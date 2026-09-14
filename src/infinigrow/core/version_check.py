@@ -141,7 +141,7 @@ def verdict(local: str, repo: str = DEFAULT_REPO, timeout: float = 6.0) -> dict:
     tag, note = latest_release(repo, timeout)
     status = "unknown" if tag is None else compare(local, tag)
     if status == "behind":
-        hint = ("本地 %s 落后于最新发布 %s —— 升级：python tools/update_local.py"
+        hint = ("本地 %s 落后于最新发布 %s —— 升级：python tools/run_latest.py --update"
                 % (local, tag))
     elif status == "same":
         hint = "本地即最新发布"

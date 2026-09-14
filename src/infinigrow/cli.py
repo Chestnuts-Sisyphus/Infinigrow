@@ -145,7 +145,8 @@ def main(argv=None) -> int:
             elif result.skipped:
                 pass
             else:
-                print("执行者：（无：机械拍，零 token）")
+                # 三态分开说：未接执行者 ≠ 接了但本拍无芽可领（后者不该被说成「机械拍」）
+                print("执行者：%s" % result.executor_line())
             if result.org:
                 print("组织会话：%s" % result.org.get("summary"))
             if result.org_decision:

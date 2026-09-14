@@ -86,9 +86,19 @@ class TickResult:
     # v2.1（运转线）：主体 / 执行者 / 组织会话 / 域饱和 / 兑现 的读数落点
     subject: dict = field(default_factory=dict)
     executor: Optional[dict] = None
+    executor_state: str = "absent"      # absent（未接）｜no_ticket（接了但本拍无芽可领）｜ran（调用了）
     org: Optional[dict] = None
     domain: dict = field(default_factory=dict)
     predictions: dict = field(default_factory=dict)
+    act_caused: list[str] = field(default_factory=list)   # 本拍动作自己造成的读数变化
+
+    def executor_line(self) -> str:
+        """执行者一行字（**三种状态分开说**：未接 ≠ 接了但没活干 ≠ 跑过了）。"""
+        if self.executor:
+            return self.executor["label"]
+        if self.executor_state == "no_ticket":
+            return "（已接执行者；本拍无芽可领 → 未调用，零 token）"
+        return "（未接执行者：机械拍，零 token）"
 
     @property
     def diff_summary(self) -> dict:
@@ -103,8 +113,9 @@ class TickResult:
             "new_sprouts": self.new_sprouts,
             "org_decision": self.org_decision,
             "subject": self.subject, "executor": self.executor,
+            "executor_state": self.executor_state,
             "org": self.org, "domain": self.domain, "predictions": self.predictions,
-            "notes": self.notes,
+            "act_caused": self.act_caused, "notes": self.notes,
         }
 
 
@@ -199,7 +210,15 @@ def release_lock(lock: Optional[Path]) -> None:
 
 # --------------------------------------------------------------------- 机械侧
 def observe_state(layout: StateLayout) -> list[Observation]:
-    """机械观测（引擎自身状态）：把状态目录里的**可查事实**读成 W回（不起子进程）。"""
+    """机械观测**引擎自身状态**：把状态目录里的可查事实读成 W回（不起子进程）。
+
+    ⚠ 默认**不进对账**（见 `run_tick` 里默认预测/观测只用主体）：这些文件是引擎
+    自己写的——每一拍都会因为自己的记账而变，把它们当「差异」等于让引擎给自己
+    派活（实测：每拍凭空长出 3 根「diffs.jsonl/sprouts.jsonl/library.jsonl 字节数」
+    的芽，执行者无法也不该去动引擎状态）。引擎自身健康由**园丁**看护
+    （断流/锁/失败计数/轮转），那是另一条线。
+    保留这个函数：显式调用与测试要用「看自己」这条读数时它仍然可用。
+    """
     objects = [layout.tick_status, layout.diff_ledger, layout.outcome_ledger,
                layout.maturity_chain, layout.sprouts, layout.library]
     out = []
@@ -212,9 +231,14 @@ def observe_state(layout: StateLayout) -> list[Observation]:
 
 
 def predict_unchanged(layout: StateLayout, tick: int) -> list[Prediction]:
-    """默认 B猜：本拍**不动**的对象保持不变（可对账的承诺，不是心情）。"""
+    """默认 B猜（引擎自身状态）：本拍这些对象保持不变。
+
+    与 `observe_state` 对称（同对象同维度）——不对称会制造假差异：只观测不预测＝
+    每拍「预测外发现」，只预测不观测＝每拍「预测未执行」。两者都是凭空生芽。
+    """
     preds = []
-    for path in (layout.tick_status, layout.outcome_ledger, layout.maturity_chain):
+    for path in (layout.tick_status, layout.diff_ledger, layout.outcome_ledger,
+                 layout.maturity_chain, layout.sprouts, layout.library):
         size = path.stat().st_size if path.is_file() else 0
         preds.append(Prediction(obj=path.name, dimension="字节数", expected=str(size),
                                 tick=tick, evidence="预测:%s@拍%d" % (path.name, tick)))
@@ -254,7 +278,9 @@ def record_maturity(layout: StateLayout, obj: str, tick: int,
 
 
 def evaluate_outcome(sprout: Sprout, diffs: Sequence[Diff], tick: int,
-                     sampled: bool = True) -> OutcomeRecord:
+                     sampled: bool = True,
+                     observable_keys: Optional[Sequence[tuple[str, str]]] = None,
+                     ) -> OutcomeRecord:
     """领做后的兑现判定（机械）：该对象该维度的差异真消＝兑现；仍错＝打脸。
 
     `sampled`＝这一拍**真有东西动过手**（执行者跑过）。没有执行者的一拍里
@@ -264,16 +290,23 @@ def evaluate_outcome(sprout: Sprout, diffs: Sequence[Diff], tick: int,
     mine = [d for d in diffs if d.key == sprout.key]
     redeemed = any(d.kind == DiffKind.OK for d in mine)
     actual = sprout.predicted_edge if redeemed else None
+    # 可对账性：机械层本拍读得到这个 (对象, 维度) 吗？读不到的（例如「应用面」这类
+    # 语义维度的芽）**永远**判不出兑现——把它们算进兑现率就是把「读不到」说成「打脸」，
+    # 那是结构性假数字。如实标 `verifiable=False`，并让兑现率把它们排除在分母外。
+    verifiable = True
+    if observable_keys is not None:
+        verifiable = tuple(sprout.key) in set(map(tuple, observable_keys))
     return OutcomeRecord(sprout_id=sprout.id, predicted_edge=sprout.predicted_edge,
                          actual_edge=actual, redeemed=redeemed,
-                         pointer=sprout.pointer, tick=tick, sampled=sampled)
+                         pointer=sprout.pointer, tick=tick, sampled=sampled,
+                         verifiable=verifiable)
 
 
 # --------------------------------------------------------------------- 提示词
 def build_tick_prompt(settings: Settings, layout: StateLayout, tick: int,
                       sprout: Optional[Sprout], predictions: Sequence[Prediction],
-                      subject_root: Path) -> str:
-    """执行会话提示词＝机制提示词原文 ＋ 本拍题面 ＋ 本拍 B猜（承诺）。
+                      subject_root: Path, facts: Optional[dict] = None) -> str:
+    """执行会话提示词＝机制提示词原文 ＋ 本拍题面 ＋ 本拍事实 ＋ 本拍 B猜（承诺）。
 
     提示词文件**真被发出去**（不是只写在文档里给静态规则检查）：机制改了、提示词没改，
     执行者那边立刻就能看出来——这是 R2 同源校验之外的第二道现实约束。
@@ -281,6 +314,10 @@ def build_tick_prompt(settings: Settings, layout: StateLayout, tick: int,
     把 B猜 给执行者，是这条通道的关键：B猜是**事前承诺**，执行者的活是让现实满足它，
     兑现账判的正是这一条。不给它，任何真动手的一拍都会被判成「预测内错」——
     那说明的不是「干错了」，而是「没预测」。
+
+    `facts`＝**机械事实摘录**（拍号／差异概览／队列／兑现率／主体读数）。为什么要有它：
+    执行者若只拿到一句题面，写出来的留痕只能是空话；给它账本里**真实存在**的数字，
+    它才可能写出可核对的东西——而「真实」的标准由引擎给，不由它自述。
     """
     prompt_path = settings.prompts_path() / TICK_PROMPT_FILE
     if not prompt_path.is_file():
@@ -314,6 +351,10 @@ def build_tick_prompt(settings: Settings, layout: StateLayout, tick: int,
         lines += ["### 本拍没有芽可领", "",
                   "队列里没有可领的芽。**不要**为了有活干而自己造题：",
                   "芽是预测差异的产物（零差异零芽）。本拍可以只留痕说明「无事可做」。", ""]
+    if facts:
+        lines += ["### 本拍事实（机械摘录；引用它时照抄，不要加工成结论）", ""]
+        lines += ["- %s" % item for item in facts.get("lines", [])]
+        lines.append("")
     lines += ["### 本拍 B猜（引擎已记录；你要让现实满足它们）", ""]
     if predictions:
         lines += ["- `%s`｜%s｜预期=%s｜指针=%s"
@@ -334,6 +375,64 @@ def build_tick_prompt(settings: Settings, layout: StateLayout, tick: int,
     if len(text) > PROMPT_INPUT_MAX_CHARS + len(base):
         text = text[:PROMPT_INPUT_MAX_CHARS + len(base)] + "\n（题面过长，已截断）\n"
     return text
+
+
+def tick_facts(layout: StateLayout, queue: SproutQueue, tick: int,
+               topic: Optional[Sprout], subject_root: Path) -> dict:
+    """组一段**机械事实摘录**给执行者（每个数字都能在账本/主体里查到）。
+
+    只用引擎自己记账得到的东西：拍号、队列读数、最近差异概览、兑现率判定、主体读数。
+    刻意不写「最近表现不错」这类判断——事实由引擎给，判断留给执行者（并由对账判对错）。
+    """
+    recent = read_jsonl(layout.diff_ledger)[-30:]
+    by_kind: dict[str, int] = {}
+    for rec in recent:
+        key = str(rec.get("kind"))
+        by_kind[key] = by_kind.get(key, 0) + 1
+    redemption = redemption_report(read_jsonl(layout.outcome_ledger))
+    snapshot = subject_mod.subject_snapshot(subject_root, tick)
+    summary = queue.summary()
+    lines = [
+        "拍号 %d（引擎：%s）" % (tick, _engine_label()),
+        "队列：活跃 %d／冻结 %d（芽源分布 %s）"
+        % (summary["active"], summary["frozen"],
+           json.dumps(summary["by_origin"], ensure_ascii=False)),
+        "本拍领到的芽：%s" % (topic.id if topic else "（无）"),
+        "最近 30 行差异账按类型：%s" % json.dumps(by_kind, ensure_ascii=False),
+        "兑现账：%s（样本 %d／共 %d 行）"
+        % (redemption["判定"], redemption["样本数"], redemption["总行数"]),
+        "主体读数：文件 %d 个／共 %d 字节（上限观测 %d 个文件）"
+        % (snapshot["file_count"], snapshot["total_bytes"], snapshot["file_limit"]),
+    ]
+    if snapshot["files"]:
+        lines.append("主体文件：%s"
+                     % "、".join("%s(%d 字节)" % (f["name"], f["bytes"])
+                                 for f in snapshot["files"][:20]))
+    else:
+        lines.append("主体文件：（空）")
+    lines.append("可对账对象（本拍会读到的现存对象×维度；数量上限 %d）：%s"
+                 % (snapshot["file_limit"],
+                    "、".join("%s×%s" % (o, dim) for o, dim in _observable_keys(snapshot))
+                    or "（无）"))
+    lines.append("要提议**新建**主体内的文件：直接对它下预测（预期=存在）——"
+                 "现实侧读不到它会记成「预测未执行」，照样产芽（这是合法的提议路径）。")
+    return {"lines": lines}
+
+
+def _observable_keys(snapshot: dict) -> list[tuple[str, str]]:
+    """主体快照 → 明早会对账的 (对象, 维度) 清单（与 `observe_subject` 对称）。"""
+    leaf = snapshot["root_name"]
+    keys = [(leaf, "存在性"), (leaf, "文件数")]
+    for item in snapshot["files"]:
+        obj = subject_mod.subject_object(item["name"])
+        keys += [(obj, "存在性"), (obj, "字节数")]
+    return keys
+
+
+def _engine_label() -> str:
+    """引擎身份一行字（延迟导入，避免 import 期循环）。"""
+    from ..core.build_info import engine_label
+    return engine_label()
 
 
 def _make_runner(settings: Settings, layout: StateLayout, subject_root: Path, tick: int,
@@ -359,8 +458,9 @@ def _redemption_lines(layout: StateLayout) -> list[str]:
     """兑现率段（**诚实呈现**：无样本就说无样本，不说 0，不说「差」）。"""
     report = redemption_report(read_jsonl(layout.outcome_ledger))
     lines = ["## 兑现率（现算，不存缓存）", "",
-             "- 判定：**%s**（样本 %d 条／兑现账共 %d 行）"
-             % (report["判定"], report["样本数"], report["总行数"]),
+             "- 判定：**%s**（样本 %d 条／兑现账共 %d 行；其中不可对账 %d 行，不计入）"
+             % (report["判定"], report["样本数"], report["总行数"],
+                report.get("不可对账", 0)),
              "- 说明：%s" % report["说明"]]
     if report.get("兑现率") is not None:
         lines.append("- 兑现率：%.2f" % report["兑现率"])
@@ -379,11 +479,12 @@ def write_reconcile_report(layout: StateLayout, result: TickResult) -> Path:
              "- 引擎：%s" % engine_label(),
              "- 本拍取题：%s" % (result.topic_sprout or "（无芽可领）"),
              "- 本拍 B猜：%s" % json.dumps(result.predictions, ensure_ascii=False),
-             "- 执行者：%s" % (result.executor["label"] if result.executor
-                             else "（无：机械拍，零 token）"),
+             "- 执行者：%s" % result.executor_line(),
              "- 组织会话：%s" % ((result.org or {}).get("summary") or "（未跑）"),
              "- 主体：%s" % json.dumps(result.subject, ensure_ascii=False),
              "- 域饱和：%s" % json.dumps(result.domain, ensure_ascii=False),
+             "- 本拍动作造成的读数变化（入账、不派芽）：%s"
+             % (json.dumps(result.act_caused, ensure_ascii=False) or "（无）"),
              "- 差异总览：%s" % json.dumps(result.diff_summary, ensure_ascii=False), ""]
     if result.diffs:
         lines += ["## 差异点（机械对账）", ""]
@@ -400,11 +501,12 @@ def write_reconcile_report(layout: StateLayout, result: TickResult) -> Path:
     lines += _redemption_lines(layout)
     if result.outcomes:
         lines += ["", "## 兑现判定（本拍领过的芽）", ""] + [
-            "- `%s` 预测边=%s 实际边=%s → %s%s"
+            "- `%s` 预测边=%s 实际边=%s → %s%s%s"
             % (o.sprout_id, o.predicted_edge.value if o.predicted_edge else "无",
                o.actual_edge.value if o.actual_edge else "无",
                "兑现" if o.redeemed else "打脸",
-               "" if o.sampled else "（无样本：本拍没有执行者动手）")
+               "" if o.sampled else "（无样本：本拍没有执行者动手）",
+               "" if o.verifiable else "（不可对账：该维度机械层读不到）")
             for o in result.outcomes]
     write_work_file(path, "\n".join(lines), layout.root,
                     require_markers=("# 对账报告",))
@@ -503,16 +605,19 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
                               "trace": org_run.trace.name if org_run.trace else ""}
                 result.notes.append("组织会话：%s" % org_run.summary())
 
-    # 2) B猜：默认「不变」（主体 ＋ 自身状态）＋ 组织会话的规划值覆盖
-    if predictions is not None:
+    # 2) B猜：默认「主体保持不变」＋ 组织会话的规划值覆盖。
+    #    刻意**不把引擎自身状态**放进默认预测/观测：那些文件是引擎自己写的，
+    #    每拍都会因自己的记账而变——当差异读就是自己给自己派活（实测每拍 3 根假芽）。
+    caller_supplied_predictions = predictions is not None
+    if caller_supplied_predictions:
         preds = list(predictions)
         planned = 0
     else:
-        defaults = (predict_unchanged(layout, tick)
-                    + subject_mod.predict_subject_unchanged(subject_root, tick))
+        defaults = subject_mod.predict_subject_unchanged(subject_root, tick)
         planned = len(org_run.predictions) if org_run else 0
         preds = (subject_mod.merge_predictions(defaults, org_run.predictions)
                  if org_run else defaults)
+    before_act = subject_mod.subject_readings(subject_root)
     result.predictions = {"total": len(preds), "planned": planned}
 
     # 3) 取题
@@ -520,6 +625,18 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
     result.topic_sprout = topic.id if topic else None
     if topic:
         queue.mark_lead(topic, tick)
+        # 把**这株芽自己带的预期**并进本拍 B猜：它是引擎当初的承诺（「该对象该维度
+        # 应当成立」）。不并进来，执行者真把差异消解了也会被记成「预测外发现→打脸」
+        # ——实测踩到过：题面要求在、它建好了，兑现账却记打脸。
+        # 只在**默认路径**下这么做：调用方显式给了 predictions 时，那份 B猜就是全部
+        # （测试与嵌入要的是「完全确定」，不该被引擎偷偷加一条）。
+        if topic.expected_value and caller_supplied_predictions is False:
+            preds = [p for p in preds if p.key != topic.key] + [
+                Prediction(obj=topic.obj, dimension=topic.dimension,
+                           expected=topic.expected_value, tick=tick,
+                           evidence="芽承诺:%s" % (topic.pointer or topic.id))]
+            result.predictions["topic_expectation"] = topic.expected_value
+            result.predictions["total"] = len(preds)
 
     # 4) 动手（执行者通道；不给执行者＝机械拍，不烧认知）
     runner = _make_runner(cfg, layout, subject_root, tick, KIND_TICK, command, llm)
@@ -527,7 +644,9 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
     if runner is not None and topic is not None:
         from . import executor as exec_mod
         try:
-            prompt = build_tick_prompt(cfg, layout, tick, topic, preds, subject_root)
+            prompt = build_tick_prompt(cfg, layout, tick, topic, preds, subject_root,
+                                       facts=tick_facts(layout, queue, tick, topic,
+                                                        subject_root))
         except FileNotFoundError as exc:
             result.notes.append("提示词缺失，本拍未动手：%s" % exc)
         else:
@@ -538,35 +657,56 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
                                "timed_out": call.timed_out, "usage": call.usage,
                                "trace": "%s-%05d.md" % (call.kind, call.tick)}
             result.notes.append("执行者：%s" % call.label())
+            result.executor_state = "ran"
     elif runner is not None:
+        result.executor_state = "no_ticket"
         result.notes.append("无芽可领：本拍未调执行者（不硬造活干）")
 
-    # 5) W回：**动手之后**再读现实（动手前读的现实证明不了动手的效果）
+    # 5) W回：**动手之后**再读现实（动手前读的现实证明不了动手的效果）。
+    #    与预测对称：默认只读**主体**（引擎自身状态由园丁看护，不进对账）。
     if observations is not None:
         obs = list(observations)
     else:
-        obs = observe_state(layout) + subject_mod.observe_subject(subject_root)
+        obs = subject_mod.observe_subject(subject_root)
     diffs = reconcile(preds, obs, tick)
 
     # 6) 差异 → 域饱和闸 → 生芽；差异**全部入账**（被吸收的也记，事实不许隐藏）
-    gate = domains.gate(diffs, tick)
+    # 哪些键的变化是**本拍动作自己造成的**：动手前后各读一次主体，差值即动作的直接后果。
+    # 这些差异记账、进报告——但**不派芽**：它们已经被那一手动作消解了，
+    # 派回去就是让执行者去「处理自己刚造成的结果」（实测：它只能拒绝，白烧一轮）。
+    act_caused = set()
+    after_act = {}
+    if call is not None:
+        after_act = subject_mod.subject_readings(subject_root)
+        act_caused = {k for k, v in after_act.items() if before_act.get(k) != v}
+        act_caused |= {k for k in before_act if k not in after_act}
+    spawnable = [d for d in diffs if d.key not in act_caused]
+
+    gate = domains.gate(spawnable, tick)
     absorbed_keys = {(d.obj, d.dimension, d.actual) for d in gate.absorbed}
     for d in diffs:
         record = d.as_record()
         record["source"] = SOURCE_MECHANICAL
+        if d.key in act_caused:
+            record["act_caused"] = True
         if (d.obj, d.dimension, d.actual) in absorbed_keys:
             record["absorbed_by_domain"] = True
         append_jsonl(layout.diff_ledger, record, layout.root)
     result.diffs = diffs
+    result.act_caused = sorted("%s×%s" % k for k in act_caused)
 
-    # 成熟链：本拍被证实（预测内对）的对象 +1 步（同拍最多 +1）
+    # 成熟链：本拍被证实（预测内对）的对象 +1 步（**同拍最多 +1**）。
+    # 逐**对象**去重再推进：一个对象在同一拍可能有多条被证实的差异（例如主体的
+    # 存在性 + 字节数），逐条推进会让它一拍 +2——那正是「同拍最多 +1」要挡的事。
     steps = maturity_of(layout)
-    capped_now = []
+    capped_now, advanced = [], []
     for d in diffs:
-        if d.kind == DiffKind.OK:
-            _, hit_cap = record_maturity(layout, d.obj, tick, steps)
-            if hit_cap:
-                capped_now.append(d.obj)
+        if d.kind != DiffKind.OK or d.obj in advanced:
+            continue
+        advanced.append(d.obj)
+        _, hit_cap = record_maturity(layout, d.obj, tick, steps)
+        if hit_cap:
+            capped_now.append(d.obj)
 
     new = sprout_sources.from_diffs(gate.kept, tick)
     known = [s.obj for s in queue.sprouts]
@@ -604,7 +744,10 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
 
     # 7) 兑现判定（本拍领过的芽）＋ 账
     if topic is not None:
-        outcome = evaluate_outcome(topic, diffs, tick, sampled=call is not None)
+        # 可对账键集＝本拍 W回 **实际读到的**那些 (对象, 维度)
+        # （默认路径下就是主体读数；调用方显式给观测时就是显式那几个）。
+        outcome = evaluate_outcome(topic, diffs, tick, sampled=call is not None,
+                                  observable_keys=[o.key for o in obs])
         append_jsonl(layout.outcome_ledger, outcome.as_record(), layout.root)
         result.outcomes.append(outcome)
 

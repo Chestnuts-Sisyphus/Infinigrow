@@ -91,10 +91,14 @@ def subject_object(rel_name: str) -> str:
 
 
 def observe_subject(root: Path, limit: int = SUBJECT_FILE_LIMIT) -> list[Observation]:
-    """机械观测主体 → W回 清单（存在性 / 文件数 / 每个文件的字节数）。
+    """机械观测主体 → W回 清单（存在性 / 文件数 / 每个文件的字节数与存在性）。
 
     「文件数」这一条是主体层面的**生长读数**：它变了就说明主体真的长了/缩了，
     与该文件是谁、内容是什么无关（内容级判断归执行者与组织会话，这里只报可查事实）。
+
+    **每个文件同时报「存在性」与「字节数」**：观测到的维度必须和预测的维度对称——
+    只观测字节数、不观测存在性，会让「预测某文件存在」变成「预测未执行」的假差异
+    （实测：首拍就因此凭空长出一根芽）。
     """
     base = Path(root)
     leaf = subject_leaf(base)
@@ -105,6 +109,8 @@ def observe_subject(root: Path, limit: int = SUBJECT_FILE_LIMIT) -> list[Observa
         Observation(leaf, "文件数", str(len(files)), "主体根"),
     ]
     for item in files:
+        out.append(Observation(subject_object(item.name), "存在性", EXISTS,
+                               "主体:%s" % item.name))
         out.append(Observation(subject_object(item.name), "字节数", str(item.bytes),
                                "主体:%s" % item.name))
     return out
@@ -115,7 +121,9 @@ def predict_subject_unchanged(root: Path, tick: int,
     """默认 B猜：本拍主体**不变**（与 `predict_unchanged` 同一姿态，只是对象换成主体）。
 
     这不是「保守」，是可对账的承诺：如果本拍主体变了而没预测到，对账会记成差异——
-    差异就是生长信号。执行者/组织会话可以**覆盖**这里的任何一条（写更精确的预期）。
+    差异就是生长信号。执行者/组织会话可以**覆盖**这里的任何一条（写更精确的预期），
+    也可以预测**尚不存在的文件**（预期=存在）——那是「该创建它」的合法提议：
+    现实侧读不到它 → 「预测未执行」→ 照样产芽。
     """
     base = Path(root)
     leaf = subject_leaf(base)
@@ -127,6 +135,8 @@ def predict_subject_unchanged(root: Path, tick: int,
         Prediction(leaf, "文件数", str(len(files)), tick=tick, evidence="预测:主体根"),
     ]
     for item in files:
+        out.append(Prediction(subject_object(item.name), "存在性", EXISTS, tick=tick,
+                              evidence="预测:主体:%s" % item.name))
         out.append(Prediction(subject_object(item.name), "字节数", str(item.bytes),
                               tick=tick, evidence="预测:主体:%s" % item.name))
     return out
@@ -150,6 +160,17 @@ def subject_snapshot(root: Path, tick: int, limit: int = SUBJECT_FILE_LIMIT) -> 
         "object_prefix": SUBJECT_PREFIX,
         "file_limit": limit,
     }
+
+
+def subject_readings(root: Path, limit: int = SUBJECT_FILE_LIMIT
+                     ) -> dict[tuple[str, str], str]:
+    """主体读数 → {(对象, 维度): 值}（供「动手前后作差」用：差集＝动作自己造成的变化）。
+
+    为什么需要它：动作会改变文件数/字节数，而这些读数又参与对账——如果不把
+    「动作自己造成的变化」认出来，每一手动作都会给引擎派回一堆「处理你自己刚造成的结果」
+    的活（实测：执行者只能拒绝，白烧一轮——那是不产出生长的空转，不是运转）。
+    """
+    return {(obs.obj, obs.dimension): obs.actual for obs in observe_subject(root, limit)}
 
 
 def merge_predictions(defaults: Iterable[Prediction],

@@ -49,6 +49,10 @@ ORG_PROMPT_FILE = "org-session.md"
 ORG_INPUT_MAX_CHARS = 8000
 ORG_TRACE_MAX_CHARS = 4000
 ORG_DIFF_ROWS = 12
+#: 主体内容摘录的上限（没有它，组织会话只能靠文件名猜主体要什么——
+#: 实测它因此凭空发明了一个「要点名建 notes.md」的提议，而主体声明里写的是 journal/）
+SUBJECT_CONTENT_CHARS = 1200
+SUBJECT_CONTENT_TOTAL = 3000
 
 #: 组织会话发现账
 FINDINGS_LEDGER = "org-findings.jsonl"
@@ -121,7 +125,7 @@ class OrgRun:
 
 # ------------------------------------------------------------------ 提示词
 def _render_subject(subject_root: Path) -> str:
-    from .subject import subject_files, subject_leaf
+    from .subject import SUBJECT_PREFIX, subject_files, subject_leaf
     files = subject_files(subject_root)
     lines = ["主体根名：%s（存在=%s）" % (subject_leaf(subject_root),
                                      subject_root.is_dir())]
@@ -130,6 +134,29 @@ def _render_subject(subject_root: Path) -> str:
         lines += ["  - %s（%d 字节）" % (f.name, f.bytes) for f in files]
     else:
         lines.append("主体文件：（空）")
+    lines.append("")
+    lines.append("### 主体里现有文件的内容（有界摘录；判断要依据它，不要凭文件名猜）")
+    lines.append("")
+    if not files:
+        lines.append("（空：主体里只有目录本身）")
+        return "\n".join(lines)
+    used = 0
+    for item in files[:3]:                       # 最多读 3 个文件的内容
+        path = subject_root / item.name
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        body = text[:SUBJECT_CONTENT_CHARS]
+        if len(text) > SUBJECT_CONTENT_CHARS:
+            body += "\n……（更长，已截断）"
+        block = "#### %s%s（%d 字节）\n```text\n%s\n```" % (
+            SUBJECT_PREFIX, item.name, item.bytes, body)
+        if used + len(block) > SUBJECT_CONTENT_TOTAL:
+            lines.append("（其余文件内容略）")
+            break
+        used += len(block)
+        lines.append(block)
     return "\n".join(lines)
 
 

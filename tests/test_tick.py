@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-"""拍循环测试：心跳、互斥、报告拍号、成熟链 +1 护栏、封顶生芽、端到端空仓跑。"""
+"""拍循环测试：心跳、互斥、报告拍号、成熟链 +1 护栏、封顶生芽、端到端空仓跑、对称性。"""
 import json
 from dataclasses import replace
 
 import pytest
 
-from infinigrow.core.paths import resolve_state
+from infinigrow.core.paths import REPO_ROOT, resolve_state
 from infinigrow.core.config import load_settings
 from infinigrow.engine.model import Observation, Prediction
 from infinigrow.engine.tick import (LOCK_STALE_SECONDS, TickHeartbeatError, acquire_lock,
@@ -108,7 +108,58 @@ def test_cap_produces_application_sprout(tmp_path, settings):
     for line in layout.sprouts.read_text(encoding="utf-8").splitlines():
         origins.add(json.loads(line)["origin"])
     assert "成熟链封顶" in origins
-    assert "差异对账" in origins
+
+
+def test_steady_subject_produces_no_spurious_diffs(tmp_path, settings):
+    """**预测/观测必须对称**：主体没变的一拍不许凭空长出差异。
+
+    踩过的坑：机械层观测 6 个自身状态文件、只预测其中 3 个 → 每拍 3 条
+    「预测外发现」；主体观测到了每个文件的存在性、却不预测它 → 一拍一条
+    「预测未执行」。两种都是**不对称造出来的假差异**，会让引擎给自己派无解的活。
+    判据：连跑两拍、主体一个字节都不动 → 差异**只有**「预测内对」，
+    且没有任何一条提到引擎自身的账本文件。
+    """
+    import datetime as _dt
+    subject = tmp_path / "subject"
+    subject.mkdir()
+    (subject / "seed.md").write_text("seed", encoding="utf-8")
+    settings = load_settings(env={}, state_root=str(tmp_path / "state"),
+                             repo_root=str(REPO_ROOT), subject_root=str(subject))
+    settings.cold_start_ticks = 0
+    first = run_tick(settings=settings, tick=1)
+    second = run_tick(settings=settings, tick=2)
+    for result in (first, second):
+        assert result.diff_summary["by_kind"].get("预测内错", 0) == 0
+        assert result.diff_summary["by_kind"].get("预测外发现", 0) == 0
+        assert result.diff_summary["by_kind"].get("预测未执行", 0) == 0
+        assert result.new_sprouts == []
+    assert second.diff_summary["by_kind"]["预测内对"] >= 4      # 根(2) + 文件(2)
+    for diff in second.diffs:
+        assert diff.obj not in ("diffs.jsonl", "sprouts.jsonl", "library.jsonl",
+                                "tick_status.json", "outcomes.jsonl", "maturity.jsonl")
+    assert _dt.datetime.now()           # 时间戳不是这里要断言的，只表明测试没被跳过
+
+
+def test_maturity_advances_at_most_once_per_object_per_tick(tmp_path, settings):
+    """同一对象同拍有多条被证实的差异（存在性＋字节数）→ 成熟链仍只 +1。"""
+    subject = tmp_path / "subject"
+    subject.mkdir()
+    (subject / "a.md").write_text("x", encoding="utf-8")
+    settings = load_settings(env={}, state_root=str(tmp_path / "state"),
+                             repo_root=str(REPO_ROOT), subject_root=str(subject))
+    for tick in (1, 2, 3):
+        run_tick(settings=settings, tick=tick)
+    layout = resolve_state(settings.state_root, settings.repo_root)
+    steps: dict[str, list[int]] = {}
+    for line in layout.maturity_chain.read_text(encoding="utf-8").splitlines():
+        rec = json.loads(line)
+        steps.setdefault(rec["obj"], []).append(rec["step"])
+    for obj, seq in steps.items():
+        for a, b in zip(seq, seq[1:], strict=False):
+            assert b - a <= 1, "对象 %s 单拍连跳：%s" % (obj, seq)
+    # 主体的那个文件对象应当每拍 +1（3 拍 → 至少到过第 3 步）
+    file_steps = steps.get("主体/a.md") or []
+    assert file_steps and max(file_steps) <= 3
 
 
 def test_tick_uses_supplied_predictions_and_observations(tmp_path, settings):
@@ -136,3 +187,86 @@ def test_no_self_sprout_api_exists():
     forbidden = [n for n in exported if "自造" in n or "candidate_sprout" in n
                  or "dispatch_sprout" in n]
     assert forbidden == []
+
+
+def test_topic_expectation_is_merged_into_the_guess(tmp_path, settings):
+    """领到的芽**带着的预期**要并进本拍 B猜——否则「真消解了」会被记成打脸。
+
+    实测踩到过：题面要求某文件存在、执行者建好了，兑现账却记「打脸」——
+    因为动手那一拍的预测清单里恰好没有这一条（它来自上一拍组织会话的承诺）。
+    判据：造一根带预期的芽（预期来自「预测未执行」那一类：承诺在先、现实没读到）
+    → 让这一拍的现实满足它 → 差异类型必须是「预测内对」，兑现判定必须是「兑现」。
+    """
+    from infinigrow.engine.sprout_queue import SproutQueue
+
+    # 拍 1：只给预测、不给观测 → 「预测未执行」→ 芽带着预期「存在」
+    run_tick(settings=settings,
+             predictions=[Prediction("主体/x.md", "存在性", "存在", tick=1,
+                                     evidence="p1")],
+             observations=[])
+    layout = resolve_state(settings.state_root, settings.repo_root)
+    queue = SproutQueue.load(layout.sprouts, layout.frozen_sprouts)
+    assert queue.sprouts and queue.sprouts[0].expected_value == "存在"
+
+    # 拍 2**不**显式给 B猜（默认路径）：引擎应把芽的预期并进去
+    result = run_tick(settings=settings, tick=2,
+                      observations=[Observation("主体/x.md", "存在性", "存在",
+                                                "主体:x.md")])
+    kinds = {(d.obj, d.dimension): d.kind.value for d in result.diffs}
+    assert kinds[("主体/x.md", "存在性")] == "预测内对"
+    assert result.outcomes and result.outcomes[0].redeemed is True
+    assert result.predictions.get("topic_expectation") == "存在"
+
+
+def test_predicted_wrong_does_not_carry_its_stale_expectation(tmp_path, settings):
+    """「预测内错」产出的芽**不**带旧预期：现实已经推翻它，派回去＝让执行者改回错的样子。"""
+    from infinigrow.engine.sprout_queue import SproutQueue
+    run_tick(settings=settings,
+             predictions=[Prediction("主体/n.md", "文件数", "1", tick=1, evidence="p1")],
+             observations=[Observation("主体/n.md", "文件数", "2", "主体根")])
+    layout = resolve_state(settings.state_root, settings.repo_root)
+    queue = SproutQueue.load(layout.sprouts, layout.frozen_sprouts)
+    assert queue.sprouts and queue.sprouts[0].expected_value is None
+
+
+def test_act_caused_readings_are_recorded_but_never_spawn(tmp_path, settings):
+    """本拍**动作自己造成**的读数变化：入账、进报告，但不派芽（否则是空转）。"""
+    subject = tmp_path / "subject"
+    subject.mkdir()
+    settings = load_settings(env={}, state_root=str(tmp_path / "state"),
+                             repo_root=str(REPO_ROOT), subject_root=str(subject))
+    settings.cold_start_ticks = 0
+    # 先造一根芽（否则本拍无芽可领，执行者根本不会被调用）
+    run_tick(settings=settings, tick=1,
+             predictions=[Prediction("主体/made.md", "存在性", "存在", tick=1,
+                                     evidence="提议新建")],
+             observations=[])
+
+    def executor(prompt: str) -> str:
+        # 假装执行者动手：往主体里写一个文件（引擎会在动手前后各读一次主体）
+        (subject / "made.md").write_text("done\n", encoding="utf-8")
+        return "动手：创建 主体/made.md"
+
+    result = run_tick(settings=settings, tick=2, llm=executor, org_session=False)
+    assert result.executor is not None, "有芽可领时执行者应当被调用"
+    # 动作造成的键（新文件的存在性/字节数、文件数）被标出来
+    assert "subject×文件数" in result.act_caused
+    assert "主体/made.md×存在性" in result.act_caused
+    assert result.new_sprouts == []              # 自己造成的变化不派芽
+    layout = resolve_state(settings.state_root, settings.repo_root)
+    rows = [json.loads(line) for line in
+            layout.diff_ledger.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert any(r.get("act_caused") for r in rows)   # 但照旧入账（不隐藏）
+
+
+def test_explicit_predictions_are_not_extended(tmp_path, settings):
+    """调用方显式给的 B猜就是全部：引擎不许偷偷往里加芽承诺（可复跑的前提）。"""
+    run_tick(settings=settings,
+             predictions=[Prediction("主体/x.md", "存在性", "存在", tick=1,
+                                     evidence="p1")],
+             observations=[Observation("主体/x.md", "存在性", "缺失", "主体:x.md")])
+    result = run_tick(settings=settings, tick=2,
+                      predictions=[Prediction("别的对象", "大小", "1", tick=2, evidence="p2")],
+                      observations=[Observation("别的对象", "大小", "1", "文件:x")])
+    assert result.diff_summary["by_kind"] == {"预测内对": 1}
+    assert "topic_expectation" not in result.predictions

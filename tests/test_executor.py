@@ -151,6 +151,42 @@ def test_tick_with_executor_records_call_and_trace(tmp_path):
     assert "不要登记新芽" in prompt and "本拍 B猜" in prompt
 
 
+def test_tick_prompt_carries_mechanical_facts(tmp_path):
+    """题面里要带**机械事实摘录**：执行者只拿到一句题面时写出来的只能是空话。
+
+    判据是具体状态：这一段存在，且里面的数字与账本/主体对得上
+    （拍号、队列读数、兑现账判定、主体文件数）。
+    """
+    subject = _seed_subject(tmp_path)
+    settings = _settings(tmp_path, subject)
+    from infinigrow.engine.model import Observation, Prediction
+    run_tick(settings=settings, tick=1,
+             predictions=[Prediction("X", "大小", "1", tick=1, evidence="p1")],
+             observations=[Observation("X", "大小", "2", "文件:x")])
+    result = run_tick(settings=settings, tick=2, executor=_cmd("ok"), org_session=False)
+    layout = resolve_state(settings.state_root, settings.repo_root)
+    prompt = (layout.traces_dir / ("tick-%05d.md" % result.tick)).read_text(encoding="utf-8")
+    assert "本拍事实（机械摘录" in prompt
+    assert "拍号 2" in prompt and "队列：" in prompt and "兑现账：" in prompt
+    assert "主体读数：文件 1 个" in prompt              # 种子里就一个 notes.md
+    assert "兑现率" not in prompt or "无样本" in prompt or "有样本" in prompt
+
+
+def test_tick_facts_are_all_checkable(tmp_path):
+    """事实摘录函数：每个字段都能在账本/主体里查到（不生成任何判断性文字）。"""
+    from infinigrow.engine.sprout_queue import SproutQueue
+    from infinigrow.engine.tick import tick_facts
+    subject = _seed_subject(tmp_path)
+    settings = _settings(tmp_path, subject)
+    layout = resolve_state(settings.state_root, settings.repo_root, create=True)
+    facts = tick_facts(layout, SproutQueue(), tick=7, topic=None, subject_root=subject)
+    text = "\n".join(facts["lines"])
+    assert "拍号 7" in text and "队列：活跃 0／冻结 0" in text
+    assert "本拍领到的芽：（无）" in text and "主体读数：文件 1 个" in text
+    for banned in ("不错", "很好", "进展", "应该"):     # 事实里不掺判断
+        assert banned not in text
+
+
 def test_tick_without_executor_stays_mechanical(tmp_path):
     """不给执行者＝机械拍：没有执行者账、没有留痕、没有子进程。"""
     subject = _seed_subject(tmp_path)

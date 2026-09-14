@@ -18,7 +18,7 @@ Infinigrow 靠**被现实反驳**生长。每一拍：
 3. **对账**：现实给出回答（W回），引擎机械地比对「预期 vs 实际」；
 4. **生芽**：每个差异成为一根芽——下一件要消解的事。**没有差异就没有芽。**
 
-引擎本体约 2,000 行 Python（另有约 600 行测试），默认不联网、不需要任何凭据。
+引擎本体约 4,400 行 Python（另有约 2,500 行测试），默认不联网、不需要任何凭据。
 **空状态目录、零 token 跑一拍**就是 CI 每次 push 都会做的事。
 
 ## 为什么是「预测 + 对账」
@@ -42,12 +42,14 @@ Infinigrow 靠**被现实反驳**生长。每一拍：
 ```bash
 pip install -e ".[dev]"
 
-infinigrow version              # Infinigrow 2.1.0
-infinigrow dry-run              # 只解析配置与路径（零写盘）
+infinigrow version              # Infinigrow 2.2.0
+infinigrow dry-run              # 解析配置与路径：状态根、生长主体、执行者（零写盘）
 infinigrow tick --probe         # 跑一拍（零 token）
-infinigrow gardener             # 机械园丁（免疫系统）
+infinigrow gardener             # 机械园丁（免疫系统，含账本轮转）
 infinigrow scan                 # 静态规则（路径／同源／凭据／BOM…）
 infinigrow selftest             # 规则正反用例
+infinigrow rotate               # 账本轮转：历史搬进 state/archive/（只移动不删）
+infinigrow org-status           # 组织会话发现的结局（待验／被证实／被推翻）
 ```
 
 状态默认落在 `./state/`，**已被 .gitignore 忽略**。可以指到任何地方：
@@ -70,37 +72,74 @@ IG_STATE_ROOT=/tmp/ig infinigrow tick
 芽的三个来源：差异对账、成熟链封顶（「它还能在哪用」）、能力库未用
 （「为什么没被用上／换个域是否成立」）。其余见[机制正本](docs/mechanism.md)。
 
-## 接执行者
+## 它在长什么（生长主体）
 
-一拍可以接一个执行者；不接就是纯机械拍。
+引擎动手的地方是**生长主体**：一个目录，默认在仓库**同级**（`<仓库名>-subject`），
+`IG_SUBJECT_ROOT` 或配置项 `subject_root` 可以指到任何位置。
+
+- 机械观测只读三样可查事实：存在性、文件数、每个文件的字节数（有界、稳定排序）；
+- 主体里的对象命名 `主体/<相对路径>`，与引擎自身状态对象永不撞名；
+- 主体不在仓库里是**刻意的**：升级引擎不动生长痕迹，开源不带出主体内容；
+- 主体缺失不是错误——「缺失」本身就是一种如实的观测（零差异就零芽）。
+
+详见 [`docs/growth-subject.md`](docs/growth-subject.md)。
+
+## 接执行者（让引擎真的动手）
+
+不给执行者＝**机械拍**：零 token、零凭据、不出网（默认姿态，CI 每次 push 都跑这个）。
+接执行者的契约只有一句：**提示词经 stdin 进，输出经 stdout 出**。
+
+```bash
+infinigrow tick --executor "python my_agent.py"     # 或写进配置 / IG_EXECUTOR 环境变量
+```
+
+引擎会给你：本拍题面 ＋ 本拍 B猜（事前承诺）；它要回来的是「你做了什么、在现实里留下
+什么可查变化」（带指针）。你的 stdout 会原样落 `state/traces/`，每次调用记
+`state/executor.jsonl`（rc／耗时／长度／可选 `IG_USAGE` 用量）。
+四种失败（非零退出／超时／空输出／命令起不来）全部可见，且与拍失败分开计数。
+
+也可以直接写 Python：
 
 ```python
 from infinigrow import load_settings, run_tick
-
-def my_executor(prompt: str) -> str:
-    # 你的模型／脚本／人；接任何会执行命令的东西之前先读 SECURITY.md
-    return "..."
-
-result = run_tick(settings=load_settings(), llm=my_executor)
-print(result.diff_summary, result.new_sprouts)
+result = run_tick(settings=load_settings(), llm=lambda prompt: "...")
 ```
+
+接任何会执行命令的东西之前先读 [`SECURITY.md`](SECURITY.md)；
+完整挂法与排障见 [`docs/running.md`](docs/running.md)。
+
+## 让它自己按时跑（Windows）
+
+```bat
+tools\run_tick.bat                        :: 一键：版本闸 -> 跑一拍 -> 园丁
+tools\manage_scheduled_task.bat install   :: 挂计划任务（默认每 10 分钟，IG_TICK_MINUTES 可改）
+tools\manage_scheduled_task.bat status    :: 看它在不在、上次跑得怎么样
+```
+
+**每次起跑都过版本闸**：默认升到最新版再跑；升不动（工作区脏／有拍在飞／分叉／离线／
+自检不过已回滚）就**按现有版本照常跑**并说明原因——绝不因为「不是最新版」把引擎停掉。
+人只需要看一个文件：`state/ALERT.md`（有致命旗就写「需要人看一眼」＋逐条原因）。
 
 ## 由机器守、不靠记忆守的约定
 
 ```bash
 infinigrow scan      # R1 零绝对路径 · R2 提示词↔代码同源 · R3 禁自造芽条款
                      # R4 状态根被忽略 · R5 无凭据字面量 · R6 无 BOM
-infinigrow selftest  # 每条规则都有正例与反例
+                     # R7 rc 语义单一来源 · R8 写盘窗口一致 · R9 同源表不缩表
+infinigrow selftest  # 每条规则都有正例与反例（19 条用例）
 python tools/check_prompt_code_sync.py   # 提示词与代码双向同源校验
 python tools/privacy_scan.py --root .    # 发布前的路径/凭据/邮箱扫描
+python tools/check_no_abs_paths.py state # 状态产物不得含本机绝对路径
 ```
 
 ## 状态与限制
 
-v2.0.0 是重写线的第一个版本。已知限制见
-[CHANGELOG.md](CHANGELOG.md#known-limitations-v200)：机械拍自身不烧认知、
-执行者接口就是一个普通函数、部署集成（调度器/代理/多通道轮转）刻意不做进本版。
+v2.2.0（运转线口径补全）是当前版本：新增生长主体、执行者通道、组织会话运行体、域饱和判据、
+账本轮转与双平台 CI。已知限制见 [CHANGELOG.md](CHANGELOG.md) 的 v2.1.0 与 v2.0.0 两节，
+其中最要紧的是三条：**机械拍自身不烧认知**（不接执行者时账本在长、主体不动）、
+**组织会话的语义能力取决于你接的执行者**、**轮转不做压缩**（历史行原样留在归档区）。
 
 ## 许可
 
 MIT —— 见 [LICENSE](LICENSE)。
+

@@ -38,7 +38,7 @@ Infinigrow grows by *being contradicted*. Every tick:
 3. **Reconcile** — reality answers (`W回`). The engine mechanically diffs prediction vs. observation.
 4. **Sprout** — each difference becomes a sprout: the next thing to resolve. **No difference, no sprout.**
 
-The engine itself is about 2,000 lines of Python (plus 600 lines of tests) and makes no network
+The engine itself is about 4,400 lines of Python (plus about 2,500 lines of tests) and makes no network
 calls by default. It runs one tick with zero tokens and zero credentials, which is exactly what
 CI does on every push.
 
@@ -64,7 +64,7 @@ Design decisions follow from that:
 ```bash
 pip install -e ".[dev]"
 
-infinigrow version              # Infinigrow 2.1.0
+infinigrow version              # Infinigrow 2.2.0
 infinigrow dry-run              # resolved config, subject root, executor (writes nothing)
 infinigrow tick --probe         # run one tick, zero tokens
 infinigrow tick --json          # machine-readable result
@@ -123,10 +123,12 @@ infinigrow tick --probe
 
 ```
 CLI ─▶ scheduler ─┐
-                   ├─▶ engine ──▶ ledger ──▶ core
-     rules ────────┤   tick        store      paths/config/encoding
-     garden ───────┘   reconcile   (only write path)   (only machine-specific layer)
-                       sprout_*
+                   ├─▶ engine ────────▶ ledger ──────▶ core
+     rules ────────┤   tick              store            paths / config / encoding
+     garden ───────┘   reconcile         rotation         exit_codes / version_check
+                       sprout_* / model  (only write path)  (only machine-specific layer)
+                       org_trigger / org_session
+                       subject / executor / domain_saturation
 ```
 
 Six layers, dependencies pointing one way, and exactly one module allowed to touch the disk.

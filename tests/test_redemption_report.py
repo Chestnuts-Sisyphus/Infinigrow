@@ -94,3 +94,40 @@ def test_report_renders_无样本_instead_of_zero(tmp_path):
     assert "判定：**无样本**" in text
     assert "不可计算" in text
     assert "兑现率：0" not in text
+
+def test_unverifiable_rows_stay_out_of_the_denominator():
+    """**读不到 ≠ 打脸**：维度机械层读不到的行（例如「应用面」这类语义维度）不计入兑现率。
+
+    实测踩到过：成熟链封顶芽的维度是「应用面」，机械层永远读不到它，
+    于是它们永远判「打脸」——兑现率被结构性假数字拖成 0%。
+    """
+    rows = [
+        {"redeemed": True, "sample": True, "verifiable": True, "sprout_id": "sp1-001-a",
+         "predicted_edge": "判读", "actual_edge": "判读"},
+        {"redeemed": False, "sample": True, "verifiable": False, "sprout_id": "cap1-001-a",
+         "predicted_edge": "固化", "actual_edge": None},        # 不可对账 → 不进分母
+    ]
+    report = redemption_report(rows)
+    assert report["判定"] == "有样本"
+    assert report["样本数"] == 1 and report["兑现率"] == 1.0
+    assert report["不可对账"] == 1
+    assert "读不到≠打脸" in report["说明"].replace(" ", "")
+
+
+def test_cap_sprout_outcome_is_marked_unverifiable(tmp_path):
+    """真机形态：封顶芽（应用面）那行的 outcome 必须标 verifiable=False。"""
+    import json as _json
+    subject = tmp_path / "subject"
+    subject.mkdir()
+    (subject / "a.md").write_text("x", encoding="utf-8")
+    settings = _settings(tmp_path, subject)
+    settings.cold_start_ticks = 0
+    for tick in range(1, 7):
+        run_tick(settings=settings, tick=tick, llm=lambda prompt: "不动手（夹具）",
+                 org_session=False)
+    layout = resolve_state(settings.state_root, settings.repo_root)
+    rows = [_json.loads(line) for line in
+            layout.outcome_ledger.read_text(encoding="utf-8").splitlines() if line.strip()]
+    cap_rows = [r for r in rows if r["sprout_id"].startswith("cap")]
+    assert cap_rows, "封顶芽应当被领过（成熟链四步到顶）"
+    assert all(r["verifiable"] is False for r in cap_rows)

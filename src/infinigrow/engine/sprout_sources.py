@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Iterable, Optional, Sequence
 
-from .model import (Diff, Edge, MATURITY_CAP, Sprout, SproutOrigin)
+from .model import (Diff, DiffKind, Edge, MATURITY_CAP, Sprout, SproutOrigin)
 
 #: 能力库条目「长期未用」的拍数阈值（具体状态判据，不是「频率高」式归纳）
 LIBRARY_IDLE_TICKS = 20
@@ -43,6 +43,11 @@ def from_diffs(diffs: Sequence[Diff], tick: int, start_seq: int = 1) -> list[Spr
             obj=d.obj, dimension=d.dimension,
             pointer=d.evidence, origin=SproutOrigin.DIFF, created_tick=tick,
             predicted_edge=predicted, maturity_step=None,
+            # 芽**带着**产出它的那个预期——但只在「预期还没被现实回答」的那类差异上
+            # （`预测未执行`：承诺在先、现实没读到）。`预测内错` 不并：那时现实已经
+            # **推翻了**预期，把旧值当目标派回去等于让执行者把现实改回错的样子
+            # （实测踩到过：文件数从 1 变 2 是生长，却派了一根「改回 1」的芽）。
+            expected_value=d.expected if d.kind == DiffKind.NOT_EXECUTED else None,
         ))
         seq += 1
     return out
@@ -54,7 +59,6 @@ def _predict_edge(diff: Diff) -> Optional[Edge]:
     预测对象必须**现实可查**（能写进预测清单、能对账打脸），所以这里的取值是枚举值
     而不是自由文本。
     """
-    from .model import DiffKind
     if diff.kind == DiffKind.UNPREDICTED:
         return Edge.READ          # 现实给了新东西而没预测到 → 先看懂（判读）
     if diff.kind == DiffKind.NOT_EXECUTED:

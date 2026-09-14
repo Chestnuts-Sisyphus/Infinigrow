@@ -135,6 +135,11 @@ class Sprout:
 
     字段里的 `predicted_edge`/`maturity_step` 是**增益预测**（事前选的边与步）——
     做事之后由兑现账判「兑现/打脸」，这是组织会话的业绩来源。
+
+    `expected_value`＝**这株芽带着的预期**（来自产出它的那个差异的 `expected`）：
+    引擎当初预测「该对象该维度应当是什么样」。领做它的那一拍，把它**并进本拍 B猜**
+    （见 `engine/tick.py`）——否则会出现一种最憋屈的记账：执行者真把差异消解了，
+    却因为动手那一拍的预测清单里没有这一条而记成「打脸」。
     """
 
     id: str
@@ -145,6 +150,7 @@ class Sprout:
     created_tick: int
     predicted_edge: Optional[Edge] = None
     maturity_step: Optional[int] = None
+    expected_value: Optional[str] = None   # 产出它的差异的预期值（可空）
     leads: int = 0                   # 已被领取次数（防霸占）
     last_lead_tick: Optional[int] = None
     long_task: bool = False          # 长任务芽豁免连领限制
@@ -161,6 +167,7 @@ class Sprout:
             "predicted_edge": self.predicted_edge.value if self.predicted_edge else None,
             "maturity_step": self.maturity_step, "leads": self.leads,
             "last_lead_tick": self.last_lead_tick, "long_task": self.long_task,
+            "expected_value": self.expected_value,
         }
 
     @classmethod
@@ -174,6 +181,7 @@ class Sprout:
             maturity_step=rec.get("maturity_step"), leads=rec.get("leads", 0),
             last_lead_tick=rec.get("last_lead_tick"),
             long_task=rec.get("long_task", False),
+            expected_value=rec.get("expected_value"),
         )
 
 
@@ -196,6 +204,7 @@ class OutcomeRecord:
     pointer: str
     tick: int
     sampled: bool = True
+    verifiable: bool = True     # 该芽的维度机械层读得到吗？读不到＝不可对账（不计入兑现率）
 
     def bucket(self) -> tuple:
         return (self.sprout_id.split("-")[0],
@@ -208,5 +217,5 @@ class OutcomeRecord:
             "predicted_edge": self.predicted_edge.value if self.predicted_edge else None,
             "actual_edge": self.actual_edge.value if self.actual_edge else None,
             "redeemed": self.redeemed, "pointer": self.pointer, "tick": self.tick,
-            "sample": self.sampled,
+            "sample": self.sampled, "verifiable": self.verifiable,
         }

@@ -126,6 +126,17 @@ def rate_table(records: Iterable) -> dict:
                    for k, n in sorted(buckets.items(), key=lambda kv: str(kv[0]))}}
 
 
+def verifiable(record) -> bool:
+    """这一行是不是**可对账**的：该芽的维度机械层读得到吗？（读不到就不该判它打脸）
+
+    默认 True（旧行没有这个字段）。`verifiable=False` 的那类（例如「应用面」这类
+    语义维度）**永远**判不出兑现——把它们算进兑现率就是把「读不到」说成「打脸」。
+    """
+    if isinstance(record, dict):
+        return record.get("verifiable") is not False
+    return bool(getattr(record, "verifiable", True))
+
+
 def sampled(record) -> bool:
     """这一行是不是**样本**：那一拍有执行者真动过手（`sample` 字段）。
 
@@ -150,21 +161,27 @@ def redemption_report(records: Iterable) -> dict:
     分母只数样本行；`总行数` 一并报出，便于看出「有没有被静默丢样本」。
     """
     rows = list(records)
-    samples = [r for r in rows if sampled(r)]
+    checkable = [r for r in rows if verifiable(r)]
+    samples = [r for r in checkable if sampled(r)]
+    unverifiable = len(rows) - len(checkable)
     if not samples:
         return {"判定": "无样本", "样本数": 0, "总行数": len(rows), "兑现率": None,
-                "分桶": {},
-                "说明": ("本状态根还没有「执行者动过手」的拍：机械拍不做语义判断、"
-                         "也不产出真实生长，所以兑现率**不可计算**"
-                         "（不是 0，也不是差）。接上执行者后自动开始积累样本。")}
+                "分桶": {}, "不可对账": unverifiable,
+                "说明": ("本状态根还没有「执行者动过手且该维度机械层读得到」的拍："
+                         "机械拍不做语义判断、也不产出真实生长，所以兑现率**不可计算**"
+                         "（不是 0，也不是差）。接上执行者后自动开始积累样本。"
+                         "（另有 %d 行因为维度读不到而不计入：读不到 ≠ 打脸。）"
+                         % unverifiable)}
     hit = sum(1 for r in samples if _redeemed(r))
     buckets: dict[tuple, int] = {}
     for r in samples:
         buckets[_bucket(r)] = buckets.get(_bucket(r), 0) + 1
     return {"判定": "有样本", "样本数": len(samples), "总行数": len(rows),
+            "不可对账": unverifiable,
             "兑现率": hit / len(samples),
             "分桶": {" × ".join(map(str, k)): {"n": n, "兑现率": redemption_rate(samples, k)}
                      for k, n in sorted(buckets.items(), key=lambda kv: str(kv[0]))},
-            "说明": ("按「对象域 × 预测边 × 实际边」分桶现算；分母只含样本行"
-                     "（%d 行非样本已排除：那些拍里没有执行者动手）。"
-                     % (len(rows) - len(samples)))}
+            "说明": ("按「对象域 × 预测边 × 实际边」分桶现算；分母只含**可对账的样本行**"
+                     "（%d 行非样本已排除：那些拍里没有执行者动手；"
+                     "%d 行不可对账已排除：该维度机械层读不到，读不到≠打脸）。"
+                     % (len(rows) - len(samples) - unverifiable, unverifiable))}
