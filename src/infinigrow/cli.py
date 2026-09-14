@@ -41,7 +41,9 @@ def main(argv=None) -> int:
     ap.add_argument("--config", default=None, help="配置文件（toml/json）")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    sub.add_parser("version", help="打印版本")
+    p_ver = sub.add_parser("version", help="打印版本（--check 与最新发布比对）")
+    p_ver.add_argument("--check", action="store_true",
+                       help="查 GitHub 最新发布并比对（只读公开接口、零凭据；离线则报 unknown）")
     p_tick = sub.add_parser("tick", help="跑一拍")
     p_tick.add_argument("--tick", type=int, default=None, help="指定拍号（默认自增）")
     p_tick.add_argument("--probe", action="store_true", help="打印芽源判定明细")
@@ -61,6 +63,13 @@ def main(argv=None) -> int:
 
     if args.cmd == "version":
         print("%s %s" % (__codename__, __version__))
+        if args.check:
+            from .core.version_check import verdict
+            v = verdict(__version__)
+            print("最新发布：%s（%s）" % (v["latest"] or "未知", v["note"]))
+            print(v["upgrade_hint"])
+            # 落后 = rc 3（可被脚本/守护脚本当闸用）；离线 unknown = 0，不误报
+            return 3 if v["status"] == "behind" else 0
         return 0
 
     if args.cmd == "dry-run":

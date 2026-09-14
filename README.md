@@ -1,10 +1,29 @@
 # Infinigrow
 
+[![ci](https://github.com/Chestnuts-Sisyphus/Infinigrow/actions/workflows/ci.yml/badge.svg)](https://github.com/Chestnuts-Sisyphus/Infinigrow/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/Chestnuts-Sisyphus/Infinigrow?color=8B5CF6)](https://github.com/Chestnuts-Sisyphus/Infinigrow/releases)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](pyproject.toml)
+[![runtime deps](https://img.shields.io/badge/runtime%20deps-0-brightgreen.svg)](pyproject.toml)
+
 **An engine that grows by predicting, reconciling, and turning differences into sprouts.**
 
-[中文说明](README.zh-CN.md) · [Mechanism](docs/mechanism.md) · [Architecture](docs/architecture.md) · [Security](SECURITY.md)
+[中文说明](README.zh-CN.md) · [Mechanism](docs/mechanism.md) · [Architecture](docs/architecture.md) · [Upgrading](docs/upgrading.md) · [Security](SECURITY.md)
 
 ---
+
+## What you can do with it
+
+- **当自我改进循环的骨架**：把执行者换成你的模型或脚本（`run_tick(..., llm=...)`），
+  引擎负责其余全部机械部分——预测清单、对账、生芽、队列纪律、账本、心跳、并发锁。
+- **当实验记录本**：差异账／兑现账／成熟链都是**追加型** JSONL，
+  兑现率现算且分桶（对象域 × 边类型 × 成熟链步）。想做「预测准不准」的长期研究，
+  数据格式是现成的。
+- **抄它的约束**：如果你也在写 agent 循环，这四条可以直接搬——**执行者不得自造任务**、
+  **零差异零芽**、**同对象同维度只养一根芽**、**成熟链同拍最多 +1**。
+  这些都是踩过坑之后的形状（见 `docs/superseded.md` 的退役登记）。
+- **单独用它的工具**：静态规则扫描（零 token）、隐私/身份清场扫描、提示词↔代码同源校验，
+  三个 CLI/脚本都能脱离引擎单独跑。
 
 ## What it is
 
@@ -96,6 +115,16 @@ Maturity chain: read → act → principle → solidify (4 steps; the 4th is the
 Three sprout sources: differences, maturity cap ("what else can this be used for?"),
 unused library entries ("why is this not used — does it hold elsewhere?").
 Everything else is in [`docs/mechanism.md`](docs/mechanism.md).
+
+## Am I running the latest?
+
+```bash
+infinigrow version --check      # 与最新发布比对（只读公开接口、零凭据；落后时退出码=3）
+python tools/update_local.py    # 一条命令升级：git pull --ff-only → 重装 → 当场自检
+```
+
+`update_local.py` 只在**落后**时才动，本地有未推送提交时**拒绝自动合并**（不会把你的活儿埋掉），
+升级后跑自检与规则扫描，绿了才算升好。`--check` 可以只看差多少。
 
 ## Plugging in an executor
 
