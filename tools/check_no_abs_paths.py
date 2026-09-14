@@ -91,6 +91,12 @@ def main(argv=None) -> int:
         return 1
     total_files, total_skipped, all_hits = 0, 0, []
     for raw in args:
+        if not str(raw).strip():
+            # 空参数几乎总是「脚本里的变量没展开」——那时 Path("") 会解析成当前目录，
+            # 于是工具去扫了整个仓库、报出一堆与产物无关的命中（红色的理由指错地方）。
+            print("FAIL：收到空路径参数（脚本里的变量没展开？）。"
+                  "什么都不扫比扫错地方诚实，直接判失败。")
+            return 1
         target = Path(raw)
         if not target.exists():
             print("跳过（不存在）：%s" % target)
@@ -100,7 +106,7 @@ def main(argv=None) -> int:
         total_skipped += len(skipped)
         all_hits += hits
         print("检查：%s（文本 %d 个，二进制跳过 %d 个）"
-              % (target, len(files), len(skipped)))
+              % (target.resolve(), len(files), len(skipped)))
         for path in skipped[:5]:
             print("  - 跳过（二进制）：%s" % path.name)
     print("检查文件总数：%d｜二进制跳过：%d" % (total_files, total_skipped))

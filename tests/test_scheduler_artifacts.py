@@ -130,6 +130,18 @@ def test_bat_files_are_ascii_only():
                                  % (path.name, exc)) from exc
 
 
+def test_empty_path_argument_is_refused(tmp_path):
+    """空参数要说「失败」，不许悄悄去扫当前目录。
+
+    实测换来的：CI 的 Windows job 里写成 `$IG_STATE_ROOT`（pwsh 取不到值），
+    参数变空 → `Path("")` 解析成 `.` → 工具扫了整个仓库、报出 23 处命中，
+    红色理由完全指错地方。空输入 = 变量没展开，判失败最诚实。
+    """
+    mod = _load_check_tool()
+    assert mod.main([""]) == 1
+    assert mod.main(["   "]) == 1
+
+
 def test_ci_runs_on_windows_too():
     """T9/G11 的结构判据：CI 矩阵含 windows-latest（真实运行环境是 Windows）。"""
     text = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")

@@ -66,10 +66,13 @@ jobs:
 
       # 产物不得含绝对路径：用仓库自带的跨平台工具（原先那段 bash heredoc
       # 在 windows runner 上跑不了——同一个检查拆成三份脚本，本身就是漂移源）。
+      #
+      # 路径用 GitHub 表达式写（`${{ runner.temp }}`）：它在 bash 与 pwsh 里都成立。
+      # 用 `$IG_STATE_ROOT` 这种 shell 变量是踩过的坑——PowerShell 里那是对的写法
+      # 但值取不到（应写 `$env:IG_STATE_ROOT`），结果参数为空、工具去扫了 `.`，
+      # 报出一堆与产物无关的命中（红色的理由完全指错地方）。
       - name: Cold start — 产物不得含绝对路径
-        env:
-          IG_STATE_ROOT: ${{ runner.temp }}/infinigrow-state
-        run: python tools/check_no_abs_paths.py "$IG_STATE_ROOT"
+        run: python tools/check_no_abs_paths.py "${{ runner.temp }}/infinigrow-state"
 
       # 一键件与计划任务脚本也要在 CI 里被解析一遍（windows runner 上有 PowerShell）
       - name: 一键件语法（批处理/PowerShell 解析）
