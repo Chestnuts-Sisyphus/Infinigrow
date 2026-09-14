@@ -242,3 +242,19 @@ def test_run_callable_exception_is_recorded(tmp_path):
     result = run_tick(settings=settings, tick=2, llm=boom, org_session=False)
     assert result.executor is not None and result.executor["rc"] == 1
     assert "抛异常" in (result.executor["label"] or "") or result.executor["rc"] == 1
+
+
+def test_executor_env_forces_utf8_stdio(tmp_path):
+    """A20 根因硬化：执行者子进程必须带 `PYTHONIOENCODING=utf-8`。
+
+    提示词经 stdin 以 UTF-8 写入；计划任务上下文的进程 stdin 默认编码非 UTF-8，
+    会把提示词读坏、混入孤立代理字符 → 上游报「lone leading surrogate」→ 400
+    （实测：只有计划任务上下文命中）。引擎侧强制 UTF-8 stdio 是防御性硬化。
+    """
+    env = exec_mod.executor_env(
+        subject_root=tmp_path / "subject", state_root=tmp_path / "state",
+        tick=1, kind="tick")
+    assert env["PYTHONIOENCODING"] == "utf-8"
+    # 其余注入上下文仍在（不回归）
+    assert env["IG_TICK"] == "1" and env["IG_PASS_KIND"] == "tick"
+    assert env["IG_SUBJECT_ROOT"] == str(tmp_path / "subject")

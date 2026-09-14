@@ -161,6 +161,11 @@ def executor_env(subject_root: Path, state_root: Path, tick: int, kind: str,
     env["IG_PASS_KIND"] = kind
     env["IG_SUBJECT_ROOT"] = str(subject_root)
     env["IG_STATE_ROOT"] = str(state_root)
+    # A20 根因硬化（2026-09-14 22:0x）：提示词经 stdin 以 UTF-8 写入，执行者进程的
+    # stdin 默认编码必须也是 UTF-8——否则计划任务上下文（默认编码非 UTF-8）会把提示词
+    # 读坏，混入孤立代理字符，上游解析报「lone leading surrogate」→ 400。
+    # 引擎侧强制 UTF-8 stdio，任何适配器都不再依赖自己的默认编码。
+    env["PYTHONIOENCODING"] = "utf-8"
     if model:
         env["IG_MODEL"] = model
     return env

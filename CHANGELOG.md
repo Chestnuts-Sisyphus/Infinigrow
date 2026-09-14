@@ -4,6 +4,23 @@
 
 版本体系说明见 [`docs/versioning.md`](docs/versioning.md)。
 
+## v2.2.3 — A20 根因硬化：执行者子进程强制 UTF-8 stdio（2026-09-14）
+
+**A20（计划任务上下文执行者持续 400）的根因与防御性硬化**：
+
+- **根因**（真机定位，完整错误体＋请求指纹打点证实）：执行者适配器的 `harden_stdio()`
+  只重配了 `stdout/stderr`，**漏了 `stdin`**。引擎经 subprocess 用 UTF-8 把提示词写进
+  stdin；而计划任务（Task Scheduler）启动的进程 stdin 默认编码**不是 UTF-8**，把提示词
+  读坏 → 字符串混入**孤立代理字符** → `json.dumps` 转义成 `\udXXX` → 上游解析报
+  「lone leading surrogate in hex escape」→ 400。交互 shell 的 stdin 默认就是 UTF-8，
+  所以手动跑同一请求一直成功——这正是「只有计划任务上下文失败」的完整解释。
+- **引擎侧硬化**：`executor_env()` 为执行者子进程注入 `PYTHONIOENCODING=utf-8`，
+  任何适配器都不再依赖自己的默认编码（防御性硬化，测试锁定）。
+- 适配器侧修复（私有文件，不进仓库）：`harden_stdio()` 补
+  `sys.stdin.reconfigure(encoding="utf-8", errors="replace")`。
+- 验证：同一计划任务上下文（隐藏启动器诊断任务），修复前 rc=1/请求含孤立代理，
+  修复后 **rc=0/无孤立代理**；交互自检连续通过。
+
 ## v2.2.2 — 运转收口（长周期可靠性与机制断链逐条补齐）（2026-09-14）
 
 这一轮是把「真机跑出来的长周期可靠性」与「机制断链」逐条补齐（T1-T10）。
