@@ -116,17 +116,17 @@ Three sprout sources: differences, maturity cap ("what else can this be used for
 unused library entries ("why is this not used — does it hold elsewhere?").
 Everything else is in [`docs/mechanism.md`](docs/mechanism.md).
 
-## Am I running the latest?
+## Am I running the latest engine?
 
 ```bash
-python tools/run_latest.py      # 运行入口：先确保最新，再起跑（默认跑一拍）
+python tools/run_latest.py      # 运行入口：有条件升级就升到最新再跑；升不动就按现有版本跑
 infinigrow version --check      # 只查：本地版 vs 最新发布（落后时退出码 3）
 ```
 
-`run_latest.py` 是推荐的**运行入口**——它让「跑着的就是最新版」成为结构而不是习惯：
-起跑前先 `git pull --ff-only` ＋ 重装 ＋ 自检，四处不满足（工作区脏／有拍在飞／
-历史分叉／自检不过）都会**当场说明并拒绝**，自检不过还会**回滚**。
-细节与理由见 [`docs/upgrading.md`](docs/upgrading.md)。
+`run_latest.py` 是推荐的**运行入口**。默认行为是「**能升就升到最新再跑；升不动就按现有版本照常跑，
+并说明为什么**」——它不会因为「不是最新版」把引擎停掉，也不会在运行中替换引擎代码
+（有拍在飞时不升级），升级后自检不过会**回滚**。要更严可以加 `--require-latest`。
+细节见 [`docs/upgrading.md`](docs/upgrading.md)。
 
 ## Plugging in an executor
 

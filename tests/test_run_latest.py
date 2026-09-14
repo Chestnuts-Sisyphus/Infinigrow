@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
-"""「引擎必须是最新版才准运转」的机制测试（2026-09-14 定规，反复强调后加强）。
+"""「默认用最新版引擎；升不动就按现有版本跑」的机制测试（2026-09-14 定规）。
 
-定规要成立，靠的不是「记得升级」，而是**运行入口带硬闸**：
-`tools/run_latest.py` 在起跑前判定引擎版本 —— **知道自己是旧版就不准跑**，
-并且升级只动引擎代码、不碰生长主体（`state/`）。
+定规的三段语义必须都被锁住：
 
-这里把决策逻辑（纯函数 `start_verdict`）与「主体不受升级影响」逐条锁住。
+1. 有条件升级 → **升级再用新版跑**（默认行为）；
+2. 没条件升级 → **按现有版本照常跑**，并说清为什么（**不因为旧版就停掉引擎**）；
+3. 严格模式 `--require-latest` → 升不到最新就不跑（CI／发布验证用）。
+
+另外锁住「引擎」与「生长主体」的分家：升级只动引擎代码，`state/` 不受影响。
 """
 from __future__ import annotations
 
@@ -20,43 +22,60 @@ run_latest = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(run_latest)
 
 
-# ---------------------------------------------------------------- 起跑闸
+# ---------------------------------------------------------------- 三段语义
 def test_up_to_date_starts():
     assert run_latest.start_verdict(behind=0, ahead=0, dirty=False, running=False) == "start"
 
 
 def test_behind_with_clean_tree_updates_then_starts():
+    """有条件升级 → 升级再用新版跑。这是默认行为。"""
     assert run_latest.start_verdict(behind=3, ahead=0, dirty=False,
                                     running=False) == "update_then_start"
 
 
-def test_known_stale_with_dirty_tree_refuses_to_start():
-    """**知道自己是旧版就不准跑**——这正是「保证」与「提示」的区别。"""
+def test_behind_with_dirty_tree_still_runs_on_current_version():
+    """**升不动就按旧版跑**——绝不因为「不是最新版」把引擎停掉。"""
     assert run_latest.start_verdict(behind=2, ahead=0, dirty=True,
-                                    running=False) == "refuse_stale"
+                                    running=False) == "start_stale"
 
 
-def test_known_stale_diverged_history_refuses_to_start():
-    assert run_latest.start_verdict(behind=2, ahead=1, dirty=False,
-                                    running=False) == "refuse_stale"
-
-
-def test_never_replaces_code_while_a_tick_is_in_flight():
-    """有拍在飞 → 拒绝：不并发、也不在运行中替换引擎代码。"""
+def test_behind_with_tick_in_flight_still_runs():
+    """有拍在飞：不替换代码，但照常跑（引擎自身的锁会处理并发）。"""
     assert run_latest.start_verdict(behind=2, ahead=0, dirty=False,
-                                    running=True) == "refuse_stale"
+                                    running=True) == "start_stale"
 
 
-def test_offline_starts_but_marks_unverified():
-    """不知道 ≠ 落后：断网不能让引擎停摆，但必须标明「本次未经验证」。"""
+def test_behind_with_diverged_history_still_runs():
+    assert run_latest.start_verdict(behind=2, ahead=1, dirty=False,
+                                    running=False) == "start_stale"
+
+
+def test_behind_with_updates_disabled_still_runs():
+    assert run_latest.start_verdict(behind=2, ahead=0, dirty=False, running=False,
+                                    can_update=False) == "start_stale"
+
+
+def test_offline_starts_and_is_marked_unverified():
+    """不知道 ≠ 落后：断网不能让引擎停摆，但要标明「未验证」。"""
     assert run_latest.start_verdict(behind=0, ahead=0, dirty=False, running=False,
                                     offline=True) == "start_unverified"
 
 
-def test_explicit_opt_out_can_run_stale():
-    """显式例外：知道旧版但仍要跑（`--allow-stale`）——决定权留给人。"""
+def test_strict_mode_refuses_when_it_cannot_reach_latest():
+    """严格模式（CI／发布验证）：拿不到最新版就不跑——这是**可选的严**，不是默认。"""
     assert run_latest.start_verdict(behind=2, ahead=0, dirty=True, running=False,
-                                    allow_stale=True) == "start"
+                                    require_latest=True) == "refuse_stale"
+    assert run_latest.start_verdict(behind=2, ahead=0, dirty=False, running=False,
+                                    require_latest=True) == "update_then_start"
+
+
+def test_stale_reasons_are_explicit():
+    """「为什么这次不是最新版」必须说出来——不解释就等于静默用旧版。"""
+    assert "工作区" in run_latest.stale_reason(ahead=0, dirty=True, running=False)
+    assert "拍在飞" in run_latest.stale_reason(ahead=0, dirty=False, running=True)
+    assert "分叉" in run_latest.stale_reason(ahead=1, dirty=False, running=False)
+    assert "no-update" in run_latest.stale_reason(ahead=0, dirty=False, running=False,
+                                                 can_update=False)
 
 
 # ---------------------------------------------------------------- 引擎与主体分家
@@ -97,7 +116,7 @@ def test_entry_help_works():
                        capture_output=True, text=True, encoding="utf-8", errors="replace",
                        timeout=120)
     assert p.returncode == 0
-    for flag in ("--check", "--no-update", "--allow-stale"):
+    for flag in ("--check", "--no-update", "--require-latest"):
         assert flag in p.stdout
 
 

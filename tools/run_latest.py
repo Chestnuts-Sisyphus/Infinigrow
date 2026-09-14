@@ -1,32 +1,31 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""run_latest —— 运行入口：**引擎必须是最新版，才准运转**。
+"""run_latest —— 运行入口：**默认用最新版引擎；升不动就按现有版本跑**。
 
-定规（2026-09-14 确立，反复强调后加强）：
-> Infinigrow 是**引擎**本身；要保证的是**引擎**是最新版。
+定规（2026-09-14 确立）：
+> Infinigrow 是**引擎**本身；要保证的是**引擎**用最新版。
 > 「它生长的主体」（状态、账本、被生长的对象）是另一回事，不在此列。
 
-所以这个入口只对**引擎代码**负责，并且是**硬保证**而不是提示：
+语义（三段，缺一不可）：
 
-| 情形 | 行为 | 说明 |
-|---|---|---|
-| 已是最新 | 直接起跑 | 正常路径 |
-| 落后、且升级条件齐备 | `pull --ff-only` → 重装 → **自检闸** → 用新版起跑 | 升级只发生在起跑前这个安全点 |
-| 落后、但工作区有未提交改动 / 历史分叉 | **拒绝起跑**（rc=4） | 我们**知道**它不是最新版 —— 那就别跑。要强跑用 `--allow-stale` |
-| 检测到 `state/locks/tick.lock`（有拍在飞） | **拒绝起跑**（rc=4） | 不并发、也不在运行中替换代码 |
-| 升级后自检不过 | **回滚**到升级前提交，拒绝起跑（rc=3） | 宁可跑旧版，也不跑自检不过的新版 |
-| 离线 / 无法判定 | **起跑**，但大声说明「本次未经验证」（rc=0） | 不知道 ≠ 落后；不能因为断网就让引擎停摆 |
+1. **有条件升级**（落后 ＋ 工作区干净 ＋ 无拍在飞 ＋ 历史不分叉 ＋ 升级后自检通过）
+   → **升级，然后用新版起跑**。这是默认行为：对使用者来说，默认就是新版。
+2. **没条件升级**（工作区有改动／有拍在飞／历史分叉／离线／pull 失败／自检不过并已回滚）
+   → **按现有版本照常起跑**，并说清「为什么这次不是最新版」。
+   **绝不因为「不是最新版」就把引擎停掉**——旧版能跑就让它跑，这才是可用的定规。
+3. 想要更严的人（CI、发布验证）可以加 `--require-latest`：升不了就不跑。
 
-**两件事分清楚**：升级只动 git 跟踪的引擎代码；`state/`（生长主体：账本、队列、报告）
-是 git 忽略的，`pull`/`reset` **不会碰它**。引擎换代，主体留痕不受影响。
+**升级只动引擎代码**：`state/`（生长主体：账本、队列、报告）是 git 忽略项，
+`pull`/`reset` 不会碰它。引擎换代，主体留痕不受影响。
 
 用法：
-    python tools/run_latest.py                 # 确保最新 → 跑一拍
+    python tools/run_latest.py                 # 默认：能升就升到最新，然后跑一拍
     python tools/run_latest.py -- --probe      # 「--」之后透传给 `infinigrow tick`
     python tools/run_latest.py --check         # 只报告版本状态，不起跑
-    python tools/run_latest.py --no-update     # 跳过版本闸（不推荐）
-    python tools/run_latest.py --allow-stale   # 已知是旧版仍要跑（显式例外）
-退出码：0=正常；3=升级后自检未过（已回滚）；4=引擎不是最新版/环境不满足，**拒绝起跑**。
+    python tools/run_latest.py --no-update     # 不尝试升级，直接用当前版本跑
+    python tools/run_latest.py --require-latest  # 严格模式：升不到最新就不跑
+退出码：0=正常起跑（含「按旧版跑」）；3=升级后自检未过（已回滚，但仍按旧版起跑）；
+       4=严格模式下未能拿到最新版，或环境不满足。
 """
 import argparse
 import os
@@ -41,20 +40,37 @@ LOCK_REL = Path("state") / "locks" / "tick.lock"
 
 
 def start_verdict(*, behind: int, ahead: int, dirty: bool, running: bool,
-                  offline: bool = False, allow_stale: bool = False) -> str:
-    """是否准予起跑（纯函数，可单测）。
+                  offline: bool = False, require_latest: bool = False,
+                  can_update: bool = True) -> str:
+    """起跑决策（纯函数，可单测）。
 
-    返回：`start`｜`start_unverified`｜`update_then_start`｜`refuse_stale`
+    返回：`start`（已最新，直接跑）｜`update_then_start`（有条件升级，升了再跑）
+    ｜`start_stale`（升不动，**按现有版本照常跑**）｜`start_unverified`（离线，未验证照跑）
+    ｜`refuse_stale`（仅严格模式 `--require-latest` 下：拿不到最新版就不跑）
     """
     if offline:
-        return "start_unverified"        # 不知道 → 跑，但标明未经验证
-    if running:
-        return "refuse_stale"            # 有拍在飞：不并发，也不动代码
+        return "start_unverified"
     if not behind:
-        return "start"                   # 已是最新：即便有本地改动，它也不是「旧」
-    if dirty or ahead:
-        return "start" if allow_stale else "refuse_stale"
-    return "update_then_start"
+        return "start"
+    # 落后：能不能升级？＝工作区干净、没拍在飞、历史不分叉、且允许升级
+    blocked_reason = dirty or running or bool(ahead) or not can_update
+    if not blocked_reason:
+        return "update_then_start"
+    return "refuse_stale" if require_latest else "start_stale"
+
+
+def stale_reason(*, ahead: int, dirty: bool, running: bool,
+                 can_update: bool = True) -> str:
+    """说清「为什么这次不是最新版」——不解释就等于静默用旧版。"""
+    if not can_update:
+        return "指定了 --no-update"
+    if running:
+        return "有拍在飞（不在运行中替换引擎代码）"
+    if dirty:
+        return "工作区有未提交改动（升级不会盖掉你的改动）"
+    if ahead:
+        return "历史分叉（本地领先又落后，不硬合）"
+    return "未知原因"
 
 
 def child_env(repo: Path):
@@ -131,11 +147,11 @@ def engine_label(repo: Path) -> str:
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser(description="引擎必须是最新版才准运转")
+    ap = argparse.ArgumentParser(description="默认用最新版引擎；升不动就按现有版本跑")
     ap.add_argument("--check", action="store_true", help="只报告版本状态，不起跑")
-    ap.add_argument("--no-update", action="store_true", help="跳过版本闸（不推荐）")
-    ap.add_argument("--allow-stale", action="store_true",
-                    help="已知是旧版仍要起跑（显式例外，会在输出里标明）")
+    ap.add_argument("--no-update", action="store_true", help="不尝试升级，直接用当前版本跑")
+    ap.add_argument("--require-latest", action="store_true",
+                    help="严格模式：拿不到最新版就不跑（CI/发布验证用）")
     ap.add_argument("--repo", default=str(REPO_ROOT))
     ap.add_argument("payload", nargs="*", help="透传给 `infinigrow tick` 的参数")
     args = ap.parse_args(argv)
@@ -148,13 +164,13 @@ def main(argv=None):
     print("引擎：%s（%s）" % (engine_label(repo), repo))
 
     if args.no_update:
-        print("WARN：--no-update ——本次**未**验证引擎是否为最新版")
+        print("按当前版本起跑（--no-update：本次不尝试升级）")
         return _run_payload(repo, args.payload)
 
     rc, out = git("fetch", "--tags", "--quiet")
     offline = rc != 0
     if offline:
-        print("WARN：git fetch 失败（离线？）——无法判定是否最新，本次起跑**未经验证**")
+        print("WARN：git fetch 失败（离线？）——无法判定是否最新，按当前版本起跑")
 
     ahead = behind = 0
     dirty = False
@@ -162,25 +178,23 @@ def main(argv=None):
         try:
             ahead, behind, dirty = status_counts()
         except (RuntimeError, ValueError) as exc:
-            print("FAIL：%s" % exc)
-            return 4
+            print("WARN：%s —— 无法判定是否最新，按当前版本起跑" % exc)
+            offline = True
 
     running = (repo / LOCK_REL).exists()
     verdict = start_verdict(behind=behind, ahead=ahead, dirty=dirty, running=running,
-                            offline=offline, allow_stale=args.allow_stale)
-    print("版本闸：领先 %d／落后 %d／工作区%s／有拍在飞=%s → %s"
+                            offline=offline, require_latest=args.require_latest,
+                            can_update=not args.no_update)
+    print("版本状态：领先 %d／落后 %d／工作区%s／有拍在飞=%s → %s"
           % (ahead, behind, "脏" if dirty else "干净", running, verdict))
 
     if args.check:
-        return 0 if verdict in ("start", "start_unverified", "update_then_start") else 4
+        return 0 if verdict != "refuse_stale" else 4
 
     if verdict == "refuse_stale":
-        if running:
-            print("拒绝起跑：检测到 %s（有拍在飞）。不并发、也不在运行中替换代码。" % LOCK_REL)
-        else:
-            print("拒绝起跑：**引擎已知不是最新版**（落后 %d 个提交%s）。"
-                  % (behind, "，且工作区有未提交改动" if dirty else "，且历史分叉" if ahead else ""))
-            print("处置：处理好本地改动（提交/暂存）后重跑；确要用旧版跑一拍，加 --allow-stale。")
+        print("严格模式（--require-latest）：引擎落后 %d 个提交且无法升级（%s）→ 不跑。"
+              % (behind, stale_reason(ahead=ahead, dirty=dirty, running=running,
+                                      can_update=not args.no_update)))
         return 4
 
     if verdict == "update_then_start":
@@ -188,29 +202,33 @@ def main(argv=None):
         before = before.strip()
         rc, out = git("pull", "--ff-only", "--quiet")
         if rc != 0:
-            print("FAIL：git pull --ff-only 失败（非快进）→ 引擎仍不是最新版，拒绝起跑\n%s"
+            print("WARN：git pull --ff-only 失败（非快进）→ **按现有版本起跑**\n%s"
                   % out.strip()[:300])
-            return 4
+            return _run_payload(repo, args.payload)
         sh([sys.executable, "-m", "pip", "install", "-q", "-e", ".", "--no-deps"])
         print("已升到：%s" % git("log", "--oneline", "-1")[1].strip())
         print("引擎：%s" % engine_label(repo))
         print("升级后自检：")
         gate = selftest_ok(repo)
         if gate == "env_error":
-            print("环境错误：新版跑不起来（包解析不到）——**不回滚**（回滚解决不了环境问题），"
-                  "退出码 4。")
-            return 4
+            print("WARN：新版跑不起来（包解析不到）——**不回滚**（回滚解决不了环境问题），"
+                  "按现有版本起跑")
+            return _run_payload(repo, args.payload)
         if gate == "fail":
-            print("自检未过 → **回滚**到 %s，拒绝起跑（宁可跑旧版，也不跑自检不过的新版）"
-                  % before[:8])
+            print("自检未过 → **回滚**到 %s，按回滚后的版本起跑"
+                  "（宁可跑旧版，也不跑自检不过的新版）" % before[:8])
             git("reset", "--hard", before)
-            return 3
-        print("自检全绿，用新版起跑。")
+            return _run_payload(repo, args.payload)
+        print("自检全绿，用最新版起跑。")
 
+    elif verdict == "start_stale":
+        print("引擎不是最新版（%s）→ **按现有版本照常起跑**。"
+              % stale_reason(ahead=ahead, dirty=dirty, running=running,
+                             can_update=not args.no_update))
     elif verdict == "start_unverified":
-        print("起跑（未经验证：无法确认是否最新版）")
+        print("按当前版本起跑（未经验证：无法确认是否最新）")
     elif dirty:
-        print("WARN：本地在最新提交之上有未提交改动——严格说这已不是发布版")
+        print("（提示：本地在最新提交之上有未提交改动——严格说这已不是发布版）")
 
     return _run_payload(repo, args.payload)
 
