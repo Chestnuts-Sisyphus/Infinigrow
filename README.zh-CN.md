@@ -42,7 +42,7 @@ Infinigrow 靠**被现实反驳**生长。每一拍：
 ```bash
 pip install -e ".[dev]"
 
-infinigrow version              # Infinigrow 2.2.0
+infinigrow version              # Infinigrow 2.2.1
 infinigrow dry-run              # 解析配置与路径：状态根、生长主体、执行者（零写盘）
 infinigrow tick --probe         # 跑一拍（零 token）
 infinigrow gardener             # 机械园丁（免疫系统，含账本轮转）
@@ -134,7 +134,7 @@ python tools/check_no_abs_paths.py state # 状态产物不得含本机绝对路�
 
 ## 状态与限制
 
-v2.2.0（运转线口径补全）是当前版本：新增生长主体、执行者通道、组织会话运行体、域饱和判据、
+v2.2.1（运转线可靠性补丁：不弹窗的隐藏启动器／心跳不可读时从账本恢复拍号／执行者通道抗抖动）是当前版本：新增生长主体、执行者通道、组织会话运行体、域饱和判据、
 账本轮转与双平台 CI。已知限制见 [CHANGELOG.md](CHANGELOG.md) 的 v2.1.0 与 v2.0.0 两节，
 其中最要紧的是三条：**机械拍自身不烧认知**（不接执行者时账本在长、主体不动）、
 **组织会话的语义能力取决于你接的执行者**、**轮转不做压缩**（历史行原样留在归档区）。

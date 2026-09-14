@@ -4,6 +4,22 @@
 
 版本体系说明见 [`docs/versioning.md`](docs/versioning.md)。
 
+## v2.2.1 — 运转可靠性补丁（2026-09-14）
+
+- **计划任务不再弹窗**：新增 `tools/run_tick_hidden.vbs`（WSH 窗口样式 0），
+  注册动作改为 `wscript //nologo <vbs>`——直接挂 `.bat` 会每跑一次闪一个控制台窗口。
+  （`New-ScheduledTaskSettingsSet -Hidden` 只隐藏任务列表**条目**，不隐藏窗口。）
+  测试守住：vbs 存在 ＋ `0, False` 窗口样式 ＋ ps1 走 wscript ＋ 不许再 `-Execute $bat`。
+- **心跳不可读时从账本恢复拍号**（`tick.current_tick`）：旧实现在心跳读不出时静默按
+  「新仓」起算（拍号回到 1）→ 对账报告被**同名覆写**、账本拍号跳变。现在从
+  diffs/outcomes/maturity/executor 账本反推最大拍号 +1，并把这件事写进本拍说明与心跳
+  （异常要显眼，不许静默）。测试锁定该行为。
+- **执行者通道抗抖动**：上游（Console Go）会成串返回 400「Invalid request／Upstream
+  request failed」，而同一题面稍后重放即成功（本地探针：短/整题面各两次全 OK）→
+  退避重试从 3 次加到 **5 次共约 52 秒**（首试带推理档，其后不带）。持续故障才记失败。
+- 测试：`update_local --check` 那条编码用例不再依赖网络（允许 rc 0 或 4——这一组测的是
+  **编码纪律**，不是网络）。
+
 ## v2.2.0 — 运转线口径补全（2026-09-14）
 
 **公设未变**（四条边、成熟链四步、差异四类、芽源三个）。这一版是把 v2.1.0 落地时

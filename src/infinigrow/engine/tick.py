@@ -134,6 +134,35 @@ def read_tick_status(layout: StateLayout) -> dict:
                 "last_note": "心跳文件不可解析：%r" % exc}
 
 
+def current_tick(layout: StateLayout) -> tuple[int, str]:
+    """本拍该用哪个拍号：**优先心跳；心跳不可读时从账本恢复**。
+
+    踩过的坑（实测）：心跳文件在某一瞬读不出时（并发/文件系统抖动/写到一半被杀），
+    旧实现静默回退成 `tick=0` → 本拍编号回到 1 → 报告 `reconcile-00001.md` 被**同名覆写**，
+    账本里拍号也出现跳变（现场：账本跨拍 1-16，心跳却是 2）。
+
+    所以：心跳读不出来就**从账本反推**（取 diffs/outcomes/maturity/executor 里的最大拍号 +1），
+    并把这件事写成可见说明——静默重置比报错危险得多。
+    """
+    status = read_tick_status(layout)
+    note = str(status.get("last_note") or "")
+    tick = int(status.get("tick") or 0)
+    if tick > 0 and not note.startswith("心跳文件不可解析"):
+        return tick + 1, ""
+    recovered = 0
+    for path in (layout.diff_ledger, layout.outcome_ledger, layout.maturity_chain,
+                 layout.executor_ledger):
+        for rec in read_jsonl(path):
+            value = rec.get("tick")
+            if isinstance(value, int) and value > recovered:
+                recovered = value
+    if recovered:
+        why = ("心跳不可读（%s），已从账本恢复：本拍按拍 %d 起算（账本最大拍号 %d）"
+               % (note or "原因未知", recovered + 1, recovered))
+        return recovered + 1, why
+    return tick + 1, ""
+
+
 def record_tick_result(layout: StateLayout, rc: int, tick: int, note: str = "",
                        executor_rc: Optional[int] = None) -> int:
     """落心跳：rc==0 归零，否则连续失败 +1。写不进去抛 `TickHeartbeatError`。
@@ -556,18 +585,26 @@ def run_tick(settings: Optional[Settings] = None,
     cfg = settings or load_settings(state_root=state_root)
     layout = resolve_state(cfg.state_root or state_root, cfg.repo_root, create=True)
 
-    status = read_tick_status(layout)
-    this_tick = tick if tick is not None else int(status.get("tick", 0)) + 1
+    recovered_note = ""
+    if tick is not None:
+        this_tick = tick
+    else:
+        this_tick, recovered_note = current_tick(layout)
 
     lock = acquire_lock(layout, this_tick)
     if lock is None:
         return TickResult(tick=this_tick, rc=0, skipped=True,
                           notes=["另一个会话在跑：本拍跳过（幂等，不覆盖他人产物）"])
     try:
-        return _run_tick_locked(cfg, layout, this_tick, predictions, observations, llm,
-                                probe, executor, org_session)
+        result = _run_tick_locked(cfg, layout, this_tick, predictions, observations, llm,
+                                 probe, executor, org_session)
     finally:
         release_lock(lock)
+    if recovered_note:
+        result.notes.insert(0, recovered_note)          # 异常要显眼，不许静默
+        record_tick_result(layout, result.rc, this_tick, note=recovered_note,
+                           executor_rc=(result.executor or {}).get("rc"))
+    return result
 
 
 def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,

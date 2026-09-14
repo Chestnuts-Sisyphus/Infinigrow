@@ -64,7 +64,7 @@ Design decisions follow from that:
 ```bash
 pip install -e ".[dev]"
 
-infinigrow version              # Infinigrow 2.2.0
+infinigrow version              # Infinigrow 2.2.1
 infinigrow dry-run              # resolved config, subject root, executor (writes nothing)
 infinigrow tick --probe         # run one tick, zero tokens
 infinigrow tick --json          # machine-readable result

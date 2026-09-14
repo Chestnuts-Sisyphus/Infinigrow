@@ -37,13 +37,15 @@ def _run(args, **env_extra):
     return proc.returncode, (proc.stdout or "") + (proc.stderr or "")
 
 
-# (标签, 参数, 期望 rc) —— 期望 rc 显式写出来：fake_executor 的 fail 模式**本来就该** rc=2
+# (标签, 参数, 期望 rc) —— 期望 rc 显式写出来：fake_executor 的 fail 模式**本来就该** rc=2；
+# 走版本闸的两条会 git fetch（依赖网络），所以允许 0（拿到状态）或 4（离线拿不到）——
+# 这一组测的是**编码纪律**（不许 UnicodeEncodeError），不是网络。
 ENTRIES = (
     ("cli version", ["-m", "infinigrow", "version"], 0),
     ("cli dry-run", ["-m", "infinigrow", "dry-run"], 0),
     ("cli scan", ["-m", "infinigrow", "scan"], 0),
-    ("run_latest --check", [str(TOOLS / "run_latest.py"), "--check"], 0),
-    ("update_local --check", [str(TOOLS / "update_local.py"), "--check"], 0),
+    ("run_latest --check", [str(TOOLS / "run_latest.py"), "--check"], (0, 4)),
+    ("update_local --check", [str(TOOLS / "update_local.py"), "--check"], (0, 4)),
     ("update_local --help", [str(TOOLS / "update_local.py"), "--help"], 0),
     ("privacy_scan", [str(TOOLS / "privacy_scan.py"), "--root", "src"], 0),
     ("check_prompt_code_sync", [str(TOOLS / "check_prompt_code_sync.py")], 0),
@@ -58,7 +60,8 @@ ENTRIES = (
 def test_entry_survives_a_non_utf8_console(label, args, want_rc):
     code, out = _run(args)
     assert "UnicodeEncodeError" not in out, "%s 在 cp1252 控制台下炸了：\n%s" % (label, out[-800:])
-    assert code == want_rc, "%s 的 rc=%d（应为 %d）：\n%s" % (label, code, want_rc, out[-800:])
+    expected = want_rc if isinstance(want_rc, tuple) else (want_rc,)
+    assert code in expected, "%s 的 rc=%d（应为 %s）：\n%s" % (label, code, expected, out[-800:])
 
 
 def test_demo_executor_survives_a_non_utf8_console(tmp_path):

@@ -270,3 +270,21 @@ def test_explicit_predictions_are_not_extended(tmp_path, settings):
                       observations=[Observation("别的对象", "大小", "1", "文件:x")])
     assert result.diff_summary["by_kind"] == {"预测内对": 1}
     assert "topic_expectation" not in result.predictions
+
+def test_tick_number_recovers_from_ledgers_when_heartbeat_is_unreadable(tmp_path, settings):
+    """心跳读不出来时**从账本恢复拍号**，不许静默回到 1（否则报告同名覆写）。
+
+    实测现场：心跳在某一瞬读不出 → 旧实现静默当新仓 → 本拍编号回到 1 →
+    `reconcile-00001.md` 被覆写、账本拍号跳变（账本跨拍 1-16、心跳却是 2）。
+    """
+    for tick in (1, 2, 3):
+        run_tick(settings=settings, tick=tick)
+    layout = resolve_state(settings.state_root, settings.repo_root)
+    # 造一个坏心跳（不可解析）
+    layout.tick_status.write_text("{ 这不是合法 JSON", encoding="utf-8")
+    result = run_tick(settings=settings)                     # 不给拍号 → 走恢复路径
+    assert result.tick == 4, "应从账本最大拍号 3 恢复成第 4 拍，而不是回到 1"
+    assert any("已从账本恢复" in n for n in result.notes)
+    import json as _json
+    status = _json.loads(layout.tick_status.read_text(encoding="utf-8"))
+    assert status["tick"] == 4 and "已从账本恢复" in status["last_note"]
