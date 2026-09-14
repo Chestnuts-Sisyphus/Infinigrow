@@ -1,0 +1,80 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: py${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+
+      - name: Lint (ruff)
+        run: python -m ruff check .
+
+      - name: Unit tests (pytest)
+        run: python -m pytest -q
+
+      - name: Static rules (零 token)
+        run: python -m infinigrow scan
+
+      - name: Rule self-test (正/反用例)
+        run: python -m infinigrow selftest
+
+      - name: Prompt ↔ code sync (同源校验机)
+        run: python tools/check_prompt_code_sync.py
+
+      - name: Privacy scan (通用层：路径/凭据/邮箱)
+        run: python tools/privacy_scan.py --root .
+
+      # O5/T12 的验收项：**冷启动空仓跑一拍**——空状态目录 + 零 token。
+      # 这一关过了，才说明「引擎能在没有任何个人数据的环境里转起来」。
+      - name: Cold start — 空仓零 token 跑三拍
+        env:
+          IG_STATE_ROOT: ${{ runner.temp }}/infinigrow-state
+        run: |
+          python -m infinigrow dry-run
+          python -m infinigrow tick --tick 1 --probe
+          python -m infinigrow tick
+          python -m infinigrow tick
+          python -m infinigrow gardener
+          python -m infinigrow org-check --tick 9 || true
+
+      - name: Cold start — 产物不得含绝对路径
+        env:
+          IG_STATE_ROOT: ${{ runner.temp }}/infinigrow-state
+        run: |
+          python - <<'PY'
+          # 真检查：上一拍产出的状态目录里，**任何一个文件**都不许出现绝对路径。
+          # （这一步曾经只是「再跑一遍测试」，名字比内容大；改成真的扫产物。）
+          import os, pathlib, re, sys
+          root = pathlib.Path(os.environ["IG_STATE_ROOT"])
+          pat = re.compile(r"[A-Za-z]:[\\/]|/(?:home|Users|mnt|opt)/")
+          files = [p for p in root.rglob("*") if p.is_file()]
+          bad = [str(p) for p in files
+                 if pat.search(p.read_text(encoding="utf-8", errors="replace"))]
+          print("检查文件数：%d" % len(files))
+          for p in files:
+              print("  -", p.relative_to(root))
+          print("绝对路径命中：%s" % (bad or "无"))
+          sys.exit(1 if bad else 0)
+          PY
