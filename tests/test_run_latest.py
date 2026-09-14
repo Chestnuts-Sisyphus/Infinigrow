@@ -63,6 +63,34 @@ def test_selftest_gate_and_rollback_are_present_in_source():
     assert "回滚" in src
 
 
+def test_env_error_is_not_treated_as_selftest_failure():
+    """「跑不起来」≠「自检不过」：前者不回滚（回滚解决不了环境问题）。
+
+    这条是真机跑出来的 bug：未安装状态下 `python -m infinigrow` 直接 No module named，
+    当时的闸会把它当失败并回滚一个本来正常的升级。
+    """
+    src = (REPO_ROOT / "tools" / "run_latest.py").read_text(encoding="utf-8")
+    assert "env_error" in src
+    assert "No module named" in src
+
+
+def test_child_env_makes_the_package_importable_without_install():
+    """运行入口不能假设「使用者装过包」：子进程环境必须带上 <repo>/src。"""
+    env = run_latest.child_env(REPO_ROOT)
+    first = env["PYTHONPATH"].split(__import__("os").pathsep)[0]
+    assert Path(first) == REPO_ROOT / "src"
+
+
+def test_payload_runs_end_to_end_help():
+    """端到端：通过运行入口起跑一个无害 payload（tick --help），必须真的跑得起来。"""
+    p = subprocess.run([sys.executable, str(REPO_ROOT / "tools" / "run_latest.py"),
+                        "--no-update", "--", "--help"],
+                       capture_output=True, text=True, encoding="utf-8", errors="replace",
+                       timeout=300, cwd=str(REPO_ROOT))
+    assert "No module named" not in p.stdout
+    assert p.returncode == 0
+
+
 def test_upgrade_docs_state_the_rule():
     text = (REPO_ROOT / "docs" / "upgrading.md").read_text(encoding="utf-8")
     assert "run_latest" in text          # 文档必须指向运行入口，别让人另找命令

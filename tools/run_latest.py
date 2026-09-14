@@ -52,11 +52,27 @@ def decide(*, behind: int, ahead: int, dirty: bool, running: bool,
     return "run_only"
 
 
-def sh(cmd, cwd=REPO_ROOT, timeout=900):
+def child_env(repo: Path):
+    """子进程环境：把 `<repo>/src` 加进 PYTHONPATH。
+
+    为什么必须有这一步：本仓库是 `src/` 布局，`python -m infinigrow` 只有在该包**被安装**
+    或 `PYTHONPATH` 指到 `src/` 时才能解析。运行入口不能假设「使用者一定装过」——
+    真机首跑就是在未安装状态下直接 `No module named infinigrow`（这个 bug 是跑出来的，
+    不是想出来的）。
+    """
+    import os
+    env = dict(os.environ)
+    src = str(repo / "src")
+    old = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = src if not old else (src + os.pathsep + old)
+    return env
+
+
+def sh(cmd, cwd=REPO_ROOT, timeout=900, env=None):
     """跑一条命令，返回 (rc, 输出)。不抛异常——失败由调用方判定并说明。"""
     try:
         p = subprocess.run(cmd, cwd=str(cwd), capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=timeout)
+                           encoding="utf-8", errors="replace", timeout=timeout, env=env)
         return p.returncode, (p.stdout or "") + (p.stderr or "")
     except (OSError, subprocess.SubprocessError) as exc:
         return 127, "执行失败：%r" % exc
@@ -82,16 +98,25 @@ def status_counts():
     return ahead, behind, dirty
 
 
-def selftest_ok():
-    """升级后的验收闸：自检 ＋ 规则扫描，两条都过才算升好。"""
-    ok = True
+def selftest_ok(repo: Path):
+    """升级后的验收闸：自检 ＋ 规则扫描。返回 `ok`｜`fail`｜`env_error`。
+
+    **必须区分「自检不过」与「根本跑不起来」**：前者要回滚（新版有问题），
+    后者是环境问题（比如包没装上）——把它当失败会**误回滚一个本来正常的升级**。
+    """
+    env = child_env(repo)
+    verdict = "ok"
     for label, args in (("selftest", ["infinigrow", "selftest"]),
                         ("scan", ["infinigrow", "scan"])):
-        rc, out = sh([sys.executable, "-m", *args])
+        rc, out = sh([sys.executable, "-m", *args], cwd=repo, env=env)
         tail = "\n".join(out.strip().splitlines()[-2:])
         print("  %s：rc=%d %s" % (label, rc, tail))
-        ok = ok and rc == 0
-    return ok
+        if rc == 0:
+            continue
+        if "No module named" in out or "ModuleNotFoundError" in out:
+            return "env_error"
+        verdict = "fail"
+    return verdict
 
 
 def main(argv=None):
@@ -153,7 +178,12 @@ def main(argv=None):
         sh([sys.executable, "-m", "pip", "install", "-q", "-e", ".", "--no-deps"])
         print("已升到：%s" % git("log", "--oneline", "-1")[1].strip())
         print("升级后自检：")
-        if not selftest_ok():
+        verdict = selftest_ok(repo)
+        if verdict == "env_error":
+            print("环境错误：新版跑不起来（包解析不到）——**不回滚**（回滚也解决不了环境问题），"
+                  "请修好环境后重跑；退出码 4。")
+            return 4
+        if verdict == "fail":
             print("自检未过 → **回滚**到 %s（宁可跑旧版，也不跑自检不过的新版）" % before[:8])
             git("reset", "--hard", before)
             return 3
@@ -166,7 +196,7 @@ def _run_payload(repo: Path, payload):
     """起跑：默认跑一拍；`--` 之后给的参数原样透传。"""
     cmd = [sys.executable, "-m", "infinigrow", "tick", *payload]
     print("起跑：%s" % " ".join(cmd[1:]))
-    rc, out = sh(cmd, cwd=repo, timeout=3600)
+    rc, out = sh(cmd, cwd=repo, timeout=3600, env=child_env(repo))
     print(out.rstrip())
     return rc
 
