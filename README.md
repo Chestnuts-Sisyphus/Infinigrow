@@ -119,12 +119,14 @@ Everything else is in [`docs/mechanism.md`](docs/mechanism.md).
 ## Am I running the latest?
 
 ```bash
-infinigrow version --check      # 与最新发布比对（只读公开接口、零凭据；落后时退出码=3）
-python tools/update_local.py    # 一条命令升级：git pull --ff-only → 重装 → 当场自检
+python tools/run_latest.py      # 运行入口：先确保最新，再起跑（默认跑一拍）
+infinigrow version --check      # 只查：本地版 vs 最新发布（落后时退出码 3）
 ```
 
-`update_local.py` 只在**落后**时才动，本地有未推送提交时**拒绝自动合并**（不会把你的活儿埋掉），
-升级后跑自检与规则扫描，绿了才算升好。`--check` 可以只看差多少。
+`run_latest.py` 是推荐的**运行入口**——它让「跑着的就是最新版」成为结构而不是习惯：
+起跑前先 `git pull --ff-only` ＋ 重装 ＋ 自检，四处不满足（工作区脏／有拍在飞／
+历史分叉／自检不过）都会**当场说明并拒绝**，自检不过还会**回滚**。
+细节与理由见 [`docs/upgrading.md`](docs/upgrading.md)。
 
 ## Plugging in an executor
 
