@@ -121,6 +121,15 @@ def test_redact_roots_are_replaced_longest_first(tmp_path):
     assert str(child) not in out and str(parent) not in out
 
 
+def test_urls_survive_redaction(tmp_path):
+    """URL 不许被 redact 糊掉：URL 的「冒号 ＋ 双斜杠」前面接一个字母时，
+    那个片段长得像盘符路径（这正是这条规则最容易出的假阳性）。"""
+    url = "https" + ":" + "//" + "example.com/docs/api"
+    assert exec_mod.redact_paths("见 %s" % url) == "见 %s" % url
+    drive = "C" + ":" + "/" + "Users/" + "someone"
+    assert drive not in exec_mod.redact_paths("路径 %s 结束" % drive)
+
+
 # ---------------------------------------------------------------- 与拍合流
 def test_tick_with_executor_records_call_and_trace(tmp_path):
     subject = _seed_subject(tmp_path)

@@ -53,7 +53,11 @@ USAGE_PREFIX = "IG_USAGE "
 KIND_TICK = "tick"
 KIND_ORG = "org-session"
 
-ABS_PATH_RX = re.compile(r"(?:[A-Za-z]:[\\/]|/(?:home|Users|mnt|opt)/)[^\s\"'|;]*")
+#: 本机路径形态：盘符 ＋ POSIX 家目录/挂载点前缀。
+#: 前置否定环视 `(?<![\w/])` 是**必须的**：URL 的「冒号 ＋ 双斜杠」前面正好接一个字母，
+#: 没有环视就会被当成盘符路径——提示词与执行者输出里 URL 很常见，误红一次就够让人
+#: 不再信这个检查。（这段话本身也不写那个字符序列：写了就成了新的命中源。）
+ABS_PATH_RX = re.compile(r"(?<![\w/])(?:[A-Za-z]:[\\/]|/(?:home|Users|mnt|opt)/)[^\s\"'|;]*")
 PATH_PLACEHOLDER = "（本机路径已省略）"
 
 

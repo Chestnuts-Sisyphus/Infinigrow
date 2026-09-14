@@ -130,6 +130,23 @@ def test_bat_files_are_ascii_only():
                                  % (path.name, exc)) from exc
 
 
+def test_urls_are_not_treated_as_drive_letters(tmp_path):
+    """带 URL 的文档不许被误判成「含本机路径」。
+
+    实测换来的：本工具扫 `docs/` 时把 release notes 里的仓库链接当成了盘符路径
+    （URL 的「冒号 ＋ 双斜杠」前面正好接一个字母）。
+    判据要能区分「URL」与「本机路径」——这是这条规则最容易出的假阳性。
+    """
+    mod = _load_check_tool()
+    docs = tmp_path / "d"
+    docs.mkdir()
+    url = "https" + ":" + "//" + "github.com/Chestnuts-Sisyphus/Infinigrow"
+    (docs / "notes.md").write_text("见 %s\n" % url, encoding="utf-8")
+    hits, files, _skipped = mod.scan(docs)
+    assert hits == [] and len(files) == 1
+    assert mod.main([str(docs)]) == 0
+
+
 def test_empty_path_argument_is_refused(tmp_path):
     """空参数要说「失败」，不许悄悄去扫当前目录。
 

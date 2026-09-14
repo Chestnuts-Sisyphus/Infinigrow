@@ -20,9 +20,13 @@ import re
 import sys
 from pathlib import Path
 
-#: 绝对路径形态（与静态规则 R1／隐私扫描同源；字符类刻意不写出完整形态，
-#: 免得本文件自己命中自己——自匹配是这类检查器最常见的假阳性）
-ABS_PATH_RX = re.compile(r"(?:[A-Za-z]:[\\/]|/(?:home|Users|mnt|opt)/)")
+#: 绝对路径形态（与静态规则 R1／隐私扫描同源）。
+#: 三处细节都是从误报里换来的：
+#:  - 前置否定环视 `(?<![\w/])`：URL 的「冒号 ＋ 双斜杠」前面正好接一个字母，
+#:    没有环视就会被当成盘符路径（任何带链接的文档都会误报——本工具真的误报过一次）；
+#:  - 字符类刻意不写出完整形态，本段注释也不写那个序列（写了就成了新的命中源）；
+#:  - 只认家目录/挂载点这几类 POSIX 前缀：判据宁窄而准，不宽而吵。
+ABS_PATH_RX = re.compile(r"(?<![\w/])(?:[A-Za-z]:[\\/]|/(?:home|Users|mnt|opt)/)")
 
 SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", ".ruff_cache", ".venv", "venv",
              "node_modules", ".mypy_cache"}
