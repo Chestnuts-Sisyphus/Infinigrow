@@ -21,7 +21,10 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 # ---------------------------------------------------------------- 扫描范围
-SCAN_SUFFIXES = (".py", ".md", ".toml", ".cfg", ".txt", ".yml", ".yaml", ".sh")
+SCAN_SUFFIXES = (".py", ".md", ".toml", ".cfg", ".txt", ".yml", ".yaml", ".sh",
+                 # 一键件与计划任务脚本也要扫：它们**就是**发布内容的一部分
+                 # （曾经因为不在这张表里，规则看不见它们）
+                 ".bat", ".cmd", ".ps1", ".psm1")
 SKIP_DIRS = {"__pycache__", ".git", "state", "archive", ".venv", "venv",
              "node_modules", ".pytest_cache", ".ruff_cache", "build", "dist"}
 
@@ -40,7 +43,34 @@ SYNC_TERMS = {
     "成熟链封顶": "engine/sprout_sources.py",
     "能力库未用": "engine/sprout_sources.py",
     "零差异零芽": "engine/sprout_sources.py",
+    # 运转线新增（v2.1）：机制新长的每一样东西，都必须同时出现在提示词与代码里，
+    # 否则就是「机制改了提示词没改」——上一代漂移病的起点。
+    "生长主体": "engine/subject.py",
+    "执行者": "engine/executor.py",
+    "组织会话": "engine/org_session.py",
+    "域饱和": "engine/domain_saturation.py",
+    "轮转": "ledger/rotation.py",
 }
+
+#: 同源表的**覆盖下限**：这几条必须一直在表里（有人静默删词＝漂移面回来了）
+MIN_SYNC_TERMS = (
+    "判读", "行动", "原理", "固化", "成熟链", "差异", "兑现账", "成熟链封顶",
+    "能力库未用", "零差异零芽", "生长主体", "执行者", "组织会话", "域饱和", "轮转",
+)
+
+#: 写盘白名单：只有这两个文件可以直接碰文件系统写动作（其余一律走 ledger/store）
+WRITE_ALLOWLIST = ("ledger/store.py", "core/encoding.py")
+
+#: 显式例外：规则模块自身含**正反用例夹具**——夹具必须能造病灶态（包括写一个带 BOM 的
+#: 假文件、往源码里注入一行越界写盘），所以它自己必然有裸写盘动作。
+#: 例外**进报告**（在 R8 的明细里点名），不是静默放宽。
+WRITE_SCAN_EXCLUDE = ("rules/static_scan.py",)
+
+#: 写盘动作的形态（**注意**：这里刻意用「方法名 + 模式参数」而不是拼出完整调用，
+#: 免得规则文件自己命中自己——自匹配是这类扫描器最常见的假阳性来源）
+WRITE_CALL_RX = re.compile(r"\.write_text\(|\.write_bytes\(|open\([^)]*['\"][wax]")
+#: 裸退出码：cli 里出现 ≥2 的整数字面量＝退出码语义被写死（应改用 core/exit_codes）
+RC_LITERAL_RX = re.compile(r"\breturn\s+([2-9]|\d{2,})\s*$")
 
 #: 提示词里**禁止**出现的历史条款（T9：执行会话不得自造芽）
 FORBIDDEN_PROMPT_PHRASES = (
@@ -226,6 +256,76 @@ def rule_no_bom(ctx: RuleContext) -> tuple[str, bool]:
             % (len(hits), "（" + "、".join(hits[:5]) + "）" if hits else ""), not hits)
 
 
+def rule_exit_codes_single_source(ctx: RuleContext) -> tuple[str, bool]:
+    """R7 rc 语义单一来源：CLI 里不许再出现裸的退出码整数（≥2）。
+
+    退出码是**调用方契约**（计划任务、CI、守护脚本都读它）。写死一个 3 在 A 处是
+    「落后」、在 B 处是「自检不过」，契约就没了。规矩：要用就 `from ..core import
+    exit_codes as rc` 然后 `rc.BEHIND`。
+    """
+    cli = ctx.src_dir / "infinigrow" / "cli.py"
+    codes = ctx.src_dir / "infinigrow" / "core" / "exit_codes.py"
+    if not cli.is_file():
+        return ("cli.py 缺失：无法判定退出码来源", False)
+    hits = []
+    for no, line in _code_lines(_read(cli)):
+        if NOQA in line:
+            continue
+        if RC_LITERAL_RX.search(line.rstrip()):
+            hits.append("cli.py:%d" % no)
+    has_module = codes.is_file() and "BEHIND" in _read(codes)
+    detail = ("rc 语义单一来源：裸整数 %d 处%s；exit_codes 模块 %s"
+              % (len(hits), "（" + "、".join(hits[:5]) + "）" if hits else "",
+                 "在位" if has_module else "**缺失**"))
+    return (detail, not hits and has_module)
+
+
+def rule_writes_go_through_store(ctx: RuleContext) -> tuple[str, bool]:
+    """R8 写盘窗口一致性：`src/infinigrow/**` 里只有 `ledger/store.py` 与
+    `core/encoding.py` 可以直接写文件。
+
+    为什么值得一条规则：写盘一旦散落各处，「越界守卫」就只在被想起来的地方存在，
+    而原子替换（防断电读到半个文件）更是没人会重复实现一遍。收成一条路，
+    出事时只需要看一个文件。
+    """
+    hits = []
+    base = ctx.src_dir / "infinigrow"
+    for path in sorted(base.rglob("*.py")):
+        rel = path.relative_to(base).as_posix()
+        if rel in WRITE_ALLOWLIST or rel in WRITE_SCAN_EXCLUDE:
+            continue
+        for no, line in _code_lines(_read(path)):
+            if NOQA in line:
+                continue
+            if WRITE_CALL_RX.search(line):
+                hits.append("%s:%d" % (rel, no))
+    return ("写盘窗口：越界写盘 %d 处%s（白名单：%s；显式例外：%s）"
+            % (len(hits), "（" + "、".join(hits[:5]) + "）" if hits else "",
+               "、".join(WRITE_ALLOWLIST), "、".join(WRITE_SCAN_EXCLUDE)), not hits)
+
+
+def rule_sync_terms_coverage(ctx: RuleContext) -> tuple[str, bool]:
+    """R9 同源表覆盖不得缩表：`MIN_SYNC_TERMS` 里的机制词必须同时在表里与提示词里。
+
+    R2 管的是「表里的词两侧齐不齐」，这条管的是「表本身有没有被悄悄改小」——
+    删一个词比改坏一处代码更隐蔽：机制还在跑，同源校验却已经不再覆盖它了。
+    """
+    missing_in_table = [t for t in MIN_SYNC_TERMS if t not in SYNC_TERMS]
+    prompt_text = ""
+    for name in (TICK_PROMPT, ORG_PROMPT):
+        p = ctx.prompts_dir / name
+        if p.is_file():
+            prompt_text += _read(p)
+    missing_in_prompt = [t for t in MIN_SYNC_TERMS if t not in prompt_text]
+    detail = ("同源表覆盖：表内缺 %d、提示词缺 %d（下限 %d 词）"
+              % (len(missing_in_table), len(missing_in_prompt), len(MIN_SYNC_TERMS)))
+    if missing_in_table:
+        detail += "；表内缺：" + "、".join(missing_in_table)
+    if missing_in_prompt:
+        detail += "；提示词缺：" + "、".join(missing_in_prompt)
+    return (detail, not missing_in_table and not missing_in_prompt)
+
+
 RULES: tuple[tuple[str, Callable[[RuleContext], tuple[str, bool]]], ...] = (
     ("R1 零绝对路径", rule_no_absolute_paths),
     ("R2 提示词代码同源", rule_prompt_code_sync),
@@ -233,6 +333,9 @@ RULES: tuple[tuple[str, Callable[[RuleContext], tuple[str, bool]]], ...] = (
     ("R4 状态根被忽略", rule_state_gitignored),
     ("R5 无凭据字面量", rule_no_secrets),
     ("R6 无 BOM", rule_no_bom),
+    ("R7 rc 语义单一来源", rule_exit_codes_single_source),
+    ("R8 写盘窗口一致", rule_writes_go_through_store),
+    ("R9 同源表不缩表", rule_sync_terms_coverage),
 )
 
 
@@ -261,14 +364,24 @@ def _make_tree(root: Path) -> RuleContext:
     (root / "src" / "infinigrow" / "engine").mkdir(parents=True, exist_ok=True)
     (root / "src" / "infinigrow" / "core").mkdir(parents=True, exist_ok=True)
     (root / "prompts").mkdir(parents=True, exist_ok=True)
+    owners: dict[str, list[str]] = {}
     for term, owner in SYNC_TERMS.items():
+        owners.setdefault(owner, []).append(term)
+    for owner, terms in owners.items():
         p = root / "src" / "infinigrow" / owner
         p.parent.mkdir(parents=True, exist_ok=True)
-        with open(p, "a", encoding="utf-8") as fh:
-            fh.write("# %s\n" % term)
+        # 夹具必须自己造文件（它要造**病灶态**，含带 BOM 的假文件）——
+        # 所以本规则模块自身在 R8 里是**显式例外**（见 rule_writes_go_through_store）。
+        p.write_text("".join("# %s\n" % t for t in terms), encoding="utf-8")
     (root / "src" / "infinigrow" / "__init__.py").write_text("x = 1\n", encoding="utf-8")
+    # 夹具 CLI：退出码走常量（R7 的正例形态）
+    (root / "src" / "infinigrow" / "core" / "exit_codes.py").write_text(
+        "OK = 0\nBEHIND = 3\n", encoding="utf-8")
+    (root / "src" / "infinigrow" / "cli.py").write_text(
+        "from .core import exit_codes as rc\n\n\ndef main():\n    return rc.OK\n",
+        encoding="utf-8")
     (root / "prompts" / TICK_PROMPT).write_text(
-        "本拍题面：按差异动手。\n" + "\n".join(SYNC_TERMS), encoding="utf-8")
+        "本拍题面：按差异动手。\n" + "\n".join(SYNC_TERMS) + "\n", encoding="utf-8")
     (root / "prompts" / ORG_PROMPT).write_text("组织会话：只从差异生芽。\n", encoding="utf-8")
     (root / ".gitignore").write_text("state/\n", encoding="utf-8")
     return RuleContext.from_repo(root)
@@ -292,6 +405,16 @@ SELFTEST_CASES = (
     ("R6 正例（无 BOM）", "rule_no_bom", None, True),
     ("R6 反例（写入带 BOM 文件）", "rule_no_bom", "src/infinigrow/__init__.py",
      "\ufeffx = 1\n"),
+    # v2.1 新增三条规则的正/反用例（T8 验收：每条规则都要能**真的红**）
+    ("R7 正例（退出码走常量）", "rule_exit_codes_single_source", None, True),
+    ("R7 反例（cli 写死裸整数）", "rule_exit_codes_single_source",
+     "src/infinigrow/cli.py", "def main():\n    return 5\n"),
+    ("R8 正例（写盘只在 store）", "rule_writes_go_through_store", None, True),
+    ("R8 反例（引擎里直接写盘）", "rule_writes_go_through_store",
+     "src/infinigrow/engine/model.py", "def leak(p):\n    p.write_text('x')\n"),
+    ("R9 正例（同源表覆盖齐）", "rule_sync_terms_coverage", None, True),
+    ("R9 反例（提示词丢机制词）", "rule_sync_terms_coverage",
+     "prompts/" + TICK_PROMPT, "# 只剩一个词\n差异\n"),
 )
 
 

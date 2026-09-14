@@ -42,7 +42,7 @@ Infinigrow 靠**被现实反驳**生长。每一拍：
 ```bash
 pip install -e ".[dev]"
 
-infinigrow version              # Infinigrow 2.0.0
+infinigrow version              # Infinigrow 2.1.0
 infinigrow dry-run              # 只解析配置与路径（零写盘）
 infinigrow tick --probe         # 跑一拍（零 token）
 infinigrow gardener             # 机械园丁（免疫系统）

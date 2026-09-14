@@ -97,22 +97,28 @@ def sh(cmd, cwd=REPO_ROOT, timeout=900, env=None):
         return 127, "执行失败：%r" % exc
 
 
-def git(*args):
-    return sh(["git", *args])
+def git(repo: Path, *args):
+    """在**指定仓库**里跑 git（`--repo` 必须真的生效：否则版本判定看的是别的仓库）。
+
+    这是 T10 端到端测试抓出来的一个真缺陷：原先 `git()` 固定用 `REPO_ROOT`，
+    于是 `--repo <别处>` 只影响路径检查与起跑目录，**版本判定仍在看本仓库**——
+    拿一个落后 2 个提交的副本去问，它会回答「已是最新」。
+    """
+    return sh(["git", *args], cwd=repo)
 
 
-def status_counts():
+def status_counts(repo: Path):
     """返回 (ahead, behind, dirty)。读不出来时抛 RuntimeError（不猜）。"""
-    rc, out = git("rev-parse", "--abbrev-ref", "HEAD")
+    rc, out = git(repo, "rev-parse", "--abbrev-ref", "HEAD")
     if rc != 0:
         raise RuntimeError("读不出当前分支：%s" % out.strip())
     branch = out.strip()
-    rc, out = git("rev-list", "--left-right", "--count",
+    rc, out = git(repo, "rev-list", "--left-right", "--count",
                   "%s...origin/%s" % (branch, branch))
     if rc != 0:
         raise RuntimeError("无法与远端比较（origin/%s 存在吗）：%s" % (branch, out.strip()))
     ahead, behind = (int(x) for x in out.split())
-    rc, out = git("status", "--porcelain")
+    rc, out = git(repo, "status", "--porcelain")
     return ahead, behind, bool(out.strip())
 
 
@@ -149,6 +155,8 @@ def engine_label(repo: Path) -> str:
 def main(argv=None):
     ap = argparse.ArgumentParser(description="默认用最新版引擎；升不动就按现有版本跑")
     ap.add_argument("--check", action="store_true", help="只报告版本状态，不起跑")
+    ap.add_argument("--update", action="store_true",
+                    help="只升级并自检，不跑拍（原 update_local.py 的能力，归并到此）")
     ap.add_argument("--no-update", action="store_true", help="不尝试升级，直接用当前版本跑")
     ap.add_argument("--require-latest", action="store_true",
                     help="严格模式：拿不到最新版就不跑（CI/发布验证用）")
@@ -163,11 +171,14 @@ def main(argv=None):
 
     print("引擎：%s（%s）" % (engine_label(repo), repo))
 
+    if args.update:
+        return update_only(repo, check=args.check, require_latest=args.require_latest)
+
     if args.no_update:
         print("按当前版本起跑（--no-update：本次不尝试升级）")
         return _run_payload(repo, args.payload)
 
-    rc, out = git("fetch", "--tags", "--quiet")
+    rc, out = git(repo, "fetch", "--tags", "--quiet")
     offline = rc != 0
     if offline:
         print("WARN：git fetch 失败（离线？）——无法判定是否最新，按当前版本起跑")
@@ -176,7 +187,7 @@ def main(argv=None):
     dirty = False
     if not offline:
         try:
-            ahead, behind, dirty = status_counts()
+            ahead, behind, dirty = status_counts(repo)
         except (RuntimeError, ValueError) as exc:
             print("WARN：%s —— 无法判定是否最新，按当前版本起跑" % exc)
             offline = True
@@ -198,15 +209,15 @@ def main(argv=None):
         return 4
 
     if verdict == "update_then_start":
-        rc, before = git("rev-parse", "HEAD")
+        rc, before = git(repo, "rev-parse", "HEAD")
         before = before.strip()
-        rc, out = git("pull", "--ff-only", "--quiet")
+        rc, out = git(repo, "pull", "--ff-only", "--quiet")
         if rc != 0:
             print("WARN：git pull --ff-only 失败（非快进）→ **按现有版本起跑**\n%s"
                   % out.strip()[:300])
             return _run_payload(repo, args.payload)
         sh([sys.executable, "-m", "pip", "install", "-q", "-e", ".", "--no-deps"])
-        print("已升到：%s" % git("log", "--oneline", "-1")[1].strip())
+        print("已升到：%s" % git(repo, "log", "--oneline", "-1")[1].strip())
         print("引擎：%s" % engine_label(repo))
         print("升级后自检：")
         gate = selftest_ok(repo)
@@ -217,7 +228,7 @@ def main(argv=None):
         if gate == "fail":
             print("自检未过 → **回滚**到 %s，按回滚后的版本起跑"
                   "（宁可跑旧版，也不跑自检不过的新版）" % before[:8])
-            git("reset", "--hard", before)
+            git(repo, "reset", "--hard", before)
             return _run_payload(repo, args.payload)
         print("自检全绿，用最新版起跑。")
 
@@ -240,6 +251,67 @@ def _run_payload(repo: Path, payload):
     rc, out = sh(cmd, cwd=repo, timeout=3600, env=child_env(repo))
     print(out.rstrip())
     return rc
+
+
+def update_only(repo: Path, check: bool = False, require_latest: bool = False) -> int:
+    """只升级、不跑拍（**T10 归并**：原 `update_local.py` 的全部能力收在这里）。
+
+    为什么归并：同一个「把本地副本升到最新」的动作有两份实现，就有两个可能漂移的
+    判据（一个拒绝非快进、另一个不拒绝；一个回滚、另一个不回滚）。现在只有这一份；
+    `tools/update_local.py` 退化成转发壳（保留旧命令可用，但不再有自己的逻辑）。
+
+    退出码：0 已是最新或升级成功｜3 升级后自检未过（已回滚）｜4 git/pip 层面失败。
+    """
+    rc, _ = git(repo, "fetch", "--tags", "--quiet")
+    if rc != 0:
+        print("FAIL：git fetch 失败（网络或权限）——无法判定是否最新。")
+        return 4
+    try:
+        ahead, behind, dirty = status_counts(repo)
+    except (RuntimeError, ValueError) as exc:
+        print("FAIL：%s" % exc)
+        return 4
+    print("本地：领先 %d 提交／落后 %d 提交／工作区%s"
+          % (ahead, behind, "脏" if dirty else "干净"))
+    if check:
+        if behind == 0:
+            print("已是最新（无需升级）。")
+            return 0
+        print("落后 %d 个提交——去掉 --check 即执行升级。" % behind)
+        return 0
+    if behind == 0:
+        print("已是最新（无需升级）。")
+        return 0
+    if require_latest and (ahead or dirty):
+        print("严格模式（--require-latest）：本地有未推送提交或未提交改动 → 不自动升级。")
+        return 4
+    if ahead:
+        print("本地有 %d 个未推送提交：**拒绝自动合并**（先处理自己的提交，"
+              "别让升级把它埋掉）。" % ahead)
+        return 4
+
+    rc, before = git(repo, "rev-parse", "HEAD")
+    before = before.strip()
+    rc, out = git(repo, "pull", "--ff-only", "--quiet")
+    if rc != 0:
+        print("FAIL：git pull --ff-only 失败（非快进，需人处理）\n%s" % out.strip()[:300])
+        return 4
+    print("已快进到：%s" % git(repo, "log", "--oneline", "-1")[1].strip())
+    rc, out = sh([sys.executable, "-m", "pip", "install", "-q", "-e", ".", "--no-deps"])
+    if rc != 0:
+        print("WARN：pip 重装失败（继续自检；入口点异常时需人手修）\n%s" % out[-300:])
+    print("引擎：%s" % engine_label(repo))
+    print("升级后自检：")
+    gate = selftest_ok(repo)
+    if gate == "env_error":
+        print("WARN：新版跑不起来（包解析不到）——**不回滚**（回滚解决不了环境问题）。")
+        return 4
+    if gate == "fail":
+        print("自检未过 → **回滚**到 %s（宁可跑旧版，也不跑自检不过的新版）。" % before[:8])
+        git(repo, "reset", "--hard", before)
+        return 3
+    print("OK：本地已是最新版，且自检全绿。")
+    return 0
 
 
 if __name__ == "__main__":

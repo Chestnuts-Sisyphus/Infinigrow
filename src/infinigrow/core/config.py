@@ -10,15 +10,22 @@
 | 配置项 | 环境变量 | 默认 | 说明 |
 |---|---|---|---|
 | `state_root` | `IG_STATE_ROOT` | `<repo>/state` | 状态根（账本/队列/心跳）|
+| `subject_root` | `IG_SUBJECT_ROOT` | `<repo 同级>/<仓库名>-subject` | **生长主体**（引擎在长什么）|
 | `prompts_dir` | `IG_PROMPTS_DIR` | `<repo>/prompts` | 提示词目录 |
 | `key_dir` | `IG_KEY_DIR` | 空 | 外部凭据目录（空＝不需要凭据）|
 | `proxy_url` | `IG_PROXY_URL` | 空 | 出网代理（空＝直连）|
-| `llm_command` | `IG_LLM_COMMAND` | 空 | 起一拍用的外部命令（空＝机械模式，零 token）|
-| `llm_model` | `IG_LLM_MODEL` | 空 | 模型标识（透传给上面那条命令）|
+| `executor` | `IG_EXECUTOR` | 空 | **执行者命令**（空＝机械拍，零 token/零凭据/不出网）|
+| `executor_timeout_s` | `IG_EXECUTOR_TIMEOUT_S` | 120 | 单次执行者调用超时（秒）|
+| `llm_command` | `IG_LLM_COMMAND` | 空 | 旧字段（与 `executor` 同义，保留兼容）|
+| `llm_model` | `IG_LLM_MODEL` | 空 | 模型标识（透传给执行者，供其自行取用）|
 | `org_gap_ticks` | `IG_ORG_GAP_TICKS` | 5 | 组织会话 LLM 段最长空窗（拍）|
+| `org_cooldown_min` | `IG_ORG_COOLDOWN_MIN` | 30 | 组织段冷却（分钟，机械时间戳口径）|
+| `tick_minutes` | `IG_TICK_MINUTES` | 10 | 调度间隔（分钟；安装计划任务时读它）|
 | `queue_cap` | `IG_QUEUE_CAP` | 50 | 活跃芽队列上限 |
 | `lead_limit` | `IG_LEAD_LIMIT` | 3 | 同一芽连领上限（拍）|
 | `cold_start_ticks` | `IG_COLD_START_TICKS` | 50 | 冷启动随机化拍数（之后走字典序）|
+| `rotate_keep_tail` | `IG_ROTATE_KEEP_TAIL` | 2000 | 轮转后主账本保留的**尾部行数**（历史行全在 `state/archive/`）|
+| `rotate_max_bytes` | `IG_ROTATE_MAX_BYTES` | 1048576 | 账本超过这么多字节才轮转 |
 """
 from __future__ import annotations
 
@@ -35,16 +42,23 @@ ENV_PREFIX = "IG_"
 
 _FIELDS = {
     "state_root": (str, ""),
+    "subject_root": (str, ""),
     "prompts_dir": (str, ""),
     "key_dir": (str, ""),
     "proxy_url": (str, ""),
+    "executor": (str, ""),
+    "executor_timeout_s": (int, 120),
     "llm_command": (str, ""),
     "llm_model": (str, ""),
     "org_gap_ticks": (int, 5),
+    "org_cooldown_min": (int, 30),
+    "tick_minutes": (int, 10),
     "queue_cap": (int, 50),
     "lead_limit": (int, 3),
     "cold_start_ticks": (int, 50),
     "frozen_review_every": (int, 20),
+    "rotate_keep_tail": (int, 2000),
+    "rotate_max_bytes": (int, 1048576),
     # repo_root 也走同一张表：测试与嵌入使用都会显式指定它（默认＝本次安装位置）
     "repo_root": (str, str(REPO_ROOT)),
 }
@@ -57,16 +71,23 @@ class Settings:
     """解析后的配置（全部字段都有默认值 → 空仓直接可跑）。"""
 
     state_root: str = ""
+    subject_root: str = ""
     prompts_dir: str = ""
     key_dir: str = ""
     proxy_url: str = ""
+    executor: str = ""
+    executor_timeout_s: int = 120
     llm_command: str = ""
     llm_model: str = ""
     org_gap_ticks: int = 5
+    org_cooldown_min: int = 30
+    tick_minutes: int = 10
     queue_cap: int = 50
     lead_limit: int = 3
     cold_start_ticks: int = 50
     frozen_review_every: int = 20
+    rotate_keep_tail: int = 2000
+    rotate_max_bytes: int = 1048576
     repo_root: str = ""
     sources: list = field(default_factory=list)   # 记录每个字段来自哪里（可审计）
 
@@ -83,6 +104,18 @@ class Settings:
             p = Path(self.prompts_dir).expanduser()
             return (self.repo_path / p).resolve() if not p.is_absolute() else p.resolve()
         return (self.repo_path / "prompts").resolve()
+
+    def subject_path(self) -> Path:
+        """生长主体根：显式配置优先，缺省＝仓库同级目录（默认规则见 `core/paths.py`）。"""
+        from .paths import default_subject_root
+        if self.subject_root:
+            p = Path(self.subject_root).expanduser()
+            return (self.repo_path / p).resolve() if not p.is_absolute() else p.resolve()
+        return default_subject_root(self.repo_path)
+
+    def executor_command(self) -> str:
+        """执行者命令：新字段优先，旧字段 `llm_command` 作兼容回退（空＝机械拍）。"""
+        return (self.executor or self.llm_command or "").strip()
 
     def as_dict(self) -> dict:
         return {k: getattr(self, k) for k in _FIELDS}

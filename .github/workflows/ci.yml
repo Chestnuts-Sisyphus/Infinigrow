@@ -10,11 +10,14 @@ permissions:
 
 jobs:
   test:
-    name: py${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} / py${{ matrix.python-version }}
+    # T9/G11：引擎实际跑在 Windows 上，CI 就必须在 Windows 上跑一遍。
+    # 只测 Linux 的「跨平台」，是把「没测过的平台」当成了「能用的平台」。
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
         python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v5
@@ -51,6 +54,7 @@ jobs:
       - name: Cold start — 空仓零 token 跑三拍
         env:
           IG_STATE_ROOT: ${{ runner.temp }}/infinigrow-state
+          IG_SUBJECT_ROOT: ${{ runner.temp }}/infinigrow-subject
         run: |
           python -m infinigrow dry-run
           python -m infinigrow tick --tick 1 --probe
@@ -58,23 +62,15 @@ jobs:
           python -m infinigrow tick
           python -m infinigrow gardener
           python -m infinigrow org-check --tick 9 || true
+          python -m infinigrow org-status
 
+      # 产物不得含绝对路径：用仓库自带的跨平台工具（原先那段 bash heredoc
+      # 在 windows runner 上跑不了——同一个检查拆成三份脚本，本身就是漂移源）。
       - name: Cold start — 产物不得含绝对路径
         env:
           IG_STATE_ROOT: ${{ runner.temp }}/infinigrow-state
-        run: |
-          python - <<'PY'
-          # 真检查：上一拍产出的状态目录里，**任何一个文件**都不许出现绝对路径。
-          # （这一步曾经只是「再跑一遍测试」，名字比内容大；改成真的扫产物。）
-          import os, pathlib, re, sys
-          root = pathlib.Path(os.environ["IG_STATE_ROOT"])
-          pat = re.compile(r"[A-Za-z]:[\\/]|/(?:home|Users|mnt|opt)/")
-          files = [p for p in root.rglob("*") if p.is_file()]
-          bad = [str(p) for p in files
-                 if pat.search(p.read_text(encoding="utf-8", errors="replace"))]
-          print("检查文件数：%d" % len(files))
-          for p in files:
-              print("  -", p.relative_to(root))
-          print("绝对路径命中：%s" % (bad or "无"))
-          sys.exit(1 if bad else 0)
-          PY
+        run: python tools/check_no_abs_paths.py "$IG_STATE_ROOT"
+
+      # 一键件与计划任务脚本也要在 CI 里被解析一遍（windows runner 上有 PowerShell）
+      - name: 一键件语法（批处理/PowerShell 解析）
+        run: python -m pytest -q tests/test_scheduler_artifacts.py

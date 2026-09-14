@@ -77,12 +77,28 @@ class SproutQueue:
                 out.append(s)
         return out
 
+    @staticmethod
+    def order_key(sprout: Sprout) -> tuple:
+        """取题顺序键＝**最久没被碰过的优先**；平局按出生拍、再按字典序（全可复现）。
+
+        ⚠ 这里踩过一个真坑（T12 现场演练抓到的）：原先直接按 `id` 字典序取题，而芽 ID
+        带**芽源前缀**（`sp`＝差异、`cap`＝成熟链封顶、`lib`＝能力库未用），
+        于是 `cap*` 会**永远插在** `sp*` 前面——连跑 12 拍，取到的全是封顶芽，
+        主芽源（差异）被饿死。**那是排序偏置，不是纪律**。
+
+        现在的口径与提示词里写的一致：「同域冷却 ＋ 最久未碰优先（平局决胜按字典序）」
+        —— 代码与提示词不再各说各话。
+        """
+        touched = (sprout.last_lead_tick if sprout.last_lead_tick is not None
+                   else sprout.created_tick)
+        return (touched, sprout.created_tick, sprout.id)
+
     def take_topic(self, tick: int, rng_seed: Optional[int] = None) -> Optional[Sprout]:
         """取本拍要做的芽。
 
         冷启动期（前 `cold_start_ticks` 拍）随机化＝避免「排序偏好」把早期样本压偏；
-        之后走**字典序**（同一输入永远同一选择，可复查、可复现）。
-        随机用 `random.Random(seed)` 且 seed 默认取拍号 → **可复现**（CI 里也能跑）。
+        之后就按 `order_key`（最久未碰 → 出生拍 → 字典序）——同一输入永远同一选择，
+        可复查、可复现。随机用 `random.Random(seed)` 且 seed 默认取拍号（CI 里也能跑）。
         """
         pool = self.eligible(tick)
         if not pool:
@@ -91,8 +107,8 @@ class SproutQueue:
             # 这里要的是**可复现的确定性伪随机**（同拍号同选择，CI 可复跑），
             # 不是密码学随机：冷启动随机化只为打散早期排序偏好，不涉及任何安全用途。
             rng = random.Random(tick if rng_seed is None else rng_seed)  # noqa: S311
-            return rng.choice(sorted(pool, key=lambda s: s.id))
-        return sorted(pool, key=lambda s: s.id)[0]
+            return rng.choice(sorted(pool, key=self.order_key))
+        return sorted(pool, key=self.order_key)[0]
 
     def mark_lead(self, sprout: Sprout, tick: int) -> None:
         sprout.leads += 1

@@ -1,15 +1,31 @@
 # -*- coding: utf-8 -*-
 """拍循环：一拍 = 取题 → 动手 → 对账 → 生芽 → 记账（＋心跳）。
 
-三条 v1 现场换来的纪律，在 v2 里是**结构保证**而不是注释约定：
+一拍的**顺序**是机制的一部分（顺序错了，「对账」就成了自说自话）：
+
+```
+    1  组织会话（可选：从 B猜/留痕/W回 里找语义差异、写规划预测）   ← 需要执行者通道
+    2  定 B猜（默认「不变」（主体+自身状态）；组织会话的规划值覆盖它）
+    3  取题（从芽队列按纪律取一根）
+    4  动手（执行者：提示词经 stdin 进、stdout 出；不给执行者＝机械拍）
+    5  W回（**动手之后**再读现实一次）
+    6  对账 → 差异四类 → 域饱和闸 → 生芽
+    7  记账：差异账/兑现账/成熟链/执行者账/域状态 ＋ 对账报告 ＋ 心跳
+```
+
+第 5 步在动手**之后**，这是「行动」边能被对账的前提：动手前读的现实证明不了动手的效果。
+
+四条从 v1 现场换来的纪律，在 v2 里是**结构保证**而不是注释约定：
 
 1. **执行会话不自产芽**：本模块**没有任何**「登记新芽候选」的入口；芽只从
-   `sprout_sources`（差异／封顶／未用）来，而这三源全部读账本。想加自造芽，
+   `sprout_sources`（差异／封顶／未用）与**组织会话**来，两者都读账本。想加自造芽，
    得先改这个模块——那就不是「顺手」能发生的事了。
 2. **报告文件名带拍号 + 会话互斥**：v1 出过「同秒覆盖丢报告」「两个会话同时跑把
-   成熟链连加两级」。这里：报告名 `reconcile-<拍号>.md`（同拍重的写＝同一个文件，
-   不会互相盖），并用 `locks/` 下的独占锁串行化；拿不到锁＝本拍跳过（幂等，不报错）。
+   成熟链连加两级」。这里：报告名 `reconcile-<拍号>.md`，`locks/` 独占锁串行化，
+   拿不到锁＝本拍跳过（幂等，不报错）。
 3. **成熟链同拍最多 +1**：步进函数显式写死 `+1` 上限，并把「单拍跳到顶」当异常拒绝。
+4. **机械拍零外部调用**：不给执行者时不加载执行者模块、不起任何子进程
+   （`tests/test_coldstart.py::test_cold_start_zero_token` 守着这条）。
 """
 from __future__ import annotations
 
@@ -22,19 +38,32 @@ from pathlib import Path
 from typing import Callable, Optional, Sequence
 
 from ..core.config import Settings, load_settings
-from ..core.encoding import harden_stdio
+from ..core.encoding import harden_stdio, read_text
 from ..core.paths import StateLayout, guard, resolve_state
-from ..ledger.store import LedgerError, append_jsonl, read_jsonl, write_work_file
+from ..ledger.store import (LedgerError, append_jsonl, create_exclusive, read_jsonl,
+                            write_work_file)
 from . import sprout_sources
+from . import subject as subject_mod
+from .domain_saturation import DomainState, value_at_freeze
 from .model import (Diff, DiffKind, MATURITY_CAP, Observation, OutcomeRecord,
                     Prediction, Sprout)
 from .org_trigger import should_run_org_session
-from .reconcile import diff_summary, reconcile
+from .reconcile import diff_summary, reconcile, redemption_report
 from .sprout_queue import SproutQueue
 
 TICK_STATUS_MARK = "consecutive_failures"
 LOCK_STALE_SECONDS = 900          # 15 分钟＝一拍超时上限量级；超过即视为死锁可清
 ORG_DUE_FILE = "org-due.json"     # 组织段到期提示（工作文件，每拍覆写）
+TICK_PROMPT_FILE = "tick.md"      # 执行会话提示词（机制正本的一部分，**真被发出去**）
+PROMPT_INPUT_MAX_CHARS = 6000     # 题面+预测块的规模上限（提示词要有界）
+
+#: 差异来源标记（账本里区分机械对账与组织会话）
+SOURCE_MECHANICAL = "mechanical"
+
+# 用途标签（与 engine/executor.py 的常量同值；此处**不导入**那个模块，
+# 保持「机械拍连执行者模块都不加载」这条结构性质）
+KIND_TICK = "tick"
+KIND_ORG = "org-session"
 
 
 class TickHeartbeatError(RuntimeError):
@@ -50,10 +79,16 @@ class TickResult:
     skipped: bool = False
     topic_sprout: Optional[str] = None
     diffs: list[Diff] = field(default_factory=list)
-    new_sprouts: list[str] = field(default_factory=list)
     outcomes: list[OutcomeRecord] = field(default_factory=list)
+    new_sprouts: list[str] = field(default_factory=list)
     org_decision: Optional[dict] = None      # 本拍算出的「该不该跑组织会话」
     notes: list[str] = field(default_factory=list)
+    # v2.1（运转线）：主体 / 执行者 / 组织会话 / 域饱和 / 兑现 的读数落点
+    subject: dict = field(default_factory=dict)
+    executor: Optional[dict] = None
+    org: Optional[dict] = None
+    domain: dict = field(default_factory=dict)
+    predictions: dict = field(default_factory=dict)
 
     @property
     def diff_summary(self) -> dict:
@@ -64,9 +99,11 @@ class TickResult:
             "tick": self.tick, "rc": self.rc, "skipped": self.skipped,
             "topic_sprout": self.topic_sprout,
             "diffs": self.diff_summary,
-            "new_sprouts": self.new_sprouts,
             "outcomes": [o.as_record() for o in self.outcomes],
+            "new_sprouts": self.new_sprouts,
             "org_decision": self.org_decision,
+            "subject": self.subject, "executor": self.executor,
+            "org": self.org, "domain": self.domain, "predictions": self.predictions,
             "notes": self.notes,
         }
 
@@ -74,30 +111,42 @@ class TickResult:
 # --------------------------------------------------------------------- 心跳
 def read_tick_status(layout: StateLayout) -> dict:
     if not layout.tick_status.is_file():
-        return {"consecutive_failures": 0, "last_rc": 0, "last_time": "", "last_note": "",
+        return {"consecutive_failures": 0, "consecutive_executor_failures": 0,
+                "last_rc": 0, "last_executor_rc": None, "last_time": "", "last_note": "",
                 "tick": 0}
     try:
         return json.loads(layout.tick_status.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         # 心跳文件坏掉＝园丁的断流判据失效；不静默吞，返回带标记的兜底并让调用方看见
-        return {"consecutive_failures": 0, "last_rc": 0, "last_time": "", "tick": 0,
+        return {"consecutive_failures": 0, "consecutive_executor_failures": 0,
+                "last_rc": 0, "last_executor_rc": None, "last_time": "", "tick": 0,
                 "last_note": "心跳文件不可解析：%r" % exc}
 
 
-def record_tick_result(layout: StateLayout, rc: int, tick: int, note: str = "") -> int:
+def record_tick_result(layout: StateLayout, rc: int, tick: int, note: str = "",
+                       executor_rc: Optional[int] = None) -> int:
     """落心跳：rc==0 归零，否则连续失败 +1。写不进去抛 `TickHeartbeatError`。
 
     心跳里记**引擎身份**（版本 ＋ 提交号）：定规是「引擎必须是最新版才准运转」，
     那么每一拍都必须能回答「这是哪个版本的引擎跑的」——否则升级之后，
     历史读数属于哪一版就说不清了（账本只记 tick 数字是不够的）。
+
+    另记**执行者连续失败**（与拍失败分开计）：机械拍跑得成、执行者起不来，
+    这是两种病；混在一个计数里，园丁的告警就指不出是哪儿坏了。
+    本拍没调执行者（`executor_rc=None`）时**保留原计数**（没调用不算失败，也不算成功）。
     """
     from ..core.build_info import engine_identity
     status = read_tick_status(layout)
     failures = 0 if rc == 0 else int(status.get("consecutive_failures", 0)) + 1
+    executor_failures = int(status.get("consecutive_executor_failures", 0) or 0)
+    if executor_rc is not None:
+        executor_failures = 0 if executor_rc == 0 else executor_failures + 1
     ident = engine_identity()
     payload = {
         TICK_STATUS_MARK: failures,
+        "consecutive_executor_failures": executor_failures,
         "last_rc": rc,
+        "last_executor_rc": executor_rc,
         "last_time": _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "last_note": note,
         "tick": tick,
@@ -115,7 +164,11 @@ def record_tick_result(layout: StateLayout, rc: int, tick: int, note: str = "") 
 
 # --------------------------------------------------------------------- 互斥
 def acquire_lock(layout: StateLayout, tick: int) -> Optional[Path]:
-    """独占锁：拿不到返回 None（本拍跳过）。陈旧锁（超过 `LOCK_STALE_SECONDS`）自动清。"""
+    """独占锁：拿不到返回 None（本拍跳过）。陈旧锁（超过 `LOCK_STALE_SECONDS`）自动清。
+
+    创建动作走 `ledger/store.create_exclusive`（原子独占创建是**写盘能力**的一种，
+    收在 store 层里 —— cli/engine 里不再各自拼系统调用，越界守卫就只可能漏在 store 里）。
+    """
     guard(layout.locks_dir, layout.root)
     layout.locks_dir.mkdir(parents=True, exist_ok=True)
     lock = layout.locks_dir / "tick.lock"
@@ -129,12 +182,11 @@ def acquire_lock(layout: StateLayout, tick: int) -> Optional[Path]:
         else:
             return None
     try:
-        fd = os.open(str(lock), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-    except FileExistsError:
-        return None                              # 竞态：另一个会话刚拿到 → 本拍跳过
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write("tick=%d pid=%d\n" % (tick, os.getpid()))
-    return lock
+        created = create_exclusive(lock, "tick=%d pid=%d\n" % (tick, os.getpid()),
+                                   layout.root)
+    except LedgerError:
+        return None
+    return lock if created else None              # 竞态：另一个会话刚拿到 → 本拍跳过
 
 
 def release_lock(lock: Optional[Path]) -> None:
@@ -147,7 +199,7 @@ def release_lock(lock: Optional[Path]) -> None:
 
 # --------------------------------------------------------------------- 机械侧
 def observe_state(layout: StateLayout) -> list[Observation]:
-    """机械观测：把状态目录里的**可查事实**读成 W回（不执行任何命令）。"""
+    """机械观测（引擎自身状态）：把状态目录里的**可查事实**读成 W回（不起子进程）。"""
     objects = [layout.tick_status, layout.diff_ledger, layout.outcome_ledger,
                layout.maturity_chain, layout.sprouts, layout.library]
     out = []
@@ -201,14 +253,121 @@ def record_maturity(layout: StateLayout, obj: str, tick: int,
     return new_step, capped_now
 
 
-def evaluate_outcome(sprout: Sprout, diffs: Sequence[Diff], tick: int) -> OutcomeRecord:
-    """领做后的兑现判定（机械）：该对象该维度的差异真消＝兑现；仍错＝打脸。"""
+def evaluate_outcome(sprout: Sprout, diffs: Sequence[Diff], tick: int,
+                     sampled: bool = True) -> OutcomeRecord:
+    """领做后的兑现判定（机械）：该对象该维度的差异真消＝兑现；仍错＝打脸。
+
+    `sampled`＝这一拍**真有东西动过手**（执行者跑过）。没有执行者的一拍里
+    兑现账会写 `sample=false`：机械拍不做语义判断也不产出真实生长，
+    把它的「打脸」当业绩读，就是把仪表盘当引擎（G6 的病灶）。
+    """
     mine = [d for d in diffs if d.key == sprout.key]
     redeemed = any(d.kind == DiffKind.OK for d in mine)
     actual = sprout.predicted_edge if redeemed else None
     return OutcomeRecord(sprout_id=sprout.id, predicted_edge=sprout.predicted_edge,
                          actual_edge=actual, redeemed=redeemed,
-                         pointer=sprout.pointer, tick=tick)
+                         pointer=sprout.pointer, tick=tick, sampled=sampled)
+
+
+# --------------------------------------------------------------------- 提示词
+def build_tick_prompt(settings: Settings, layout: StateLayout, tick: int,
+                      sprout: Optional[Sprout], predictions: Sequence[Prediction],
+                      subject_root: Path) -> str:
+    """执行会话提示词＝机制提示词原文 ＋ 本拍题面 ＋ 本拍 B猜（承诺）。
+
+    提示词文件**真被发出去**（不是只写在文档里给静态规则检查）：机制改了、提示词没改，
+    执行者那边立刻就能看出来——这是 R2 同源校验之外的第二道现实约束。
+
+    把 B猜 给执行者，是这条通道的关键：B猜是**事前承诺**，执行者的活是让现实满足它，
+    兑现账判的正是这一条。不给它，任何真动手的一拍都会被判成「预测内错」——
+    那说明的不是「干错了」，而是「没预测」。
+    """
+    prompt_path = settings.prompts_path() / TICK_PROMPT_FILE
+    if not prompt_path.is_file():
+        raise FileNotFoundError("执行会话提示词缺失：%s" % TICK_PROMPT_FILE)
+    base = read_text(prompt_path)
+    lines = [
+        "",
+        "---",
+        "",
+        "## 本拍题面（机器填，勿改）",
+        "",
+        "- 拍号：%d" % tick,
+        "- 状态根名：%s" % layout.root.name,
+        "- 主体根名：%s" % subject_mod.subject_leaf(subject_root),
+        "- 主体对象命名：`%s<相对路径>`" % subject_mod.SUBJECT_PREFIX,
+        "",
+    ]
+    if sprout is not None:
+        lines += [
+            "### 本拍要消解的差异（领到的芽）",
+            "",
+            "- 芽 ID：`%s`" % sprout.id,
+            "- 芽源：%s" % sprout.origin.value,
+            "- 对象：%s｜维度：%s" % (sprout.obj, sprout.dimension),
+            "- 差异指针：%s" % (sprout.pointer or "（缺）"),
+            "- 增益预测（事前选的边）：%s"
+            % (sprout.predicted_edge.value if sprout.predicted_edge else "（无）"),
+            "",
+        ]
+    else:
+        lines += ["### 本拍没有芽可领", "",
+                  "队列里没有可领的芽。**不要**为了有活干而自己造题：",
+                  "芽是预测差异的产物（零差异零芽）。本拍可以只留痕说明「无事可做」。", ""]
+    lines += ["### 本拍 B猜（引擎已记录；你要让现实满足它们）", ""]
+    if predictions:
+        lines += ["- `%s`｜%s｜预期=%s｜指针=%s"
+                  % (p.obj, p.dimension, p.expected, p.evidence or "（缺）")
+                  for p in predictions]
+    else:
+        lines += ["（本拍没有预测）"]
+    lines += [
+        "",
+        "### 输出与留痕",
+        "",
+        "- 你的 stdout 会**原样**落进 `state/traces/`（这一拍的留痕），stderr 同路。",
+        "- 要报告用量就单独打一行：`IG_USAGE {\"input_tokens\": 0, \"cost_usd\": 0}`",
+        "  （不写＝账本里记 null：引擎不拿输出长度冒充 token 数）。",
+        "- 返回值非 0＝这一拍记为**执行者失败**（可见、进告警计数），但不会因此丢账。",
+    ]
+    text = base + "\n".join(lines)
+    if len(text) > PROMPT_INPUT_MAX_CHARS + len(base):
+        text = text[:PROMPT_INPUT_MAX_CHARS + len(base)] + "\n（题面过长，已截断）\n"
+    return text
+
+
+def _make_runner(settings: Settings, layout: StateLayout, subject_root: Path, tick: int,
+                 kind: str, executor_cmd: str, callable_fn):
+    """造执行者 runner。**延迟导入执行者模块**：机械拍连它都不加载。
+
+    工作目录刻意是**仓库根**（不是主体根）：命令照你在仓库里的写法解析
+    （`python tools/xxx.py` 这类相对路径要能直接用），而「该动手的地方」由
+    `IG_SUBJECT_ROOT` 环境变量给执行者——两者分工明确，不靠猜。
+    """
+    command = (executor_cmd or "").strip()
+    if not command and callable_fn is None:
+        return None
+    from . import executor as exec_mod
+    return exec_mod.make_runner(
+        command=command, callable_fn=callable_fn, tick=tick, kind=kind,
+        cwd=settings.repo_path, state_root=layout.root, subject_root=subject_root,
+        timeout_s=settings.executor_timeout_s, model=settings.llm_model)
+
+
+# --------------------------------------------------------------------- 报告
+def _redemption_lines(layout: StateLayout) -> list[str]:
+    """兑现率段（**诚实呈现**：无样本就说无样本，不说 0，不说「差」）。"""
+    report = redemption_report(read_jsonl(layout.outcome_ledger))
+    lines = ["## 兑现率（现算，不存缓存）", "",
+             "- 判定：**%s**（样本 %d 条／兑现账共 %d 行）"
+             % (report["判定"], report["样本数"], report["总行数"]),
+             "- 说明：%s" % report["说明"]]
+    if report.get("兑现率") is not None:
+        lines.append("- 兑现率：%.2f" % report["兑现率"])
+        for bucket, stat in report["分桶"].items():
+            lines.append("  - 桶 %s：n=%d 兑现率=%.2f"
+                         % (bucket, stat["n"], stat["兑现率"]))
+    return lines
 
 
 def write_reconcile_report(layout: StateLayout, result: TickResult) -> Path:
@@ -219,21 +378,55 @@ def write_reconcile_report(layout: StateLayout, result: TickResult) -> Path:
     lines = ["# 对账报告 · 拍 %d" % result.tick, "",
              "- 引擎：%s" % engine_label(),
              "- 本拍取题：%s" % (result.topic_sprout or "（无芽可领）"),
+             "- 本拍 B猜：%s" % json.dumps(result.predictions, ensure_ascii=False),
+             "- 执行者：%s" % (result.executor["label"] if result.executor
+                             else "（无：机械拍，零 token）"),
+             "- 组织会话：%s" % ((result.org or {}).get("summary") or "（未跑）"),
+             "- 主体：%s" % json.dumps(result.subject, ensure_ascii=False),
+             "- 域饱和：%s" % json.dumps(result.domain, ensure_ascii=False),
              "- 差异总览：%s" % json.dumps(result.diff_summary, ensure_ascii=False), ""]
-    for d in result.diffs:
-        lines.append("- `%s` | %s | %s | 预期=%s | 实际=%s | 指针=%s"
-                     % (d.kind.value, d.obj, d.dimension, d.expected, d.actual,
-                        d.evidence or "（缺）"))
+    if result.diffs:
+        lines += ["## 差异点（机械对账）", ""]
+        for d in result.diffs:
+            lines.append("- `%s` | %s | %s | 预期=%s | 实际=%s | 指针=%s"
+                         % (d.kind.value, d.obj, d.dimension, d.expected, d.actual,
+                            d.evidence or "（缺）"))
+        lines.append("")
+    if result.org and result.org.get("findings"):
+        lines += ["## 组织会话发现（语义判断，进账可被打脸）", ""]
+        lines += ["- %s" % f for f in result.org["findings"]] + [""]
     if result.new_sprouts:
-        lines += ["", "## 本拍新生芽", ""] + ["- `%s`" % s for s in result.new_sprouts]
+        lines += ["## 本拍新生芽", ""] + ["- `%s`" % s for s in result.new_sprouts] + [""]
+    lines += _redemption_lines(layout)
     if result.outcomes:
-        lines += ["", "## 兑现判定", ""] + [
-            "- `%s` 预测边=%s 实际边=%s → %s"
+        lines += ["", "## 兑现判定（本拍领过的芽）", ""] + [
+            "- `%s` 预测边=%s 实际边=%s → %s%s"
             % (o.sprout_id, o.predicted_edge.value if o.predicted_edge else "无",
                o.actual_edge.value if o.actual_edge else "无",
-               "兑现" if o.redeemed else "打脸") for o in result.outcomes]
+               "兑现" if o.redeemed else "打脸",
+               "" if o.sampled else "（无样本：本拍没有执行者动手）")
+            for o in result.outcomes]
     write_work_file(path, "\n".join(lines), layout.root,
                     require_markers=("# 对账报告",))
+    return path
+
+
+def write_org_due(layout: StateLayout, result: TickResult, decision) -> Path:
+    """把「组织会话是否到期」落成可人读、可机读的一个小件（每拍覆写，工作文件）。"""
+    path = layout.root / ORG_DUE_FILE
+    guard(path, layout.root)
+    org = result.org or {}
+    payload = {
+        "tick": result.tick,
+        "should_run_org": bool(decision.should_run),
+        "reason": decision.reason,
+        "executor": bool(result.executor is not None),
+        "ran_this_tick": bool(org.get("ran")),
+        "org_summary": org.get("summary") or "",
+        "criteria": decision.criteria,
+    }
+    write_work_file(path, json.dumps(payload, ensure_ascii=False, indent=2),
+                    layout.root, require_markers=("should_run_org",))
     return path
 
 
@@ -244,13 +437,18 @@ def run_tick(settings: Optional[Settings] = None,
              predictions: Optional[Sequence[Prediction]] = None,
              observations: Optional[Sequence[Observation]] = None,
              llm: Optional[Callable[[str], str]] = None,
-             probe: bool = False) -> TickResult:
+             probe: bool = False,
+             executor: Optional[str] = None,
+             org_session: bool = True) -> TickResult:
     """跑一拍。
 
-    `llm=None`（默认）＝**机械拍**：零 token，只做机械观测与对账——冷启动验收、
-    CI、以及「只想看机制转不转」时都用它。给了 `llm`（可调用：提示词→输出）才烧认知。
+    - `executor=None` 且 `llm=None`（默认）＝**机械拍**：零 token、零凭据、不起子进程，
+      只做机械观测与对账——冷启动验收、CI、以及「只想看机制转不转」时都用它。
+    - `executor="命令"`（或配置 `IG_EXECUTOR`）＝**接上执行者**：题面与 B猜经 stdin 进、
+      stdout 出，输出落留痕、调用落账（成功／失败／超时／空输出都是可见事实）。
+    - `llm=可调用`＝进程内执行者（嵌入与测试用），与命令行走同一条记账路径。
 
-    `probe=True` 时额外把三个芽源的判定明细打进 notes（排查用，不改行为）。
+    `probe=True` 时额外把芽源判定明细打进 notes（排查用，不改行为）。
     """
     harden_stdio()
     cfg = settings or load_settings(state_root=state_root)
@@ -264,38 +462,102 @@ def run_tick(settings: Optional[Settings] = None,
         return TickResult(tick=this_tick, rc=0, skipped=True,
                           notes=["另一个会话在跑：本拍跳过（幂等，不覆盖他人产物）"])
     try:
-        return _run_tick_locked(cfg, layout, this_tick, predictions, observations, llm, probe)
+        return _run_tick_locked(cfg, layout, this_tick, predictions, observations, llm,
+                                probe, executor, org_session)
     finally:
         release_lock(lock)
 
 
 def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
-                     predictions, observations, llm, probe: bool) -> TickResult:
+                     predictions, observations, llm, probe: bool,
+                     executor_cmd: Optional[str], org_enabled: bool) -> TickResult:
     result = TickResult(tick=tick)
-    queue = SproutQueue(cap=cfg.queue_cap, lead_limit=cfg.lead_limit,
-                        cold_start_ticks=cfg.cold_start_ticks)
+    subject_root = cfg.subject_path()
     queue = SproutQueue.load(layout.sprouts, layout.frozen_sprouts,
                              cap=cfg.queue_cap, lead_limit=cfg.lead_limit,
                              cold_start_ticks=cfg.cold_start_ticks)
+    domains = DomainState.load(layout.domains)
+    command = (executor_cmd if executor_cmd is not None else cfg.executor_command())
 
+    # 1) 组织会话（可选）：从 B猜/留痕/W回 里找语义差异、写规划预测。
+    #    生芽权在这一层——但**只从差异生**（零差异零芽），执行会话依旧不能自产芽。
+    org_run = None
+    if org_enabled:
+        runner_org = _make_runner(cfg, layout, subject_root, tick, KIND_ORG, command, llm)
+        if runner_org is not None:
+            decision_pre = should_run_org_session(layout, tick, gap=cfg.org_gap_ticks,
+                                                  cooldown_min=cfg.org_cooldown_min)
+            if decision_pre.should_run:
+                from . import org_session as org_mod
+                org_run = org_mod.run_org_session(
+                    settings=cfg, layout=layout, tick=tick, subject_root=subject_root,
+                    queue=queue, domains=domains, runner=runner_org)
+                result.org = {"ran": True, "summary": org_run.summary(),
+                              "findings": ["%s | %s | %s | 指针=%s"
+                                           % (f.kind.value, f.obj, f.dimension,
+                                              f.pointer or "（缺）")
+                                           for f in org_run.findings],
+                              "sprouts": org_run.sprouts,
+                              "predictions": len(org_run.predictions),
+                              "parse_error": org_run.parse_error,
+                              "trace": org_run.trace.name if org_run.trace else ""}
+                result.notes.append("组织会话：%s" % org_run.summary())
+
+    # 2) B猜：默认「不变」（主体 ＋ 自身状态）＋ 组织会话的规划值覆盖
+    if predictions is not None:
+        preds = list(predictions)
+        planned = 0
+    else:
+        defaults = (predict_unchanged(layout, tick)
+                    + subject_mod.predict_subject_unchanged(subject_root, tick))
+        planned = len(org_run.predictions) if org_run else 0
+        preds = (subject_mod.merge_predictions(defaults, org_run.predictions)
+                 if org_run else defaults)
+    result.predictions = {"total": len(preds), "planned": planned}
+
+    # 3) 取题
     topic = queue.take_topic(tick)
     result.topic_sprout = topic.id if topic else None
     if topic:
         queue.mark_lead(topic, tick)
 
-    # 干活（LLM 段可选：不给 llm 就是机械拍，零 token）
-    if llm is not None and topic is not None:
-        prompt = _topic_prompt(topic)
-        result.notes.append("LLM 段完成：%s" % ("有输出" if llm(prompt) else "空输出"))
+    # 4) 动手（执行者通道；不给执行者＝机械拍，不烧认知）
+    runner = _make_runner(cfg, layout, subject_root, tick, KIND_TICK, command, llm)
+    call = None
+    if runner is not None and topic is not None:
+        from . import executor as exec_mod
+        try:
+            prompt = build_tick_prompt(cfg, layout, tick, topic, preds, subject_root)
+        except FileNotFoundError as exc:
+            result.notes.append("提示词缺失，本拍未动手：%s" % exc)
+        else:
+            call = runner(prompt)
+            exec_mod.record_executor_run(layout, call)
+            exec_mod.write_trace(layout, call, prompt, subject_root)
+            result.executor = {"label": call.label(), "rc": call.rc, "ok": call.ok,
+                               "timed_out": call.timed_out, "usage": call.usage,
+                               "trace": "%s-%05d.md" % (call.kind, call.tick)}
+            result.notes.append("执行者：%s" % call.label())
+    elif runner is not None:
+        result.notes.append("无芽可领：本拍未调执行者（不硬造活干）")
 
-    preds = list(predictions) if predictions is not None else predict_unchanged(layout, tick)
-    obs = list(observations) if observations is not None else observe_state(layout)
+    # 5) W回：**动手之后**再读现实（动手前读的现实证明不了动手的效果）
+    if observations is not None:
+        obs = list(observations)
+    else:
+        obs = observe_state(layout) + subject_mod.observe_subject(subject_root)
     diffs = reconcile(preds, obs, tick)
-    result.diffs = diffs
 
-    # 记账：差异账（追加型，all rows，包括「预测内对」——被验证也是事实）
+    # 6) 差异 → 域饱和闸 → 生芽；差异**全部入账**（被吸收的也记，事实不许隐藏）
+    gate = domains.gate(diffs, tick)
+    absorbed_keys = {(d.obj, d.dimension, d.actual) for d in gate.absorbed}
     for d in diffs:
-        append_jsonl(layout.diff_ledger, d.as_record(), layout.root)
+        record = d.as_record()
+        record["source"] = SOURCE_MECHANICAL
+        if (d.obj, d.dimension, d.actual) in absorbed_keys:
+            record["absorbed_by_domain"] = True
+        append_jsonl(layout.diff_ledger, record, layout.root)
+    result.diffs = diffs
 
     # 成熟链：本拍被证实（预测内对）的对象 +1 步（同拍最多 +1）
     steps = maturity_of(layout)
@@ -306,14 +568,11 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
             if hit_cap:
                 capped_now.append(d.obj)
 
-    # 芽源①：差异对账（N 差异 N 芽；无指针不成芽）
-    new = sprout_sources.from_diffs(diffs, tick)
-    # 芽源②：成熟链封顶（本拍恰好到顶的对象）
+    new = sprout_sources.from_diffs(gate.kept, tick)
     known = [s.obj for s in queue.sprouts]
     new += sprout_sources.from_maturity_cap(
         [{"obj": o, "step": MATURITY_CAP, "tick": tick} for o in capped_now], tick,
         known_objects=known, start_seq=len(new) + 1)
-    # 芽源③：能力库长期未用（读账本，判据＝具体状态：拍差 ≥ 阈值且本拍留痕未出现）
     liuhen = "\n".join(r.get("note", "") for r in read_jsonl(layout.diff_ledger)[-20:])
     new += sprout_sources.from_unused_library(
         read_jsonl(layout.library), liuhen, tick,
@@ -321,6 +580,13 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
 
     for s in new:
         action, evicted = queue.add(s)
+        if s.origin.value == "差异对账":
+            value = value_at_freeze(gate.kept, s.obj, s.dimension)
+            if value != "":
+                from .domain_saturation import domain_key as _dkey, encode as _dencode
+                domains.claim(s.obj, s.dimension, s.id, value, tick, s.pointer,
+                              absorbed=gate.absorbed_by_key.get(
+                                  _dencode(*_dkey(s.obj, s.dimension)), 0))
         result.new_sprouts.append("%s(%s)" % (s.id, action))
         if probe:
             result.notes.append("芽源=%s 对象=%s 维度=%s 动作=%s"
@@ -328,45 +594,41 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
         if evicted is not None and probe:
             result.notes.append("队列超限 → 冻结：%s" % evicted.id)
 
-    # 兑现判定（本拍领过的芽）
+    # 域占用同步（芽被消解或已不在队列 → 释放该域，允许再立一根）
+    released = domains.sync([s.id for s in queue.sprouts + queue.frozen],
+                            [(d.obj, d.dimension) for d in diffs if d.kind == DiffKind.OK],
+                            tick)
+    result.domain = {"占用": len(domains.claims), "本拍吸收": len(gate.absorbed),
+                     "本拍放行": len(gate.kept), "本拍释放": released}
+    domains.save(layout)
+
+    # 7) 兑现判定（本拍领过的芽）＋ 账
     if topic is not None:
-        outcome = evaluate_outcome(topic, diffs, tick)
+        outcome = evaluate_outcome(topic, diffs, tick, sampled=call is not None)
         append_jsonl(layout.outcome_ledger, outcome.as_record(), layout.root)
         result.outcomes.append(outcome)
 
     queue.save(layout.sprouts, layout.frozen_sprouts, layout.root)
+
+    # 8) 主体快照（只记目录名与相对名，不落绝对路径）
+    snapshot = subject_mod.subject_snapshot(subject_root, tick)
+    result.subject = {k: snapshot[k] for k in ("root_name", "exists", "file_count",
+                                              "total_bytes")}
+    write_work_file(layout.subject_snapshot,
+                    json.dumps(snapshot, ensure_ascii=False, indent=2),
+                    layout.root, require_markers=("root_name",))
+
     report = write_reconcile_report(layout, result)
     result.notes.append("对账报告：%s" % report.name)
 
     # 组织段到期提示：**拍循环自己查判据**，不把「该看语义层了」留给外部调度器。
     # 上一代的 P0 根因之一就是「语义判断段没有调度入口」——诊断产出后没人回灌、就地过期。
-    # 语义：这里只**提示**（写 org-due.json 并进本拍结果），不代跑 LLM 段、也不写尝试账
-    # （尝试账＝「真跑过」，写了会误触 30 分钟冷却闸）。
-    decision = should_run_org_session(layout, tick, gap=cfg.org_gap_ticks)
+    decision = should_run_org_session(layout, tick, gap=cfg.org_gap_ticks,
+                                      cooldown_min=cfg.org_cooldown_min)
     result.org_decision = decision.as_dict()
     write_org_due(layout, result, decision)
 
     result.rc = 0
-    record_tick_result(layout, result.rc, tick)
+    record_tick_result(layout, result.rc, tick,
+                       executor_rc=(call.rc if call is not None else None))
     return result
-
-
-def write_org_due(layout: StateLayout, result: TickResult, decision) -> Path:
-    """把「组织会话是否到期」落成可人读、可机读的一个小件（每拍覆写，工作文件）。"""
-    path = layout.root / ORG_DUE_FILE
-    guard(path, layout.root)
-    lines = ["{", '  "tick": %d,' % result.tick,
-             '  "should_run_org": %s,' % ("true" if decision.should_run else "false"),
-             '  "reason": %s' % json.dumps(decision.reason, ensure_ascii=False),
-             "}"]
-    write_work_file(path, "\n".join(lines), layout.root,
-                    require_markers=("should_run_org",))
-    return path
-
-
-def _topic_prompt(sprout: Sprout) -> str:
-    """把芽拼成给执行会话的题面（题面里只含**差异本身**，不含「顺便再造根芽」这类指令）。"""
-    return ("本拍题面（来源：%s）\n对象：%s\n维度：%s\n差异指针：%s\n"
-            "要求：动手前先写下你对本对象的预期（B猜），动手后由对账判对错；"
-            "不要登记新芽——芽由对账产出。" % (sprout.origin.value, sprout.obj,
-                                          sprout.dimension, sprout.pointer))

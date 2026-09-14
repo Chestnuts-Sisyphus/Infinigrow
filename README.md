@@ -64,14 +64,44 @@ Design decisions follow from that:
 ```bash
 pip install -e ".[dev]"
 
-infinigrow version              # Infinigrow 2.0.0
-infinigrow dry-run              # show resolved config and paths (writes nothing)
+infinigrow version              # Infinigrow 2.1.0
+infinigrow dry-run              # resolved config, subject root, executor (writes nothing)
 infinigrow tick --probe         # run one tick, zero tokens
 infinigrow tick --json          # machine-readable result
-infinigrow gardener             # mechanical immune system
+infinigrow gardener             # mechanical immune system (locks / liveness / rotation)
 infinigrow scan                 # static rules (paths / sync / secrets / BOM …)
 infinigrow selftest             # rule positive & negative cases
 infinigrow org-check --tick 9   # should the LLM reconciliation pass run now?
+infinigrow org-status           # what happened to the org session's findings?
+infinigrow rotate               # move old ledger lines to state/archive/ (move-only)
+```
+
+### Wiring it to something that acts
+
+By default the engine runs **mechanical ticks** (zero tokens, zero credentials, no network).
+To let it act, hand it an *executor*: any command that reads the prompt on **stdin** and
+writes its answer to **stdout**.
+
+```bash
+infinigrow tick --executor "your-command --flags"     # or IG_EXECUTOR=...
+```
+
+Four failure modes (non-zero exit / timeout / empty output / cannot start) are all recorded
+in `state/executor.jsonl` and counted separately from tick failures. See
+[`docs/running.md`](docs/running.md).
+
+### What it grows (the subject)
+
+The engine needs something to grow: a directory (the "growth subject"), by default a
+**sibling** of the repo — `IG_SUBJECT_ROOT` points anywhere. Objects inside are named
+`主体/<relative path>`, and mechanical observation reads their existence, file count and
+byte sizes. See [`docs/growth-subject.md`](docs/growth-subject.md).
+
+### Running it on a schedule (Windows)
+
+```bat
+tools\run_tick.bat                        :: version gate -> one tick -> gardener
+tools\manage_scheduled_task.bat install   :: every 10 minutes (IG_TICK_MINUTES to change)
 ```
 
 State lives in `./state/` by default and is **gitignored**. Point it anywhere:

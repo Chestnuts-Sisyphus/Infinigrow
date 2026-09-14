@@ -179,10 +179,14 @@ class Sprout:
 
 @dataclass(frozen=True)
 class OutcomeRecord:
-    """兑现账一行：预测边 vs 实际边（兑现/打脸）+ 指针 + 拍号。
+    """兑现账一行：预测边 vs 实际边（兑现/打脸）+ 指针 + 拍号 ＋ **是不是样本**。
 
     兑现率**现算**，不存缓存：按「对象域 × 边类型 × 成熟链步」这个机械锚分桶，
     防「换类名操纵统计」。
+
+    `sampled`（G6 的处方）：**没有执行者动手的一拍不是样本**。机械拍不做语义判断、
+    也不产出真实生长，它的「打脸」只能说明没动手，不能当成兑现率的分母——
+    否则「兑现率 0」会被读成「引擎很差」，而真相是「还没接执行者」。
     """
 
     sprout_id: str
@@ -191,6 +195,7 @@ class OutcomeRecord:
     redeemed: bool
     pointer: str
     tick: int
+    sampled: bool = True
 
     def bucket(self) -> tuple:
         return (self.sprout_id.split("-")[0],
@@ -203,4 +208,5 @@ class OutcomeRecord:
             "predicted_edge": self.predicted_edge.value if self.predicted_edge else None,
             "actual_edge": self.actual_edge.value if self.actual_edge else None,
             "redeemed": self.redeemed, "pointer": self.pointer, "tick": self.tick,
+            "sample": self.sampled,
         }

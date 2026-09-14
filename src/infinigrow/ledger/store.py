@@ -62,6 +62,55 @@ def iter_jsonl_bad_lines(path: Path) -> Iterator[tuple[int, str]]:
             yield no, raw
 
 
+def write_lines(path: Path, lines: Iterable[str], root: Path, header: str = "") -> None:
+    """把若干**原始行**整份写进一个文件（先过 `guard`，再原子替换）。
+
+    给轮转用的：归档件是「账本行的搬运目的地」。搬运不许在调用方那边自己拼写盘动作——
+    那样「路径校验」就只存在于调用方的记忆里。这里把「校验 ＋ 原子写」收在同一条路上，
+    与本模块其它写盘能力同权同检（首次写入前还会解析一遍符号链接，防软链跳出根）。
+    """
+    safe = require_within(path, root)
+    write_work_file(safe, header + "".join(line.rstrip("\n") + "\n" for line in lines),
+                    root, require_markers=())
+
+
+def require_within(path: Path, root: Path) -> Path:
+    """校验并返回**可写的根内路径**：解析后必须仍在根内，否则拒绝（含软链跳出）。
+
+    返回的是解析后的绝对路径——调用方拿它去写，路径校验就不会被后续拼接绕过去。
+    """
+    guard(path, root)
+    try:
+        resolved = Path(path).resolve()
+        base = Path(root).resolve()
+    except OSError as exc:
+        raise PermissionError("路径无法解析，拒绝写：%s（%s）" % (path, exc)) from exc
+    if not (resolved == base or base in resolved.parents):
+        raise PermissionError("拒绝越界写（解析后不在根内）：%s" % resolved)
+    return resolved
+
+
+def create_exclusive(path: Path, text: str, root: Path) -> bool:
+    """**原子独占创建**一个文件：成功 True，已存在 False。
+
+    锁文件不是「内容写盘」而是**互斥原语**：它必须用 `O_CREAT|O_EXCL` 一步创建
+    （「先看有没有、再创建」之间会有竞态窗口，两个会话都能拿到锁）。
+    这种能力放在本模块而不是让调用方自己拼系统调用——否则越界守卫就漏了一处，
+    而「写盘只有一条路」这条纪律也就名存实亡了。
+    """
+    safe = require_within(path, root)
+    safe.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(str(safe), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        return False
+    except OSError as exc:
+        raise LedgerError("独占创建失败：%s（%s）" % (safe, exc)) from exc
+    with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(text)
+    return True
+
+
 def write_work_file(path: Path, text: str, root: Path,
                     require_markers: Iterable[str] = ()) -> None:
     """原子覆写工作文件：先写同目录临时文件，再 `os.replace` 顶替。

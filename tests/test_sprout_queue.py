@@ -71,3 +71,27 @@ def test_summary_counts_by_origin():
     q = SproutQueue(cap=10)
     q.add(_sprout("s1", "A"))
     assert q.summary()["by_origin"] == {"差异对账": 1}
+
+
+def test_ordering_is_not_biased_by_id_prefix():
+    """取题顺序不许被「芽源前缀」支配（T12 现场演练抓到的真坑）。
+
+    判据是**具体状态**：一根**更早出生**的差异芽（`sp*`）与一根**更晚出生**的
+    封顶芽（`cap*`）同时在队列里时，先取到的是更早出生的那根——
+    纯按 ID 字典序取题时 `cap` < `sp`，封顶芽会永远插队，把主芽源（差异）饿死。
+    """
+    q = SproutQueue(cap=50, lead_limit=3, cold_start_ticks=0)
+    earlier = Sprout(id="sp0010-001-subject_growth_md", obj="主体/growth-1.md",
+                     dimension="存在性", pointer="p", origin=SproutOrigin.DIFF,
+                     created_tick=10)
+    later = Sprout(id="cap0011-001-state_json", obj="state.json", dimension="应用面",
+                   pointer="p", origin=SproutOrigin.MATURITY_CAP, created_tick=11)
+    q.add(later)
+    q.add(earlier)
+    assert q.take_topic(tick=12).id == earlier.id         # 更早出生的先做
+
+    q.mark_lead(earlier, 12)                              # 被碰过 → 让位给最久没碰的
+    assert q.take_topic(tick=13).id == later.id
+
+    assert q.order_key(earlier) == q.order_key(earlier)   # 全可复现（不引入随机）
+    assert q.order_key(earlier) != q.order_key(later)

@@ -26,6 +26,24 @@ REPO_ROOT = _MODULE_PATH.parents[3]
 
 ENV_STATE_ROOT = "IG_STATE_ROOT"
 ENV_CONFIG = "IG_CONFIG"
+ENV_SUBJECT_ROOT = "IG_SUBJECT_ROOT"
+
+#: 生长主体的默认目录名后缀（**默认落在仓库之外**：代码与「被生长的东西」分家）
+SUBJECT_SUFFIX = "-subject"
+
+
+def default_subject_root(repo_root: "str | os.PathLike | None" = None) -> Path:
+    """主体的默认位置＝仓库的**同级目录** `<仓库名>-subject`。
+
+    为什么不落在仓库内：仓库是**引擎代码**（要维护、要最小改动、要能开源），
+    主体是**被生长的东西**（持续变化、属于使用者、可能含私密内容）。两者放一起，
+    迟早出现「升级引擎时动了生长痕迹」「开源时把主体一起带出去」这类事故。
+
+    要指到别处：配置项 `subject_root` 或环境变量 `IG_SUBJECT_ROOT`（任意目录）。
+    本函数是**默认规则的单一来源**（`config.Settings.subject_path()` 与文档都引用它）。
+    """
+    repo = Path(repo_root).resolve() if repo_root else REPO_ROOT
+    return repo.parent / (repo.name + SUBJECT_SUFFIX)
 
 
 def _within(path: Path, root: Path) -> bool:
@@ -60,9 +78,36 @@ class StateLayout:
     reconcile_dir: Path      # 对账报告目录
     locks_dir: Path
     log: Path
+    # 以下为运转期新增（v2.1）：都落在状态根内，且默认值保证旧调用不需要改
+    archive_dir: Path = None            # type: ignore[assignment]  账本归档区（轮转：只移动不删）
+    traces_dir: Path = None             # type: ignore[assignment]  执行者留痕（每拍一份）
+    logs_dir: Path = None               # type: ignore[assignment]  调度器/看护日志
+    subject_snapshot: Path = None       # type: ignore[assignment]  主体快照（工作文件）
+    executor_ledger: Path = None        # type: ignore[assignment]  执行者调用账（追加型）
+    org_findings: Path = None           # type: ignore[assignment]  组织会话发现账（追加型）
+    settings_file: Path = None          # type: ignore[assignment]  生效配置快照（工作文件）
+    domains: Path = None                # type: ignore[assignment]  域饱和状态（工作文件）
 
     def all_dirs(self) -> Iterable[Path]:
         return (self.root, self.reconcile_dir, self.locks_dir)
+
+
+def _fill(layout: StateLayout) -> StateLayout:
+    """补齐派生路径（构造时只给根与老字段，派生字段在这里统一算）。"""
+    from dataclasses import replace
+    root = layout.root
+    derived = {
+        "archive_dir": root / "archive",
+        "traces_dir": root / "traces",
+        "logs_dir": root / "logs",
+        "subject_snapshot": root / "subject.json",
+        "executor_ledger": root / "executor.jsonl",
+        "org_findings": root / "org-findings.jsonl",
+        "settings_file": root / "settings.json",
+        "domains": root / "domains.json",
+    }
+    patch = {k: v for k, v in derived.items() if getattr(layout, k) is None}
+    return replace(layout, **patch) if patch else layout
 
 
 def resolve_state(state_root: "str | os.PathLike | None" = None,
@@ -93,8 +138,10 @@ def resolve_state(state_root: "str | os.PathLike | None" = None,
         locks_dir=root / "locks",
         log=root / "engine.log",
     )
+    layout = _fill(layout)
     if create:
-        for d in layout.all_dirs():
+        for d in (layout.root, layout.reconcile_dir, layout.locks_dir,
+                  layout.archive_dir, layout.traces_dir, layout.logs_dir):
             guard(d, root)
             d.mkdir(parents=True, exist_ok=True)
     return layout

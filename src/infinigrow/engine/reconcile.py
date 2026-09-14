@@ -124,3 +124,47 @@ def rate_table(records: Iterable) -> dict:
     return {"总记录": len(rows),
             "桶": {" × ".join(map(str, k)): {"n": n, "兑现率": redemption_rate(rows, k)}
                    for k, n in sorted(buckets.items(), key=lambda kv: str(kv[0]))}}
+
+
+def sampled(record) -> bool:
+    """这一行是不是**样本**：那一拍有执行者真动过手（`sample` 字段）。
+
+    旧行（v2.0 及更早）没有这个字段 → 视为**非样本**：那时候根本没有执行者通道，
+    那些「全打脸」记录是机械拍的产物，不该混进兑现率的分母。
+    """
+    if isinstance(record, dict):
+        return record.get("sample") is True
+    return bool(getattr(record, "sampled", False))
+
+
+def redemption_report(records: Iterable) -> dict:
+    """兑现率的**诚实呈现**（T11/G6）：无样本就说「无样本」，不说 0，更不说「差」。
+
+    两种状态必须能被机器与人都一眼分清：
+
+    | 状态 | 判定 | 含义 |
+    |---|---|---|
+    | 没有执行者动过手 | `无样本` | 兑现率**不可计算**（不是 0，也不是差） |
+    | 有执行者动过手 | `有样本` | 给真实兑现率与分桶 |
+
+    分母只数样本行；`总行数` 一并报出，便于看出「有没有被静默丢样本」。
+    """
+    rows = list(records)
+    samples = [r for r in rows if sampled(r)]
+    if not samples:
+        return {"判定": "无样本", "样本数": 0, "总行数": len(rows), "兑现率": None,
+                "分桶": {},
+                "说明": ("本状态根还没有「执行者动过手」的拍：机械拍不做语义判断、"
+                         "也不产出真实生长，所以兑现率**不可计算**"
+                         "（不是 0，也不是差）。接上执行者后自动开始积累样本。")}
+    hit = sum(1 for r in samples if _redeemed(r))
+    buckets: dict[tuple, int] = {}
+    for r in samples:
+        buckets[_bucket(r)] = buckets.get(_bucket(r), 0) + 1
+    return {"判定": "有样本", "样本数": len(samples), "总行数": len(rows),
+            "兑现率": hit / len(samples),
+            "分桶": {" × ".join(map(str, k)): {"n": n, "兑现率": redemption_rate(samples, k)}
+                     for k, n in sorted(buckets.items(), key=lambda kv: str(kv[0]))},
+            "说明": ("按「对象域 × 预测边 × 实际边」分桶现算；分母只含样本行"
+                     "（%d 行非样本已排除：那些拍里没有执行者动手）。"
+                     % (len(rows) - len(samples)))}

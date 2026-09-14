@@ -1,111 +1,92 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""update_local —— 把**本地运行副本**升到最新发布，并当场自检（定规：运行的引擎永远最新版）。
+"""update_local —— **兼容壳**：真正的实现在 `tools/run_latest.py --update`。
 
-它只做三件事，全部是「对已有仓库/已装包」的操作，**不写任何源码内容**：
+T10 的归并结论：同一件事（把本地运行副本升到最新发布并当场自检）只能有一份实现。
+两份实现＝两份判据，迟早出现「一个拒绝非快进、另一个不拒绝」「一个回滚、另一个不回滚」。
+所以本文件不再包含任何升级逻辑，只做两件事：
 
-    1. `git fetch --tags` ＋ 比对本地 HEAD 与 `origin/<默认分支>`；
-    2. 落后就 `git pull --ff-only`（**快进合并**：本地有自己提交时直接失败而不是乱合）；
-       然后用 pip 重装本包（`-e .`，只更新元数据与入口点）；
-    3. 跑自检（`selftest` ＋ 静态规则扫描），**绿了才算升好**。
+    1. 打印一句「已归并」的说明（让老命令的使用者知道去哪看）；
+    2. 把参数**按白名单**转给 `run_latest.main`：
+         --check   → run_latest --update --check
+         --repo X  → run_latest --update --repo X（X 必须是已存在目录）
+         默认       → run_latest --update
 
-为什么要一条命令而不是让人记三步：定规要能落地，就得便宜到「顺手就做了」。
-为什么默认不自动升级：**运行中的代码被静默替换**是另一种危险（跑着跑着换了灵魂，
-出了问题不知道是哪版）。所以这里给的是「一句话升级＋当场验证」，而不是后台自动更新。
+两处刻意的选择：
 
-用法：
-    python tools/update_local.py            # 检查并升级（落后才动）
-    python tools/update_local.py --check    # 只看差多少，什么都不改
-    python tools/update_local.py --repo <路径>
-退出码：0=已是最新或升级成功；3=升级后自检未过（需人看）；4=git/pip 操作失败。
+- **不用子进程转发**：直接 import 并调用 `run_latest.main`。少一层进程＝少一层
+  「外部输入被交给子进程」的注入面，也不会出现「两个解释器/两套环境」的怪事。
+- **参数按白名单**：只放行两个明确开关，其余一律拒绝并提示直接调 run_latest.py。
+
+为什么保留这个文件而不是删掉：删除是不可逆动作（本项目硬约束是「只增改不删」），
+而且旧命令可能已经写进计划任务或别人的笔记里——保留一个**会自己说清楚**的转发壳，
+比一个突然报「文件不存在」的缺口友好得多。
+
+退出码与 `run_latest.py --update` 一致：
+    0 已是最新或升级成功｜3 升级后自检未过（已回滚）｜4 git/pip 层面失败。
 """
-import argparse
-import subprocess
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "src"))
+TOOLS = REPO_ROOT / "tools"
+
+#: 允许转发的开关（白名单：多余的一律拒绝，不猜使用者想干什么）
+ALLOWED_FLAGS = ("--check", "--help", "-h")
+PATH_FLAG = "--repo"
 
 
-def run(cmd, cwd=None, timeout=600):
-    """执行一条命令，返回 (rc, 合并输出)。不抛异常——失败由调用方判定并报出来。"""
-    try:
-        p = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True,
-                           encoding="utf-8", errors="replace", timeout=timeout)
-        return p.returncode, (p.stdout or "") + (p.stderr or "")
-    except (OSError, subprocess.SubprocessError) as exc:
-        return 127, "执行失败：%r" % exc
-
-
-def git(repo: Path, *args):
-    return run(["git", *args], cwd=repo)
-
-
-def main(argv=None):
-    ap = argparse.ArgumentParser(description="把本地运行副本升到最新版并自检")
-    ap.add_argument("--repo", default=str(REPO_ROOT))
-    ap.add_argument("--check", action="store_true", help="只报告差异，不改任何东西")
-    args = ap.parse_args(argv)
-
-    repo = Path(args.repo).resolve()
-    if not (repo / ".git").is_dir():
-        print("FAIL：%s 不是 git 仓库（升级需要 git 历史）" % repo)
-        return 4
-
-    rc, branch = git(repo, "rev-parse", "--abbrev-ref", "HEAD")
-    if rc != 0:
-        print("FAIL：读不出当前分支\n%s" % branch)
-        return 4
-    branch = branch.strip()
-
-    rc, _ = git(repo, "fetch", "--tags", "--quiet")
-    if rc != 0:
-        print("FAIL：git fetch 失败（网络或权限）")
-        return 4
-
-    rc, counts = git(repo, "rev-list", "--left-right", "--count",
-                     "%s...origin/%s" % (branch, branch))
-    if rc != 0:
-        print("FAIL：无法与远端比较（origin/%s 不存在？）" % branch)
-        return 4
-    ahead, behind = (int(x) for x in counts.split())
-    print("本地 %s：领先 %d 提交 / 落后 %d 提交" % (branch, ahead, behind))
-
-    if behind == 0:
-        print("已是最新（无需升级）。")
-        return 0
-    if args.check:
-        print("落后 %d 个提交——去掉 --check 即执行升级。" % behind)
-        return 0
-    if ahead:
-        print("本地有 %d 个未推送提交：**拒绝自动合并**（请先处理自己的提交，别让升级把它埋掉）" % ahead)
-        return 4
-
-    rc, out = git(repo, "pull", "--ff-only", "--quiet")
-    if rc != 0:
-        print("FAIL：git pull --ff-only 失败（非快进，需人处理）\n%s" % out)
-        return 4
-    print("已快进到最新提交：%s" % git(repo, "log", "--oneline", "-1")[1].strip())
-
-    rc, out = run([sys.executable, "-m", "pip", "install", "-q", "-e", ".", "--no-deps"],
-                  cwd=repo)
-    if rc != 0:
-        print("WARN：pip 重装失败（继续自检；若入口点异常需人手修）\n%s" % out[-400:])
-
-    print("\n=== 升级后自检 ===")
-    ok = True
-    for label, cmd in (("自检（规则正反用例）", [sys.executable, "-m", "infinigrow", "selftest"]),
-                       ("静态规则扫描", [sys.executable, "-m", "infinigrow", "scan"])):
-        rc, out = run(cmd, cwd=repo, timeout=300)
-        tail = "\n".join(out.strip().splitlines()[-3:])
-        print("%s：rc=%d\n%s" % (label, rc, tail))
-        ok = ok and rc == 0
-    if not ok:
-        print("\nFAIL：升级后自检未过——需人看（不要带着红的状态跑引擎）")
-        return 3
-    print("\nOK：本地已是最新版，且自检全绿。")
+def _help() -> int:
+    print("update_local（兼容壳）——真正的实现：python tools/run_latest.py --update")
+    print("用法：python tools/update_local.py [--check] [--repo <目录>]")
+    print("      --check   只看差多少，什么都不改")
+    print("      --repo X  指定本地副本（X 必须是已存在目录）")
     return 0
+
+
+def forward_args(argv):
+    """把外部参数压成白名单内的 argv 片段；越界返回 None（＝参数不合格）。"""
+    out = []
+    i = 0
+    while i < len(argv):
+        token = argv[i]
+        if token in ("--help", "-h"):
+            out.append("__HELP__")           # 本壳自己的帮助：不转发给 run_latest
+        elif token in ALLOWED_FLAGS:
+            out.append(token)
+        elif token == PATH_FLAG:
+            value = argv[i + 1] if i + 1 < len(argv) else ""
+            candidate = Path(value)
+            if not value or not candidate.is_dir():
+                print("FAIL：%s 需要一个**已存在的目录**（收到 %r）" % (PATH_FLAG, value))
+                return None
+            out += [PATH_FLAG, str(candidate.resolve())]
+            i += 1
+        else:
+            print("FAIL：本壳只转发 %s 与 %s（其余请直接调 tools/run_latest.py）：%r"
+                  % ("、".join(ALLOWED_FLAGS), PATH_FLAG, token))
+            return None
+        i += 1
+    return out
+
+
+def main(argv=None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    if any(tok in ("--help", "-h") for tok in argv):
+        return _help()
+    print("说明：本命令已归并进 tools/run_latest.py（实现在那一份，避免两套判据）。")
+    forwarded = forward_args(argv)
+    if forwarded is None:
+        return 4
+    if not (TOOLS / "run_latest.py").is_file():
+        print("FAIL：找不到 tools/run_latest.py —— 本壳无法转发。")
+        return 4
+    print("      等价命令：python tools/run_latest.py --update %s"
+          % " ".join(forwarded).strip())
+    if str(TOOLS) not in sys.path:
+        sys.path.insert(0, str(TOOLS))
+    import run_latest                     # 延迟导入：只在真要用的时候加载
+    return run_latest.main(["--update", *forwarded])
 
 
 if __name__ == "__main__":
