@@ -85,15 +85,24 @@ def read_tick_status(layout: StateLayout) -> dict:
 
 
 def record_tick_result(layout: StateLayout, rc: int, tick: int, note: str = "") -> int:
-    """落心跳：rc==0 归零，否则连续失败 +1。写不进去抛 `TickHeartbeatError`。"""
+    """落心跳：rc==0 归零，否则连续失败 +1。写不进去抛 `TickHeartbeatError`。
+
+    心跳里记**引擎身份**（版本 ＋ 提交号）：定规是「引擎必须是最新版才准运转」，
+    那么每一拍都必须能回答「这是哪个版本的引擎跑的」——否则升级之后，
+    历史读数属于哪一版就说不清了（账本只记 tick 数字是不够的）。
+    """
+    from ..core.build_info import engine_identity
     status = read_tick_status(layout)
     failures = 0 if rc == 0 else int(status.get("consecutive_failures", 0)) + 1
+    ident = engine_identity()
     payload = {
         TICK_STATUS_MARK: failures,
         "last_rc": rc,
         "last_time": _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "last_note": note,
         "tick": tick,
+        "engine_version": ident["version"],
+        "engine_commit": ident["commit"],
     }
     try:
         write_work_file(layout.tick_status,
@@ -204,9 +213,11 @@ def evaluate_outcome(sprout: Sprout, diffs: Sequence[Diff], tick: int) -> Outcom
 
 def write_reconcile_report(layout: StateLayout, result: TickResult) -> Path:
     """写对账报告：**文件名带拍号**（同拍重跑＝同一个文件，不会互相覆盖）。"""
+    from ..core.build_info import engine_label
     path = layout.reconcile_dir / ("reconcile-%05d.md" % result.tick)
     guard(path, layout.root)
     lines = ["# 对账报告 · 拍 %d" % result.tick, "",
+             "- 引擎：%s" % engine_label(),
              "- 本拍取题：%s" % (result.topic_sprout or "（无芽可领）"),
              "- 差异总览：%s" % json.dumps(result.diff_summary, ensure_ascii=False), ""]
     for d in result.diffs:
