@@ -177,4 +177,5 @@ def test_rotate_files_rotates_tick_log_by_bytes(tmp_path):
     log.write_text(payload, encoding="utf-8")
     reports2 = rotate_files(layout, keep_files=200, log_max_bytes=1024,
                             stamp="20260101-000005")
+    assert reports2 and reports2[0]["moved"] == 1
     assert len(list((layout.archive_dir / "files" / "logs").glob("tick.log.*"))) == 2

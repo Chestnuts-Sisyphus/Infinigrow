@@ -93,7 +93,7 @@ def subject_object(rel_name: str) -> str:
 
 def valid_subject_object(obj: str, allowed_objs: set[str],
                          for_proposal: bool = False) -> tuple[bool, str]:
-    """组织会话产出的对象名**机械闸**（T5/A11）。
+    r"""组织会话产出的对象名**机械闸**（T5/A11）。
 
     判据（具体状态，反不完全归纳）：
     - 对象已在可对账清单（本拍主体观测集）→ 通过；
