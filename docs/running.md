@@ -100,6 +100,7 @@ python -m infinigrow org-status
 | `tools/run_tick.bat` | 一次完整的运转：**版本闸 → 跑一拍 → 园丁（死锁/断流/失败升级/轮转）** |
 | `tools/manage_scheduled_task.bat` | `install` / `status` / `uninstall` 计划任务 |
 | `tools/scheduled_task.ps1` | 真正的注册逻辑（按当前登录用户，不请求提权） |
+| `tools/run_tick_hidden.vbs` | **隐藏启动器**：计划任务挂它，不是挂 `.bat` |
 
 双击 `tools/run_tick.bat` 就能跑一拍；计划任务挂的就是它。
 
@@ -116,6 +117,16 @@ tools\manage_scheduled_task.bat status
   自检不过已回滚）就**按现有版本照常跑**，并打印「为什么这次不是最新版」——
   **绝不因为「不是最新版」把引擎停掉**；
 - 卸载：`tools\manage_scheduled_task.bat uninstall`（**只删任务，不删状态与账本**）。
+
+### 2.5 为什么不直接挂 `.bat`（**别去掉这一层**）
+
+让计划任务直接跑 `.bat`（或 `cmd`、裸 `python`），**每跑一次就会在屏幕上闪一个控制台窗口**
+——抢焦点、遮住人正在看的东西。`run_tick_hidden.vbs` 用 WSH 的窗口样式 0 把它藏起来，
+任务动作因此是 `wscript.exe //nologo …run_tick_hidden.vbs`。
+注意 `New-ScheduledTaskSettingsSet -Hidden` 只隐藏任务列表里的**条目**，**不隐藏窗口**，别混。
+
+（同类经验：`.bat`/`.vbs` 一律**纯 ASCII**——cmd 与 wscript 按系统代码页读脚本，
+中文注释会破坏解析；需要无窗口跑 Python 时用 `pythonw.exe`。）
 
 ### 3. 看护（园丁每次跑顺手做）
 

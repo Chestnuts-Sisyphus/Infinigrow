@@ -30,6 +30,10 @@ $ErrorActionPreference = 'Stop'
 
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $bat = Join-Path $PSScriptRoot 'run_tick.bat'
+# Run through a hidden launcher: a bare .bat action flashes a console window on every
+# run, which steals focus from whoever is using the machine. WSH window style 0 hides it.
+$vbs = Join-Path $PSScriptRoot 'run_tick_hidden.vbs'
+$wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
 
 $taskName = $env:IG_TASK_NAME
 if ([string]::IsNullOrWhiteSpace($taskName)) { $taskName = 'Infinigrow_tick' }
@@ -50,9 +54,14 @@ switch ($Action) {
             Write-Host "FAIL: launcher not found: $bat"
             exit 1
         }
+        if (-not (Test-Path $vbs)) {
+            Write-Host "FAIL: hidden launcher not found: $vbs"
+            exit 1
+        }
         # NOTE: do NOT name this $action - PowerShell variables are case-insensitive,
         # so it would overwrite the $Action parameter and trip its ValidateSet.
-        $taskAction = New-ScheduledTaskAction -Execute $bat -WorkingDirectory $repo
+        $taskAction = New-ScheduledTaskAction -Execute $wscript `
+            -Argument ('//nologo "' + $vbs + '"') -WorkingDirectory $repo
         $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) `
             -RepetitionInterval (New-TimeSpan -Minutes $minutes) `
             -RepetitionDuration (New-TimeSpan -Days 3650)
@@ -61,7 +70,7 @@ switch ($Action) {
             -DontStopOnIdleEnd
         Register-ScheduledTask -TaskName $taskName -Action $taskAction -Trigger $trigger `
             -Settings $settings -Force `
-            -Description "Infinigrow: one tick every $minutes minutes (version gate -> tick -> gardener)" | Out-Null
+            -Description "Infinigrow: one tick every $minutes minutes (version gate -> tick -> gardener; hidden window)" | Out-Null
         Write-Host "OK: registered scheduled task '$taskName' (every $minutes minutes; workdir $repo)"
         Write-Host "Note: it runs as the *currently logged-on user* (active while logged on)."
         Write-Host "Check it with: tools\manage_scheduled_task.bat status"

@@ -67,6 +67,24 @@ def test_powershell_script_parses():
     assert "PARSE_OK" in (proc.stdout or ""), (proc.stdout or "") + (proc.stderr or "")
 
 
+def test_hidden_launcher_exists_and_hides_the_window():
+    """计划任务必须走**隐藏启动器**：直接挂 .bat 会每跑一次闪一个黑窗。
+
+    判据（具体状态）：① `tools/run_tick_hidden.vbs` 存在且模板里出现窗口样式 0 的调用形态；
+    ② `scheduled_task.ps1` 的注册动作走 `wscript` ＋ 这个 vbs（不是直接跑 .bat）；
+    ③ vbs 与名称里不含非 ASCII（wscript 按系统代码页读脚本，中文会读坏）。
+    """
+    vbs = TOOLS / "run_tick_hidden.vbs"
+    assert vbs.is_file(), "缺隐藏启动器"
+    text = vbs.read_text(encoding="utf-8")
+    assert "WScript.Shell" in text and "sh.Run" in text
+    assert ", 0, False" in text, "窗口样式必须是 0（隐藏）且不等待"
+    vbs.read_bytes().decode("ascii")                 # 非 ASCII 会读坏
+    ps1 = PS1.read_text(encoding="utf-8")
+    assert "run_tick_hidden.vbs" in ps1 and "wscript" in ps1.lower()
+    assert "New-ScheduledTaskAction -Execute $bat" not in ps1, "不许再直接挂 .bat（会闪窗）"
+
+
 def test_scheduled_task_script_has_install_uninstall_status():
     text = PS1.read_text(encoding="utf-8")
     for token in ("Register-ScheduledTask", "Unregister-ScheduledTask",
