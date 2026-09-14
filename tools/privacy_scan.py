@@ -157,7 +157,25 @@ def walk(root, extra_skip=()):
             yield full, os.path.relpath(full, root).replace("\\", "/")
 
 
+def _harden_stdio() -> None:
+    """stdout/stderr 切 UTF-8（T9 双平台 CI 抓到的真缺陷：Windows runner 控制台是
+    cp1252，直接打印中文会 UnicodeEncodeError，整个入口 rc=1）。
+    逻辑只有一份：引擎的 `core/encoding.harden_stdio`（这里延迟导入它）。
+    """
+    import sys
+    from pathlib import Path
+    src = str(Path(__file__).resolve().parents[1] / "src")
+    if src not in sys.path:
+        sys.path.insert(0, src)
+    try:
+        from infinigrow.core.encoding import harden_stdio as _h
+    except ImportError:
+        return
+    _h()
+
+
 def main(argv=None):
+    _harden_stdio()
     ap = argparse.ArgumentParser(description="发布前隐私/身份清场扫描（只读、零写盘）")
     ap.add_argument("--root", default=".")
     ap.add_argument("--deny", default=None, help="项目层禁列文件（不进公共仓库）")

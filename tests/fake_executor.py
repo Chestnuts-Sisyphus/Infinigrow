@@ -14,9 +14,31 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+from pathlib import Path
+
+
+def _harden_stdio() -> None:
+    """stdout/stderr 切 UTF-8：Windows 控制台默认不是 UTF-8（CI runner 是 cp1252，
+    有的机器是 GBK），直接打印中文会 UnicodeEncodeError，让整段调用 rc!=0。
+    逻辑只有一份：引擎的 `core/encoding.harden_stdio`（这里延迟导入）。
+    """
+    src = str(Path(__file__).resolve().parents[1] / "src")
+    if src not in sys.path:
+        sys.path.insert(0, src)
+    try:
+        from infinigrow.core.encoding import harden_stdio as _h
+    except ImportError:                      # 没装包也没关系：自己切一下流
+        for stream in (sys.stdout, sys.stderr):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except (AttributeError, ValueError):
+                pass
+        return
+    _h()
 
 
 def main(argv=None) -> int:
+    _harden_stdio()
     ap = argparse.ArgumentParser()
     ap.add_argument("--mode", default="ok",
                     choices=("ok", "fail", "empty", "timeout", "echo"))

@@ -72,6 +72,10 @@ def forward_args(argv):
 
 def main(argv=None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
+    if str(TOOLS) not in sys.path:
+        sys.path.insert(0, str(TOOLS))
+    import run_latest                     # 延迟导入：只在真要用的时候加载
+    run_latest.harden_stdio()             # **先切流**：本壳自己也要打印中文
     if any(tok in ("--help", "-h") for tok in argv):
         return _help()
     print("说明：本命令已归并进 tools/run_latest.py（实现在那一份，避免两套判据）。")
@@ -83,9 +87,6 @@ def main(argv=None) -> int:
         return 4
     print("      等价命令：python tools/run_latest.py --update %s"
           % " ".join(forwarded).strip())
-    if str(TOOLS) not in sys.path:
-        sys.path.insert(0, str(TOOLS))
-    import run_latest                     # 延迟导入：只在真要用的时候加载
     return run_latest.main(["--update", *forwarded])
 
 

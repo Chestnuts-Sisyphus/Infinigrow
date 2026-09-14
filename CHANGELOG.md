@@ -57,14 +57,26 @@
 - **一键件与计划任务**：`tools/run_tick.bat`（**版本闸 → 跑一拍 → 园丁**）、
   `tools/manage_scheduled_task.bat`、`tools/scheduled_task.ps1`
   （默认 `Infinigrow_tick`，每 10 分钟，可由 `IG_TICK_MINUTES` 改）。
+  **批处理与 PowerShell 脚本一律纯 ASCII**：cmd 用 OEM 代码页读 `.bat`、
+  Windows PowerShell 5.1 把无 BOM 的 `.ps1` 当 ANSI 读——中文写在里面会被打乱甚至
+  破坏解析（实测：`install` 直接报「不是内部或外部命令」）。中文说明在 `docs/` 里。
 - **CI 双平台**：矩阵加 `windows-latest`（引擎实际跑在 Windows 上）；
   冷启动产物检查改用跨平台工具 `tools/check_no_abs_paths.py`
-  （原先是一段只有 bash 能跑的 heredoc）。
+  （原先是一段只有 bash 能跑的 heredoc；该工具现在**跳过二进制文件并报数**，
+  修掉一次对 PNG 的误报）。
+- **非 UTF-8 控制台修复**（Windows CI 第一次跑就抓到的一族真缺陷）：
+  `tools/*` 与两个执行者夹具此前**直接打印中文**，在 cp1252 控制台上
+  `UnicodeEncodeError` → 进程 rc=1；现在所有入口都先过
+  `core/encoding.harden_stdio`（单一实现），并有 `tests/test_stdio_encoding.py`
+  用 `PYTHONIOENCODING=cp1252` 复现环境逐入口锁住。
 - **`update_local.py` 归并**：升级逻辑只剩一份（`tools/run_latest.py --update`），
   旧命令退化成会自我说明的转发壳（参数按白名单转发，无子进程）。
-- **修掉一个真缺陷**：`run_latest.py --repo <路径>` 原先只影响起跑目录，
-  **版本判定仍在看本仓库**（拿落后 2 个提交的副本去问，它会回答「已是最新」）。
-  现在 `--repo` 真正生效；端到端测试（本地 bare 远端，不出网）锁住三种情形。
+- **两个真缺陷**：① `run_latest.py --repo <路径>` 原先只影响起跑目录，
+  **版本判定仍在看本仓库**（拿落后 2 个提交的副本去问，它会回答「已是最新」）；
+  ② 取题顺序按芽 ID 字典序，而 ID 带芽源前缀 → `cap*`（封顶芽）**永远插在**
+  `sp*`（差异芽）前面，把主芽源饿死（现场连跑 12 拍取到的全是封顶芽）。
+  前者由端到端测试锁住（本地 bare 远端，不出网）；后者改为
+  「最久未碰优先 → 出生拍 → 字典序」，与提示词里写的纪律一致。
 
 ### 已知限制（v2.1.0 新增部分）
 

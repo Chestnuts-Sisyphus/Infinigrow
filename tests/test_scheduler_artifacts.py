@@ -20,6 +20,15 @@ PS1 = TOOLS / "scheduled_task.ps1"
 CHECK_PATHS = TOOLS / "check_no_abs_paths.py"
 
 
+def _load_check_tool():
+    """按文件路径加载工具模块（它不是包的一部分，直接 import 找不到）。"""
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("check_no_abs_paths", CHECK_PATHS)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def test_one_click_files_exist():
     for path in (RUN_TICK, MANAGE, PS1, CHECK_PATHS):
         assert path.is_file(), "缺一键件：%s" % path.name
@@ -67,25 +76,58 @@ def test_scheduled_task_script_has_install_uninstall_status():
 
 
 def test_check_no_abs_paths_tool_reports_clean_tree(tmp_path):
-    import importlib.util
-    spec = importlib.util.spec_from_file_location("check_no_abs_paths", CHECK_PATHS)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    """工具本身要能**真的红**：造一个含绝对路径的产物，必须 rc=1。"""
+    mod = _load_check_tool()
 
     clean = tmp_path / "clean"
     clean.mkdir()
     (clean / "state.json").write_text('{"tick": 3}', encoding="utf-8")
-    hits, files = mod.scan(clean)
-    assert hits == [] and len(files) == 1
+    hits, files, skipped = mod.scan(clean)
+    assert hits == [] and len(files) == 1 and skipped == []
 
     dirty = tmp_path / "dirty"
     dirty.mkdir()
     # 造病灶：用拼装方式构造路径字面量（免得测试文件自己命中规则）
     absolute = "C" + ":" + "/" + "Users/" + "someone/state"
     (dirty / "state.json").write_text('{"root": "%s"}' % absolute, encoding="utf-8")
-    hits, _files = mod.scan(dirty)
+    hits, _files, _skipped = mod.scan(dirty)
     assert hits and "state.json" in hits[0]
     assert mod.main([str(dirty)]) == 1 and mod.main([str(clean)]) == 0
+
+
+def test_binary_files_are_skipped_not_flagged(tmp_path):
+    """二进制文件要**跳过并报数**，不许误报（真教训：一次扫 `docs/` 误报了 PNG——
+    图片字节里凑巧出现「字母:斜杠」的组合，而判据要管的是**文本**里的本机路径）。
+
+    夹具里的 NUL 用 `bytes([0])` 在运行时构造：源码里不出现真实 NUL 字节
+    （源码里含 NUL 本身就是一类事故——本次改这个测试时就现场撞上过一次）。
+    """
+    mod = _load_check_tool()
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    # 病灶样本按**拼装**构造：源码里不出现完整的「盘符:斜杠」形态
+    # （否则静态规则 R1 会把测试文件自己判成病灶——自匹配是最常见的假阳性）
+    drive_like = b"s" + b":/" + b" bytes"
+    fake_png = b"\x89PNG\r\n\x1a\n" + bytes([0]) + b"junk " + drive_like + bytes([0, 0])
+    (binary / "img.png").write_bytes(fake_png)
+    hits, files, skipped = mod.scan(binary)
+    assert hits == [] and files == [] and len(skipped) == 1
+    assert mod.main([str(binary)]) == 0
+
+
+def test_bat_files_are_ascii_only():
+    """批处理必须**纯 ASCII**：cmd 用 OEM 代码页读 .bat，UTF-8 中文会打乱甚至破坏解析。
+
+    （实测换来的：第一版 .bat 写中文注释，`manage_scheduled_task.bat install` 在本机
+    直接报 `'RRORLEVEL"=="0" (' 不是内部或外部命令`——解析在中文字节处断掉了。）
+    """
+    for path in (RUN_TICK, MANAGE):
+        raw = path.read_bytes()
+        try:
+            raw.decode("ascii")
+        except UnicodeDecodeError as exc:
+            raise AssertionError("%s 含非 ASCII 字节（cmd 会读坏）：%s"
+                                 % (path.name, exc)) from exc
 
 
 def test_ci_runs_on_windows_too():

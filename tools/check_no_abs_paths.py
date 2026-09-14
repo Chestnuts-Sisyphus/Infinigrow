@@ -28,10 +28,25 @@ SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", ".ruff_cache", ".venv", "ve
              "node_modules", ".mypy_cache"}
 
 
-def scan(root: Path) -> tuple[list[str], list[Path]]:
-    """返回 (命中列表, 检查过的文件列表)。传目录＝递归；传单个文件＝只看那一个。"""
+def is_binary(path: Path) -> bool:
+    """二进制文件（前 8KB 里有 NUL 字节即判二进制）。
+
+    为什么必须区分：第一次拿它扫 `docs/` 就误报了一个 PNG——图片字节流里凑巧凑出
+    「盘符形态」的字符组合，而判据要管的是**文本里的本机路径**，不是图片字节。
+    跳过要**报数**（不是静默略过）：略过多少、为什么，都写在输出里。
+    """
+    try:
+        with open(path, "rb") as fh:
+            return b"\x00" in fh.read(8192)
+    except OSError:
+        return True
+
+
+def scan(root: Path) -> tuple[list[str], list[Path], list[Path]]:
+    """返回 (命中列表, 检查过的文件, 跳过的二进制文件)。目录＝递归；文件＝只看那一个。"""
     hits: list[str] = []
     files: list[Path] = []
+    skipped: list[Path] = []
     base = Path(root)
     candidates = [base] if base.is_file() else sorted(base.rglob("*"))
     for path in candidates:
@@ -39,31 +54,56 @@ def scan(root: Path) -> tuple[list[str], list[Path]]:
             continue
         if any(part in SKIP_DIRS for part in path.parts):
             continue
+        if is_binary(path):
+            skipped.append(path)
+            continue
         files.append(path)
         text = path.read_text(encoding="utf-8", errors="replace")
         for no, line in enumerate(text.splitlines(), 1):
             m = ABS_PATH_RX.search(line)
             if m:
                 hits.append("%s:%d %s" % (path, no, m.group(0)))
-    return hits, files
+    return hits, files, skipped
+
+
+def _harden_stdio() -> None:
+    """stdout/stderr 切 UTF-8（T9 双平台 CI 抓到的真缺陷：Windows runner 控制台是
+    cp1252，直接打印中文会 UnicodeEncodeError，整个入口 rc=1）。
+    逻辑只有一份：引擎的 `core/encoding.harden_stdio`（这里延迟导入它）。
+    """
+    import sys
+    from pathlib import Path
+    src = str(Path(__file__).resolve().parents[1] / "src")
+    if src not in sys.path:
+        sys.path.insert(0, src)
+    try:
+        from infinigrow.core.encoding import harden_stdio as _h
+    except ImportError:
+        return
+    _h()
 
 
 def main(argv=None) -> int:
+    _harden_stdio()
     args = list(sys.argv[1:] if argv is None else argv)
     if not args:
         print("用法：python tools/check_no_abs_paths.py <目录或文件> [更多...]")
         return 1
-    total_files, all_hits = 0, []
+    total_files, total_skipped, all_hits = 0, 0, []
     for raw in args:
         target = Path(raw)
         if not target.exists():
             print("跳过（不存在）：%s" % target)
             continue
-        hits, files = scan(target)
+        hits, files, skipped = scan(target)
         total_files += len(files)
+        total_skipped += len(skipped)
         all_hits += hits
-        print("检查：%s（%d 个文件）" % (target, len(files)))
-    print("检查文件总数：%d" % total_files)
+        print("检查：%s（文本 %d 个，二进制跳过 %d 个）"
+              % (target, len(files), len(skipped)))
+        for path in skipped[:5]:
+            print("  - 跳过（二进制）：%s" % path.name)
+    print("检查文件总数：%d｜二进制跳过：%d" % (total_files, total_skipped))
     if all_hits:
         print("绝对路径命中 %d 处：" % len(all_hits))
         for hit in all_hits[:20]:

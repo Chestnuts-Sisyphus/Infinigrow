@@ -97,6 +97,24 @@ def sh(cmd, cwd=REPO_ROOT, timeout=900, env=None):
         return 127, "执行失败：%r" % exc
 
 
+def harden_stdio() -> None:
+    """把本进程的 stdout/stderr 切到 UTF-8（失败静默）。
+
+    T9 双平台 CI 抓到的真缺陷：Windows 的 CI runner 控制台编码是 cp1252，
+    本文件会打印中文 → `UnicodeEncodeError` → 整个入口 rc=1。
+    引擎自带 `core/encoding.harden_stdio`，工具侧调用同一个实现（延迟导入，
+    免得在 import 期就把 src/ 塞进 sys.path）。
+    """
+    src = str(REPO_ROOT / "src")
+    if src not in sys.path:
+        sys.path.insert(0, src)
+    try:
+        from infinigrow.core.encoding import harden_stdio as _harden
+    except ImportError:
+        return
+    _harden()
+
+
 def git(repo: Path, *args):
     """在**指定仓库**里跑 git（`--repo` 必须真的生效：否则版本判定看的是别的仓库）。
 
@@ -163,6 +181,7 @@ def main(argv=None):
     ap.add_argument("--repo", default=str(REPO_ROOT))
     ap.add_argument("payload", nargs="*", help="透传给 `infinigrow tick` 的参数")
     args = ap.parse_args(argv)
+    harden_stdio()                       # 中文输出在非 UTF-8 控制台上会炸（T9 抓到）
 
     repo = Path(args.repo).resolve()
     if not (repo / ".git").is_dir():

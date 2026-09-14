@@ -166,7 +166,25 @@ def build(src):
     return lines, buckets, unassigned, order_seen
 
 
+def _harden_stdio() -> None:
+    """stdout/stderr 切 UTF-8（T9 双平台 CI 抓到的真缺陷：Windows runner 控制台是
+    cp1252，直接打印中文会 UnicodeEncodeError，整个入口 rc=1）。
+    逻辑只有一份：引擎的 `core/encoding.harden_stdio`（这里延迟导入它）。
+    """
+    import sys
+    from pathlib import Path
+    src = str(Path(__file__).resolve().parents[1] / "src")
+    if src not in sys.path:
+        sys.path.insert(0, src)
+    try:
+        from infinigrow.core.encoding import harden_stdio as _h
+    except ImportError:
+        return
+    _h()
+
+
 def main(argv=None):
+    _harden_stdio()
     ap = argparse.ArgumentParser(description="单体外壳拆分分析器（零写盘）")
     ap.add_argument("--src", required=True)
     ap.add_argument("--table", action="store_true", help="打印归属表")
