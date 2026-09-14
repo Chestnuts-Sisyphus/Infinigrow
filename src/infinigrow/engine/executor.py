@@ -36,7 +36,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Iterable, Optional
 
 from ..core.paths import StateLayout, guard
 from ..ledger.store import append_jsonl, write_work_file
@@ -100,9 +100,23 @@ class ExecutorRun:
                    if self.usage else ""))
 
 
-def redact_paths(text: str) -> str:
-    """把文本里的本机绝对路径替换成占位符（状态产物不得含本机路径）。"""
-    return ABS_PATH_RX.sub(PATH_PLACEHOLDER, text or "")
+def redact_paths(text: str, roots: Iterable = ()) -> str:
+    """把文本里的本机绝对路径替换成占位符（状态产物不得含本机路径）。
+
+    两类目标：
+
+    1. **已知的根**（`roots`）：引擎自己知道的那几个位置（状态根、主体根、仓库根）——
+       要分享/迁移状态目录时，泄漏的通常就是它们。这里是**精确**替换（整串匹配）。
+    2. **经典家目录/挂载点前缀**（`ABS_PATH_RX`）：跨平台兜底，形状明确、误报低。
+
+    刻意**不**用「任意以斜杠开头的串」当判据：那会把 `POST /v1/messages` 这类
+    正常文本也糊掉，还会让产物检查误报成命中——判据宁可窄而准，不宽而吵。
+    """
+    out = text or ""
+    # 长根优先：先替换更长的路径，避免父目录先把子目录的前缀吃掉一半
+    for root in sorted((str(r) for r in roots if r), key=len, reverse=True):
+        out = out.replace(root, PATH_PLACEHOLDER)
+    return ABS_PATH_RX.sub(PATH_PLACEHOLDER, out)
 
 
 def split_command(command: str) -> list[str]:
@@ -235,6 +249,9 @@ def write_trace(layout: StateLayout, run: ExecutorRun, prompt: str,
     name = "%s-%05d.md" % (run.kind, run.tick)
     path = layout.traces_dir / name
     guard(path, layout.root)
+    # 已知的根一起 redact：留痕里最可能出现的本机路径就是引擎自己的这几个位置
+    # （cwd 是仓库根、主体根、状态根——提示词与执行者输出里都可能带上它们）
+    roots = (layout.root, subject_root, Path.cwd())
     body = [
         "# 留痕 · %s · 拍 %d" % (run.kind, run.tick),
         "",
@@ -247,13 +264,13 @@ def write_trace(layout: StateLayout, run: ExecutorRun, prompt: str,
         "## 提示词（原样）",
         "",
         "```text",
-        redact_paths(prompt),
+        redact_paths(prompt, roots),
         "```",
         "",
         "## 输出（原样）",
         "",
         "```text",
-        redact_paths(run.output),
+        redact_paths(run.output, roots),
         "```",
     ]
     write_work_file(path, "\n".join(body), layout.root, require_markers=("# 留痕",))

@@ -171,6 +171,7 @@ def engine_label(repo: Path) -> str:
 
 
 def main(argv=None):
+    harden_stdio()          # **第一件事**：argparse 的 --help 也会打印中文（T9 抓到）
     ap = argparse.ArgumentParser(description="默认用最新版引擎；升不动就按现有版本跑")
     ap.add_argument("--check", action="store_true", help="只报告版本状态，不起跑")
     ap.add_argument("--update", action="store_true",
@@ -181,7 +182,6 @@ def main(argv=None):
     ap.add_argument("--repo", default=str(REPO_ROOT))
     ap.add_argument("payload", nargs="*", help="透传给 `infinigrow tick` 的参数")
     args = ap.parse_args(argv)
-    harden_stdio()                       # 中文输出在非 UTF-8 控制台上会炸（T9 抓到）
 
     repo = Path(args.repo).resolve()
     if not (repo / ".git").is_dir():

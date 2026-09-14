@@ -89,17 +89,36 @@ def test_missing_executor_binary_is_rc127(tmp_path):
 
 
 def test_trace_is_written_without_absolute_paths(tmp_path):
+    """留痕要能分享/迁移：引擎自己知道的那几个根（状态根/主体根）绝不落进留痕。
+
+    判据口径与 `tools/check_no_abs_paths.py` 一致（盘符 ＋ 家目录/挂载点前缀），
+    再加一条更强的：**已知的根**整串被替换成占位符（这是实际会泄漏的那一类）。
+    """
     layout = resolve_state(str(tmp_path / "state"), str(REPO_ROOT), create=True)
     subject = tmp_path / "subj"
     subject.mkdir()
-    run = exec_mod.run_command(_cmd("ok"), "提示词 %s" % tmp_path, tick=3, kind="org-session",
+    prompt = "提示词里带上主体根 %s 与状态根 %s" % (subject, layout.root)
+    run = exec_mod.run_command(_cmd("ok"), prompt, tick=3, kind="org-session",
                                cwd=subject, state_root=layout.root,
                                subject_root=subject, timeout_s=30)
-    trace = exec_mod.write_trace(layout, run, "提示词 %s" % tmp_path, subject)
+    trace = exec_mod.write_trace(layout, run, prompt, subject)
     text = trace.read_text(encoding="utf-8")
     assert trace.name == "org-session-00003.md"
-    assert str(tmp_path) not in text                # 本机路径已被占位符替换
+    assert str(subject) not in text and str(layout.root) not in text
     assert exec_mod.PATH_PLACEHOLDER in text
+    # 经典前缀（跨平台兜底）也要被替换：样本按拼装构造，免得测试文件自己命中规则
+    home_like = "/" + "home/" + "someone/data"
+    assert exec_mod.redact_paths("看这个 %s" % home_like) == "看这个 （本机路径已省略）"
+
+
+def test_redact_roots_are_replaced_longest_first(tmp_path):
+    """父目录与子目录同时在列表里时先替换长的（否则子目录只剩半截，仍算泄漏）。"""
+    parent = tmp_path / "outer"
+    child = parent / "inner"
+    text = "A=%s B=%s" % (child, parent)
+    out = exec_mod.redact_paths(text, roots=(parent, child))
+    assert out.count(exec_mod.PATH_PLACEHOLDER) == 2
+    assert str(child) not in out and str(parent) not in out
 
 
 # ---------------------------------------------------------------- 与拍合流
