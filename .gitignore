@@ -1,0 +1,37 @@
+# —— 运行时态（绝不进库：账本/树身/报告/日志）——
+state/
+*.log
+*.bak
+*.bak-*
+
+# —— 私密文件（本机专有：禁列清单、密钥、扫描报告）——
+privacy-deny.txt
+privacy-scan*.json
+.env
+.env.*
+*.key
+*.pem
+
+# —— 归档区（历史沉淀仅本地留档，不进公共仓库）——
+archive/
+
+# —— Python ——
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# —— 编辑器/系统 ——
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+desktop.ini

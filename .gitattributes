@@ -1,0 +1,18 @@
+# 仓库文本规范：UTF-8 无 BOM、LF 换行（写成规则，不靠记忆）
+* text=auto eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.txt text eol=lf
+
+# 二进制：不做行尾转换
+*.png binary
+*.jpg binary
+*.pdf binary
+*.xmind binary
+
+# 账本/状态：JSONL 也是文本，但**不进库**（见 .gitignore）
+*.jsonl text eol=lf

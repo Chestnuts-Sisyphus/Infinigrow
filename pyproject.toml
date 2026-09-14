@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "infinigrow"
+version = "2.0.0"
+description = "Infinigrow — an engine that grows by predicting, reconciling, and turning differences into sprouts"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Infinigrow contributors" }]
+keywords = ["agent", "autonomy", "prediction", "reconciliation", "ledger", "growth"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Intended Audience :: Developers",
+]
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.5"]
+
+[project.urls]
+Homepage = "https://github.com/Chestnuts-Sisyphus/Infinigrow"
+Source = "https://github.com/Chestnuts-Sisyphus/Infinigrow"
+
+[project.scripts]
+infinigrow = "infinigrow.cli:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = ["state", "archive", ".venv"]
+
+[tool.ruff.lint]
+# 规则集刻意收窄到「能抓到真缺陷」的一档（pyflakes/语法错/易错写法）：
+#   E 语法类 · F pyflakes（未用导入、未定义名）· W 警告 · B bugbear（易错写法）
+# 不选 UP（pyupgrade）与 I（isort）：本项目的 house style 就是
+#   %-格式化 + 显式 Optional[] + 中文 docstring 不按列宽硬折行，
+#   UP/I 会把「风格偏好」报成错误，噪音淹没真问题。
+select = ["E", "F", "W", "B"]
+ignore = [
+  "E501",   # 中文文档与格式串按语义断行，不做硬性列宽
+]
