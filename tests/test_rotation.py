@@ -132,3 +132,49 @@ def test_archive_name_cannot_escape_the_root(tmp_path):
                       layout.root, policy=(TAIL,), keep_tail=1, stamp="../../evil")
     assert not (tmp_path / "evil.jsonl").exists()        # 根外没被写出任何东西
     assert archived_files(layout) == []                  # 归档区也没被污染
+
+
+def test_rotate_files_moves_excess_traces_and_reconciles(tmp_path):
+    """留痕/报告按**份数**轮转（T2/A3）：造超量份数 → 只留最近 N 份，
+    其余整体移进 `state/archive/files/<类>/`，归档**可检索**（只移动不删的另一半）。"""
+    from infinigrow.ledger.rotation import rotate_files
+    settings, layout = _layout(tmp_path, "files")
+    for i in range(105):
+        (layout.traces_dir / ("tick-%05d.md" % i)).write_text(
+            "# trace %d\n针 %d\n" % (i, i), encoding="utf-8")
+    for i in range(105):
+        (layout.reconcile_dir / ("reconcile-%05d.md" % i)).write_text(
+            "# report %d\n" % i, encoding="utf-8")
+    reports = rotate_files(layout, keep_files=100, log_max_bytes=0,
+                           stamp="20260101-000004")
+    by_name = {r["name"]: r for r in reports}
+    assert by_name["traces"]["moved"] == 5 and by_name["traces"]["kept"] == 100
+    assert by_name["reconcile"]["moved"] == 5 and by_name["reconcile"]["kept"] == 100
+    assert len(list(layout.traces_dir.glob("*.md"))) == 100     # 只留最近 100 份
+    assert len(list(layout.reconcile_dir.glob("*.md"))) == 100
+    assert not (layout.traces_dir / "tick-00000.md").exists()   # 最旧那份已进归档
+    hits = search_archive(layout, "针 0")                        # 归档里找得回（搜内容）
+    assert any(h.startswith("files/traces/") for h in hits)
+    assert (layout.archive_dir / "files" / "reconcile" / "reconcile-00000.md").is_file()
+
+
+def test_rotate_files_rotates_tick_log_by_bytes(tmp_path):
+    """`logs/tick.log` 按**字节**轮转：超阈值 → 整体进归档，主日志另起空文件（不删）。"""
+    from infinigrow.ledger.rotation import rotate_files
+    settings, layout = _layout(tmp_path, "log")
+    layout.logs_dir.mkdir(parents=True, exist_ok=True)
+    log = layout.logs_dir / "tick.log"
+    payload = "x" * 5000 + "\n"
+    log.write_text(payload, encoding="utf-8")
+    reports = rotate_files(layout, keep_files=200, log_max_bytes=1024,
+                           stamp="20260101-000005")
+    assert reports and reports[0]["name"] == "logs/tick.log"
+    assert reports[0]["moved"] == 1
+    assert log.is_file() and log.stat().st_size <= 1            # 主日志另起（空）
+    archived = list((layout.archive_dir / "files" / "logs").glob("tick.log.*"))
+    assert len(archived) == 1 and archived[0].read_text(encoding="utf-8") == payload
+    # 同秒重跑不覆盖：第二次轮转换后缀
+    log.write_text(payload, encoding="utf-8")
+    reports2 = rotate_files(layout, keep_files=200, log_max_bytes=1024,
+                            stamp="20260101-000005")
+    assert len(list((layout.archive_dir / "files" / "logs").glob("tick.log.*"))) == 2

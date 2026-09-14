@@ -110,7 +110,9 @@ def _redeemed(record) -> bool:
 def _bucket(record) -> tuple:
     if not isinstance(record, dict):
         return record.bucket()
-    return (str(record.get("sprout_id", "")).split("-")[0],
+    obj = str(record.get("obj", ""))
+    domain = obj.rsplit("/", 1)[0] if "/" in obj else obj
+    return (domain or "（无对象）",
             record.get("predicted_edge") or "无",
             record.get("actual_edge") or "无")
 
@@ -159,14 +161,24 @@ def redemption_report(records: Iterable) -> dict:
     | 有执行者动过手 | `有样本` | 给真实兑现率与分桶 |
 
     分母只数样本行；`总行数` 一并报出，便于看出「有没有被静默丢样本」。
+
+    **固化边单独列出**（T6/A7）：`cap*`（成熟链封顶→开应用面）的维度「应用面」是
+    语义维度，机械层永远读不到 → 兑现永远判不出。它们**单独列出**（`固化边` 字段），
+    不进兑现率分母，也不算「打脸」——那是「读不到」，不是「错了」。占取题位是刻意的：
+    封顶芽驱动执行者把已固化能力**应用到别域**（一个真动作），只是动作的结果没法机械对账。
     """
     rows = list(records)
     checkable = [r for r in rows if verifiable(r)]
     samples = [r for r in checkable if sampled(r)]
     unverifiable = len(rows) - len(checkable)
+    cap_rows = [r for r in rows
+                if str(r.get("sprout_id", "")).startswith("cap") and not verifiable(r)]
+    cap_bucket = {"单独列出": [str(r.get("sprout_id")) for r in cap_rows],
+                  "n": len(cap_rows),
+                  "说明": "固化边（应用面）不可机械验证：cap 芽单独列出，不计入兑现率分母，也不算打脸"}
     if not samples:
         return {"判定": "无样本", "样本数": 0, "总行数": len(rows), "兑现率": None,
-                "分桶": {}, "不可对账": unverifiable,
+                "分桶": {}, "不可对账": unverifiable, "固化边": cap_bucket,
                 "说明": ("本状态根还没有「执行者动过手且该维度机械层读得到」的拍："
                          "机械拍不做语义判断、也不产出真实生长，所以兑现率**不可计算**"
                          "（不是 0，也不是差）。接上执行者后自动开始积累样本。"
@@ -177,11 +189,14 @@ def redemption_report(records: Iterable) -> dict:
     for r in samples:
         buckets[_bucket(r)] = buckets.get(_bucket(r), 0) + 1
     return {"判定": "有样本", "样本数": len(samples), "总行数": len(rows),
-            "不可对账": unverifiable,
+            "不可对账": unverifiable, "固化边": cap_bucket,
             "兑现率": hit / len(samples),
             "分桶": {" × ".join(map(str, k)): {"n": n, "兑现率": redemption_rate(samples, k)}
                      for k, n in sorted(buckets.items(), key=lambda kv: str(kv[0]))},
             "说明": ("按「对象域 × 预测边 × 实际边」分桶现算；分母只含**可对账的样本行**"
                      "（%d 行非样本已排除：那些拍里没有执行者动手；"
-                     "%d 行不可对账已排除：该维度机械层读不到，读不到≠打脸）。"
-                     % (len(rows) - len(samples) - unverifiable, unverifiable))}
+                     "%d 行不可对账已排除：该维度机械层读不到，读不到≠打脸；"
+                     "固化边 %d 行单独列出）。"
+                     % (len(rows) - len(samples) - unverifiable, unverifiable,
+                        len(cap_rows)))}
+

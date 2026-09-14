@@ -17,7 +17,7 @@ from typing import Optional
 from ..core.config import Settings, load_settings
 from ..core.paths import StateLayout, guard, resolve_state
 from ..engine.tick import LOCK_STALE_SECONDS, read_tick_status
-from ..ledger.rotation import rotate_all
+from ..ledger.rotation import rotate_all, rotate_files
 from ..ledger.store import ledger_stats, write_work_file
 
 #: 断流阈值（小时）：最后一拍超过这么久没更新 → 致命旗
@@ -37,11 +37,13 @@ class GardenerReport:
     notes: list[str] = field(default_factory=list)
     cleared_locks: list[str] = field(default_factory=list)
     rotated: list[dict] = field(default_factory=list)
+    rotated_files: list[dict] = field(default_factory=list)
     ledger_stats: dict = field(default_factory=dict)
 
     def as_dict(self) -> dict:
         return {"fatal": self.fatal, "flags": self.flags, "notes": self.notes,
                 "cleared_locks": self.cleared_locks, "rotated": self.rotated,
+                "rotated_files": self.rotated_files,
                 "ledger_stats": self.ledger_stats}
 
 
@@ -131,6 +133,15 @@ def run_gardener(settings: Optional[Settings] = None,
         else:
             report.notes.append("账本轮转：无账本超阈值（%d 字节）"
                                 % cfg.rotate_max_bytes)
+
+    # 5b) 文件型产物轮转（traces/reconcile 按份数、tick.log 按字节；也只移动不删）
+    report.rotated_files = rotate_files(layout, keep_files=cfg.rotate_keep_files,
+                                        log_max_bytes=cfg.rotate_max_bytes)
+    if report.rotated_files:
+        report.notes.append("留痕/报告轮转：%s"
+                            % "、".join("%s→%s(移 %d 份)"
+                                       % (r["name"], r["archive"], r["moved"])
+                                       for r in report.rotated_files))
 
     if write_alert:
         _write_alert(layout, report, status)

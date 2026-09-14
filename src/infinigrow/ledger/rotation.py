@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-"""账本轮转：追加型账本只增不减，长期会把状态目录撑成巨石（T6/G7 的实现层）。
+"""账本与文件型产物轮转：追加型账本只增不减、每拍一份的报告只增不减，
+长期会把状态目录撑成巨石（T6/G7 的实现层）。
 
 v1 的实测：园丁日志 3.5MB、STATE 629KB，读一次要全量扫——「翻账」越来越贵，
 最后没人翻，账本就成了摆设。v2 的账本都是 JSONL（一行一条），所以轮转很干净：
 
-**只移动，不删**：被移走的每一行，逐字进 `state/archive/<名字>.<时间戳>.jsonl`。
+**只移动，不删**：被移走的每一行/每一份，逐字进 `state/archive/`。
 主账本只保留**能维持语义**的那部分：
 
 | 账本 | 保留策略 | 为什么 |
@@ -20,15 +21,20 @@ v1 的实测：园丁日志 3.5MB、STATE 629KB，读一次要全量扫——「
 后面两条是**保语义**的关键：若按尾部行数截，某个很久没被碰过的对象的「已到第几步」
 会随轮转一起消失，成熟链就会悄悄倒退——那比账本变大严重得多。
 
-**次序**：先把要移走的行写进归档件，再重写主账本。反过来的话，会出现
-「主账本已缩、归档还没写」的窗口，那一刻断电＝真丢账。
+**文件型产物**（`rotate_files`，T2/A3）：`traces/`（每拍一份留痕）、`reconcile/`
+（每拍一份报告）、`logs/tick.log`（单文件日志）。前两者按**份数**留最近 N 份；
+日志按**字节**超过阈值就整体归档、另起空文件。同样只移动不删，
+归档落在 `state/archive/files/<类>/`，`infinigrow rotate --search` 可检索。
 
-**路径**：三处（账本、归档目录、归档文件）全部经 `ledger.store.require_within` 校验，
-拿到的是**解析后的根内路径**；归档名由「账本名 + 时间戳」拼成，两段都先洗掉路径语义
-（分隔符、`..`），所以归档名不可能指到根外。
+**次序**：先把要移走的行/文件写进归档件，再缩主件。反过来的话，会出现
+「主件已缩、归档还没写」的窗口，那一刻断电＝真丢。
 
-阈值（`rotate_max_bytes` / `rotate_keep_tail`）是配置项；园丁每次跑顺手轮转一次
-（定期＝跟着看护周期走，不必另设调度）。
+**路径**：所有落点全部经 `ledger.store.require_within` 校验，拿到的是**解析后的根内路径**；
+归档名由「名字 + 时间戳」拼成，两段都先洗掉路径语义（分隔符、`..`），
+所以归档名不可能指到根外。
+
+阈值（`rotate_max_bytes` / `rotate_keep_tail` / `rotate_keep_files`）是配置项；
+园丁每次跑顺手轮转一次（定期＝跟着看护周期走，不必另设调度）。
 """
 from __future__ import annotations
 
@@ -40,7 +46,7 @@ from typing import Iterable, Optional
 
 from ..core.encoding import read_text
 from ..core.paths import StateLayout
-from ..ledger.store import LedgerError, require_within, write_lines, write_work_file
+from ..ledger.store import LedgerError, move_file, require_within, write_lines, write_work_file
 
 #: 保留策略：尾部 N 行 / 每 key 最新一行
 TAIL = "tail"
@@ -53,6 +59,14 @@ LEDGER_POLICY: dict[str, tuple] = {
     "maturity.jsonl": ("latest", "obj"),
     "library.jsonl": ("latest", "name"),
 }
+
+#: 文件型产物轮转（账本之外的「每拍一份」类）：目录名 → 归档子目录
+FILE_POLICY = (
+    ("traces", "files/traces"),        # 执行者留痕（每拍一份 markdown）
+    ("reconcile", "files/reconcile"),  # 对账报告（每拍一份 markdown）
+)
+
+LOG_NAME = "tick.log"                  # 调度/看护日志（单文件，按字节整体归档）
 
 ARCHIVE_HEADER = "# 轮转归档（只移动不删）：%s｜移动 %d 行｜主账本保留 %d 行｜%s\n"
 
@@ -183,6 +197,49 @@ def rotate_all(layout: StateLayout, max_bytes: int = 1048576,
     return reports
 
 
+def rotate_files(layout: StateLayout, keep_files: int = 200,
+                 log_max_bytes: int = 1048576,
+                 stamp: Optional[str] = None) -> list[dict]:
+    """轮转**文件型**产物（T2/A3）：traces/、reconcile/ 按**份数**留最近 N 份；
+    `logs/tick.log` 按**字节**超过阈值就整体归档、另起空文件。都**只移动不删**。
+
+    归档落在 `state/archive/files/<类>/`，与 JSONL 账本归档区分开，仍可检索。
+    """
+    reports = []
+    safe_stamp = _safe_component(stamp or _dt.datetime.now().strftime("%Y%m%d-%H%M%S"),
+                                 fallback="stamp")
+    for kind, archive_rel in FILE_POLICY:
+        src_dir = getattr(layout, kind + "_dir")
+        if not src_dir.is_dir():
+            continue
+        files = sorted(p for p in src_dir.glob("*.md") if p.is_file())
+        if len(files) <= keep_files:
+            continue
+        moved = files[:len(files) - keep_files]
+        dest_dir = layout.archive_dir / archive_rel
+        for p in moved:
+            move_file(p, require_within(dest_dir / p.name, layout.root), layout.root)
+        reports.append({"name": kind, "moved": len(moved), "kept": len(files) - len(moved),
+                        "archive": archive_rel})
+    if log_max_bytes > 0:
+        log = layout.logs_dir / LOG_NAME
+        if log.is_file() and log.stat().st_size >= log_max_bytes:
+            dest_dir = layout.archive_dir / "files" / "logs"
+            dest = require_within(dest_dir / ("%s.%s" % (LOG_NAME, safe_stamp)),
+                                  layout.root)
+            suffix = 1
+            while dest.exists():        # 同秒重跑：换后缀，不覆盖已有归档
+                suffix += 1
+                dest = require_within(dest_dir / ("%s.%s-%d" % (LOG_NAME, safe_stamp, suffix)),
+                                      layout.root)
+            move_file(log, dest, layout.root)
+            # 主日志另起空文件（append 方继续写新内容；旧内容全在归档件里）
+            write_work_file(log, "", layout.root, require_markers=())
+            reports.append({"name": "logs/" + LOG_NAME, "moved": 1, "kept": 0,
+                            "archive": "files/logs"})
+    return reports
+
+
 def ledger_sizes(layout: StateLayout) -> dict:
     """账本体检（园丁报告用）：名字 → 字节数。"""
     return {name: (layout.root / name).stat().st_size
@@ -190,17 +247,24 @@ def ledger_sizes(layout: StateLayout) -> dict:
 
 
 def archived_files(layout: StateLayout) -> list[str]:
-    """归档区里的文件名（可检索的证明：主账本缩了，但历史还在）。"""
-    return sorted(p.name for p in Path(layout.archive_dir).glob("*.jsonl"))
+    """归档区里的文件（可检索的证明：主账本缩了，但历史还在）。"""
+    return sorted(str(p.relative_to(layout.archive_dir).as_posix())
+                  for p in Path(layout.archive_dir).rglob("*")
+                  if p.is_file())
 
 
 def search_archive(layout: StateLayout, needle: str, limit: int = 20) -> list[str]:
-    """在归档区里检索（**可检索**是「只移动不删」的另一半：不只要留着，还要找得回来）。"""
+    """在归档区里检索（**可检索**是「只移动不删」的另一半：不只要留着，还要找得回来）。
+
+    覆盖 JSONL 账本归档与 `files/` 下的文件型产物（traces/reconcile/logs）。
+    """
     hits = []
-    for path in sorted(Path(layout.archive_dir).glob("*.jsonl")):
+    for path in sorted(Path(layout.archive_dir).rglob("*")):
+        if not path.is_file():
+            continue
         for no, line in enumerate(_lines(path), 1):
             if needle in line:
-                hits.append("%s:%d" % (path.name, no))
+                hits.append("%s:%d" % (path.relative_to(layout.archive_dir).as_posix(), no))
                 if len(hits) >= limit:
                     return hits
     return hits

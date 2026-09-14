@@ -9,6 +9,10 @@
 | R4 状态根被忽略 | 状态目录进版本库＝把个人账本推上公开仓库 |
 | R5 无凭据字面量 | key/token/私钥不得硬编码 |
 | R6 无 BOM | 写盘统一 UTF-8 无 BOM（BOM 曾造出「幽灵首行」事故） |
+| R7 rc 语义单一来源 | CLI 里不许出现裸退出码整数，一律走 `core/exit_codes` 常量 |
+| R8 写盘窗口一致 | 只有 `ledger/store.py` 与 `core/encoding.py` 可以直接写盘 |
+| R9 同源表不缩表 | 提示词↔代码同源表有覆盖下限，静默删词即 FAIL |
+| R10 计划任务隐藏启动器 | 计划任务动作必须走 `wscript` ＋ 窗口样式 0 的 vbs，不许直接挂 .bat |
 
 自检（`selftest()`）给每条规则配**正反用例**：正例=正常态应 PASS，反例=病灶态应 FAIL。
 规则自身的防退化靠它——规则改坏了不会静默。
@@ -24,7 +28,9 @@ from typing import Callable, Iterable
 SCAN_SUFFIXES = (".py", ".md", ".toml", ".cfg", ".txt", ".yml", ".yaml", ".sh",
                  # 一键件与计划任务脚本也要扫：它们**就是**发布内容的一部分
                  # （曾经因为不在这张表里，规则看不见它们）
-                 ".bat", ".cmd", ".ps1", ".psm1")
+                 ".bat", ".cmd", ".ps1", ".psm1",
+                 # 隐藏启动器（计划任务动作挂它，R10 守的就是这条链）
+                 ".vbs")
 SKIP_DIRS = {"__pycache__", ".git", "state", "archive", ".venv", "venv",
              "node_modules", ".pytest_cache", ".ruff_cache", "build", "dist"}
 
@@ -326,6 +332,40 @@ def rule_sync_terms_coverage(ctx: RuleContext) -> tuple[str, bool]:
     return (detail, not missing_in_table and not missing_in_prompt)
 
 
+def rule_hidden_launcher(ctx: RuleContext) -> tuple[str, bool]:
+    """R10 计划任务必须走隐藏启动器。
+
+    不弹窗是跨会话硬约束（R3，优先级最高）：引擎的调度动作**不得打扰正在用电脑的人**。
+    直接挂 `.bat`／`cmd`／裸 `python` 会每跑一次闪一个控制台窗口抢焦点；而
+    `New-ScheduledTaskSettingsSet -Hidden` 只隐藏任务列表**条目**、**不隐藏窗口**——
+    这两个是常被搞混的东西。
+    规则守三个**结构事实**：① `tools/run_tick_hidden.vbs` 在且带窗口样式 0 的调用形态；
+    ② `tools/scheduled_task.ps1` 的注册动作走 `wscript` ＋ 那个 vbs；③ ps1 里不许再出现
+    「直接 `-Execute` 那个 .bat」的形态（本机真被当场叫停过）。
+    """
+    problems = []
+    vbs = ctx.repo_root / "tools" / "run_tick_hidden.vbs"
+    ps1 = ctx.repo_root / "tools" / "scheduled_task.ps1"
+    if not vbs.is_file():
+        problems.append("缺 tools/run_tick_hidden.vbs")
+    else:
+        vbs_text = _read(vbs)
+        if ", 0, False" not in vbs_text:
+            problems.append("vbs 缺窗口样式 0 的调用形态（sh.Run cmd, 0, False）")
+    if not ps1.is_file():
+        problems.append("缺 tools/scheduled_task.ps1")
+    else:
+        ps1_text = _read(ps1)
+        if "wscript" not in ps1_text.lower() or "run_tick_hidden.vbs" not in ps1_text:
+            problems.append("ps1 注册动作不走 wscript ＋ run_tick_hidden.vbs")
+        if re.search(r"New-ScheduledTaskAction\s+-Execute\s+\$bat\b", ps1_text):
+            problems.append("ps1 仍直接 -Execute 那个 .bat（会闪窗）")
+    return ("计划任务隐藏启动器：%s"
+            % ("；".join(problems) if problems
+               else "vbs 窗口样式 0 ／ ps1 走 wscript＋vbs ／ 不直接挂 .bat，全部满足"),
+            not problems)
+
+
 RULES: tuple[tuple[str, Callable[[RuleContext], tuple[str, bool]]], ...] = (
     ("R1 零绝对路径", rule_no_absolute_paths),
     ("R2 提示词代码同源", rule_prompt_code_sync),
@@ -336,6 +376,7 @@ RULES: tuple[tuple[str, Callable[[RuleContext], tuple[str, bool]]], ...] = (
     ("R7 rc 语义单一来源", rule_exit_codes_single_source),
     ("R8 写盘窗口一致", rule_writes_go_through_store),
     ("R9 同源表不缩表", rule_sync_terms_coverage),
+    ("R10 计划任务隐藏启动器", rule_hidden_launcher),
 )
 
 
@@ -383,6 +424,16 @@ def _make_tree(root: Path) -> RuleContext:
     (root / "prompts" / TICK_PROMPT).write_text(
         "本拍题面：按差异动手。\n" + "\n".join(SYNC_TERMS) + "\n", encoding="utf-8")
     (root / "prompts" / ORG_PROMPT).write_text("组织会话：只从差异生芽。\n", encoding="utf-8")
+    # R10 的正例形态：隐藏启动器 vbs（窗口样式 0）＋ 注册脚本走 wscript＋vbs
+    (root / "tools").mkdir(parents=True, exist_ok=True)
+    (root / "tools" / "run_tick_hidden.vbs").write_text(
+        'Option Explicit\nDim sh\nSet sh = CreateObject("WScript.Shell")\n'
+        'sh.Run "run_tick.bat", 0, False\n', encoding="utf-8")
+    (root / "tools" / "scheduled_task.ps1").write_text(
+        '$vbs = Join-Path $PSScriptRoot "run_tick_hidden.vbs"\n'
+        '$wscript = Join-Path $env:SystemRoot "System32\\wscript.exe"\n'
+        'New-ScheduledTaskAction -Execute $wscript -Argument ("//nologo " + $vbs)\n',
+        encoding="utf-8")
     (root / ".gitignore").write_text("state/\n", encoding="utf-8")
     return RuleContext.from_repo(root)
 
@@ -415,6 +466,9 @@ SELFTEST_CASES = (
     ("R9 正例（同源表覆盖齐）", "rule_sync_terms_coverage", None, True),
     ("R9 反例（提示词丢机制词）", "rule_sync_terms_coverage",
      "prompts/" + TICK_PROMPT, "# 只剩一个词\n差异\n"),
+    ("R10 正例（隐藏启动器就位）", "rule_hidden_launcher", None, True),
+    ("R10 反例（ps1 直接挂 .bat）", "rule_hidden_launcher",
+     "tools/scheduled_task.ps1", 'New-ScheduledTaskAction -Execute $bat\n'),
 )
 
 

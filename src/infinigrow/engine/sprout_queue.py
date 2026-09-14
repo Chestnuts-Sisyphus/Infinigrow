@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from ..ledger.store import read_jsonl, write_jsonl_work_file
-from .model import Sprout
+from .model import SPROUTING_KINDS, Sprout
 
 
 @dataclass
@@ -67,6 +67,35 @@ class SproutQueue:
         sprout.leads = 0
         sprout.last_lead_tick = None
         self.add(sprout)
+
+    def review_frozen(self, recent_diffs, tick: int, max_relight: int = 3) -> list[str]:
+        """冻结区重看（T4/A5）：每 `frozen_review_every` 拍重看一次冻结区。
+
+        判据（具体状态，反不完全归纳）：冻结芽的 (对象, 维度) 在**本拍差异**里仍以
+        **未消解**形态出现（预测未执行／预测外发现／预测内错）→ 重新点亮（挂起≠死亡）；
+        否则记为「未点亮＋原因」。每拍最多重亮 `max_relight` 根，防批量复活把队列顶爆
+        （刚复活的刚刷新过出生拍，不会被「最旧」立即挤出）。
+
+        此前 `frozen_review_every` 只有配置项没有调用方——冻结区一旦被挤满就永不重看，
+        冻结芽只能在下次「同一差异重现」时靠 `revive` 复活。现在引擎每 N 拍自己重看。
+        """
+        alive = {(d.obj, d.dimension) for d in recent_diffs
+                 if d.kind in SPROUTING_KINDS}
+        notes: list[str] = []
+        relit = 0
+        for s in sorted(self.frozen, key=lambda x: (x.created_tick, x.id)):
+            if (s.obj, s.dimension) in alive:
+                if relit < max_relight:
+                    self.revive(s, tick)
+                    notes.append("冻结区重看：重新点亮 %s（%s×%s）"
+                                 % (s.id, s.obj, s.dimension))
+                    relit += 1
+                else:
+                    notes.append("冻结区重看：未点亮 %s（原因：本拍重亮已达上限）"
+                                 % s.id)
+            else:
+                notes.append("冻结区重看：未点亮 %s（原因：差异已消解或未重现）" % s.id)
+        return notes
 
     # ---------------------------------------------------------------- 取题
     def eligible(self, tick: int) -> list[Sprout]:

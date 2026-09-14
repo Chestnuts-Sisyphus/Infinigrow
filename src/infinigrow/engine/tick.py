@@ -33,7 +33,7 @@ import datetime as _dt
 import json
 import os
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
@@ -48,7 +48,7 @@ from .domain_saturation import DomainState, value_at_freeze
 from .model import (Diff, DiffKind, MATURITY_CAP, Observation, OutcomeRecord,
                     Prediction, Sprout)
 from .org_trigger import should_run_org_session
-from .reconcile import diff_summary, reconcile, redemption_report
+from .reconcile import diff_summary, pending_pointer, reconcile, redemption_report
 from .sprout_queue import SproutQueue
 
 TICK_STATUS_MARK = "consecutive_failures"
@@ -143,12 +143,17 @@ def current_tick(layout: StateLayout) -> tuple[int, str]:
 
     所以：心跳读不出来就**从账本反推**（取 diffs/outcomes/maturity/executor 里的最大拍号 +1），
     并把这件事写成可见说明——静默重置比报错危险得多。
+
+    另一个同样危险的情形（v2.2.1 后真机复见）：心跳**可读**但拍号**落后于账本最大拍号**
+    （序列倒退——现场：账本跨拍 1-16，心跳却是 4）。这是旧事故留下的余波：
+    心跳没坏，恢复逻辑只守「不可读」一种触发，于是新序列 4、5、6… 会**逐一覆写**旧报告
+    `reconcile-00004..00016.md`。所以只要「心跳拍号 < 账本最大拍号」就同样恢复，
+    不许把拍号序列接回已经被账本占用的区间。
     """
     status = read_tick_status(layout)
     note = str(status.get("last_note") or "")
     tick = int(status.get("tick") or 0)
-    if tick > 0 and not note.startswith("心跳文件不可解析"):
-        return tick + 1, ""
+    heartbeat_broken = tick <= 0 or note.startswith("心跳文件不可解析")
     recovered = 0
     for path in (layout.diff_ledger, layout.outcome_ledger, layout.maturity_chain,
                  layout.executor_ledger):
@@ -156,9 +161,13 @@ def current_tick(layout: StateLayout) -> tuple[int, str]:
             value = rec.get("tick")
             if isinstance(value, int) and value > recovered:
                 recovered = value
-    if recovered:
-        why = ("心跳不可读（%s），已从账本恢复：本拍按拍 %d 起算（账本最大拍号 %d）"
-               % (note or "原因未知", recovered + 1, recovered))
+    if recovered and (heartbeat_broken or tick < recovered):
+        if heartbeat_broken:
+            why = ("心跳不可读（%s），已从账本恢复：本拍按拍 %d 起算（账本最大拍号 %d）"
+                   % (note or "原因未知", recovered + 1, recovered))
+        else:
+            why = ("心跳拍号 %d 落后于账本最大拍号 %d（序列倒退），已从账本恢复："
+                   "本拍按拍 %d 起算" % (tick, recovered, recovered + 1))
         return recovered + 1, why
     return tick + 1, ""
 
@@ -328,7 +337,7 @@ def evaluate_outcome(sprout: Sprout, diffs: Sequence[Diff], tick: int,
     return OutcomeRecord(sprout_id=sprout.id, predicted_edge=sprout.predicted_edge,
                          actual_edge=actual, redeemed=redeemed,
                          pointer=sprout.pointer, tick=tick, sampled=sampled,
-                         verifiable=verifiable)
+                         verifiable=verifiable, obj=sprout.obj)
 
 
 # --------------------------------------------------------------------- 提示词
@@ -496,6 +505,10 @@ def _redemption_lines(layout: StateLayout) -> list[str]:
         for bucket, stat in report["分桶"].items():
             lines.append("  - 桶 %s：n=%d 兑现率=%.2f"
                          % (bucket, stat["n"], stat["兑现率"]))
+    cap = report.get("固化边") or {}
+    if cap.get("n"):
+        lines.append("- 固化边（应用面，不可机械验证）：%d 条，单独列出：%s"
+                     % (cap["n"], "、".join(cap.get("单独列出") or [])[:160]))
     return lines
 
 
@@ -707,6 +720,28 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
         obs = subject_mod.observe_subject(subject_root)
     diffs = reconcile(preds, obs, tick)
 
+    # 待补指针超时（T4/A6）：差异账里 `pending_pointer=True` 的条目超过宽限拍数
+    # → 生成「指针缺失」差异并**照样产芽**（机制正本：超时未补＝照样产芽）。
+    # 此前 `reconcile.pending_pointer()` 只有实现没有调用方——待补指针只登记、永不处理。
+    # 判据（具体状态）：条目 `tick` 距今 ≥ 宽限拍数，且该 (对象, 维度) 尚未产出过
+    # `pointer_missing` 差异（去重：同一待补条目不重复产）。
+    pointer_timeout_keys: set[tuple[str, str]] = set()
+    pending_rows = [r for r in read_jsonl(layout.diff_ledger) if r.get("pending_pointer")]
+    done_keys = {(r.get("obj"), r.get("dimension"))
+                 for r in read_jsonl(layout.diff_ledger) if r.get("pointer_missing")}
+    pp_preds = [Prediction(obj=str(r.get("obj", "")),
+                           dimension=str(r.get("dimension", "")),
+                           expected=r.get("expected", ""), tick=r.get("tick"),
+                           evidence="")
+                for r in pending_rows
+                if (r.get("obj"), r.get("dimension")) not in done_keys]
+    for d in pending_pointer(pp_preds, tick):
+        # 「指针缺失」差异的指针＝超时这一机械事实本身（无指针不成芽的纪律不变）
+        fixed = replace(d, evidence="待补指针超时@拍%d" % d.tick)
+        pointer_timeout_keys.add((fixed.obj, fixed.dimension))
+        diffs.append(fixed)
+        result.notes.append("待补指针超时（指针缺失）产芽：%s×%s" % (fixed.obj, fixed.dimension))
+
     # 6) 差异 → 域饱和闸 → 生芽；差异**全部入账**（被吸收的也记，事实不许隐藏）
     # 哪些键的变化是**本拍动作自己造成的**：动手前后各读一次主体，差值即动作的直接后果。
     # 这些差异记账、进报告——但**不派芽**：它们已经被那一手动作消解了，
@@ -728,6 +763,9 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
             record["act_caused"] = True
         if (d.obj, d.dimension, d.actual) in absorbed_keys:
             record["absorbed_by_domain"] = True
+        if d.key in pointer_timeout_keys:
+            record["source"] = "pointer-timeout"
+            record["pointer_missing"] = True
         append_jsonl(layout.diff_ledger, record, layout.root)
     result.diffs = diffs
     result.act_caused = sorted("%s×%s" % k for k in act_caused)
@@ -744,6 +782,16 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
         _, hit_cap = record_maturity(layout, d.obj, tick, steps)
         if hit_cap:
             capped_now.append(d.obj)
+
+    # 能力库**写入方**（T3/A4）：对象本拍封顶 → 写一条「可复用认知」。
+    # 此前 `library.jsonl` 没有任何写入方 → 芽源③（能力库未用）是死路径，永不产芽。
+    # 语义：封顶＝已固化（同一类输入不再烧认知）→ 值得拿到别域验证；此后若连续
+    # `LIBRARY_IDLE_TICKS` 拍未被留痕消费，`from_unused_library` 才生「为何未用」的芽。
+    for o in capped_now:
+        append_jsonl(layout.library, {
+            "name": o, "created_tick": tick, "last_used_tick": tick,
+            "source": "maturity-cap",
+        }, layout.root)
 
     new = sprout_sources.from_diffs(gate.kept, tick)
     known = [s.obj for s in queue.sprouts]
@@ -784,9 +832,15 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
         # 可对账键集＝本拍 W回 **实际读到的**那些 (对象, 维度)
         # （默认路径下就是主体读数；调用方显式给观测时就是显式那几个）。
         outcome = evaluate_outcome(topic, diffs, tick, sampled=call is not None,
-                                  observable_keys=[o.key for o in obs])
+                                   observable_keys=[o.key for o in obs])
         append_jsonl(layout.outcome_ledger, outcome.as_record(), layout.root)
         result.outcomes.append(outcome)
+
+    # 7b) 冻结区重看（T4/A5）：每 `frozen_review_every` 拍给冻结芽「重新点亮」的机会。
+    #     此前该配置项无人调用——冻结区一旦被挤满就永不重看。
+    if tick % cfg.frozen_review_every == 0 and queue.frozen:
+        for note in queue.review_frozen(diffs, tick):
+            result.notes.append(note)
 
     queue.save(layout.sprouts, layout.frozen_sprouts, layout.root)
 

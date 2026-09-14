@@ -29,7 +29,7 @@
 ```bash
 python tools/privacy_scan.py --root .                      # 通用层必须零命中
 python tools/privacy_scan.py --root . --deny privacy-deny.txt   # 项目层必须零命中
-python -m infinigrow scan                                   # 九条规则全 PASS（R1-R9）
+python -m infinigrow scan                                   # 十条规则全 PASS（R1-R10）
 python -m pytest -q                                         # 含冷启动与隐私测试
 git status --porcelain --ignored                            # state/ archive/ 秘密文件必须被忽略
 ```

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """芽队列纪律：合并、上限冻结、连领上限、冷启动随机化 vs 字典序。"""
-from infinigrow.engine.model import Sprout, SproutOrigin
+from infinigrow.engine.model import Diff, DiffKind, Sprout, SproutOrigin
 from infinigrow.engine.sprout_queue import SproutQueue
 
 
@@ -65,6 +65,38 @@ def test_revive_from_frozen():
     assert "s1" in {s.id for s in q.sprouts}                 # 挂起≠死亡：回活跃队列
     assert moved.created_tick == 4 and moved.leads == 0     # 重新点亮＝刷新年龄与连领计数
     assert q.frozen and q.frozen[0].id != "s1"               # 被挤出的换成别人
+
+
+def test_review_frozen_relights_live_diffs_and_records_reason():
+    """冻结区重看（T4/A5）：差异仍以**未消解**形态出现 → 重新点亮；
+    否则如实记录「未点亮＋原因」——不许静默躺着，也不许无差别全复活。"""
+    q = SproutQueue(cap=2)
+    q.add(_sprout("s1", "A", tick=1))
+    q.add(_sprout("s2", "B", tick=2))
+    q.add(_sprout("s3", "C", tick=3))
+    assert len(q.frozen) == 1                                # s1 被挤出
+
+    # 本拍差异：A×存在性 仍以「预测未执行」出现（未消解）→ s1 应被重新点亮
+    diffs = [Diff(DiffKind.NOT_EXECUTED, "A", "大小", "存在", "（无）", "p", tick=4)]
+    notes = q.review_frozen(diffs, tick=4)
+    assert any("重新点亮 s1" in n for n in notes)
+    assert "s1" in {s.id for s in q.sprouts}
+
+    # 差异已消解/未重现 → 记录「未点亮＋原因」，冻结区保持原样
+    notes2 = q.review_frozen([], tick=5)
+    assert any("未点亮" in n and "差异已消解或未重现" in n for n in notes2)
+    assert [s.id for s in q.frozen] == ["s2"]          # s2 被 s1 复活挤出，差异未重现→仍冻结
+
+    # 重亮上限：冻结 3 根、差异全活着 → 本拍最多重亮 max_relight 根，其余记原因
+    q2 = SproutQueue(cap=2)
+    for i in range(5):
+        q2.add(_sprout("x%d" % i, "obj%d" % i, tick=i))
+    live = [Diff(DiffKind.WRONG, "obj%d" % i, "大小", "1", "2", "p", tick=6)
+            for i in range(3)]
+    notes3 = q2.review_frozen(live, tick=6, max_relight=2)
+    relit = [n for n in notes3 if "重新点亮" in n]
+    capped = [n for n in notes3 if "重亮已达上限" in n]
+    assert len(relit) == 2 and len(capped) == 1
 
 
 def test_summary_counts_by_origin():

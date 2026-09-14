@@ -38,6 +38,7 @@ from ..core.paths import StateLayout
 from ..ledger.store import append_jsonl, read_jsonl
 from . import executor as exec_mod
 from . import sprout_sources
+from . import subject as subject_mod
 from .domain_saturation import DomainState, domain_key, value_at_freeze
 from .model import Diff, DiffKind, Prediction
 from .org_trigger import record_org_session
@@ -254,8 +255,15 @@ def _extract_json(text: str) -> Optional[dict]:
     return None
 
 
-def parse_org_output(text: str, tick: int) -> OrgOutput:
-    """解析组织会话输出 → 发现 ＋ 规划预测。解析失败**不猜**（返回 parse_error）。"""
+def parse_org_output(text: str, tick: int,
+                     allowed_objs: Optional[set] = None) -> OrgOutput:
+    """解析组织会话输出 → 发现 ＋ 规划预测。解析失败**不猜**（返回 parse_error）。
+
+    对象名**机械闸**（T5/A11）：给了 `allowed_objs`（本拍主体观测集）时，
+    findings 的对象必须在该清单里（描述现实的发现不许发明对象名）；
+    predictions 的对象可在清单里，也可以是**主体内合法新相对路径**（提议创建）。
+    不合规的条目**丢弃并记 parse_error**（不产芽）；不产芽比产错芽诚实。
+    """
     data = _extract_json(text)
     if data is None:
         return OrgOutput(parse_error="输出里没有可解析的 JSON 对象")
@@ -271,18 +279,31 @@ def parse_org_output(text: str, tick: int) -> OrgOutput:
             out.parse_error = ("第 %d 条发现不合格（kind/obj/dimension 三者缺一）：%s"
                                % (i, json.dumps(rec, ensure_ascii=False)[:120]))
             continue
+        if allowed_objs is not None:
+            ok, why = subject_mod.valid_subject_object(obj, allowed_objs)
+            if not ok:
+                out.parse_error = ("第 %d 条发现对象名被拒（%s）：%s"
+                                   % (i, why, json.dumps(rec, ensure_ascii=False)[:120]))
+                continue
         out.findings.append(OrgFinding(
             kind=kind, obj=obj, dimension=dimension,
             expected=str(rec.get("expected") or "（未说）"),
             actual=str(rec.get("actual") or "（未说）"),
             pointer=str(rec.get("pointer") or rec.get("evidence") or "").strip()))
-    for rec in data.get("predictions") or []:
+    for j, rec in enumerate(data.get("predictions") or [], 1):
         if not isinstance(rec, dict):
             continue
         obj = str(rec.get("obj") or "").strip()
         dimension = str(rec.get("dimension") or "").strip()
         if not obj or not dimension:
             continue
+        if allowed_objs is not None:
+            ok, why = subject_mod.valid_subject_object(obj, allowed_objs,
+                                                       for_proposal=True)
+            if not ok:
+                out.parse_error = ("第 %d 条预测对象名被拒（%s）：%s"
+                                   % (j, why, json.dumps(rec, ensure_ascii=False)[:120]))
+                continue
         out.predictions.append(Prediction(
             obj=obj, dimension=dimension, expected=str(rec.get("expected") or ""),
             tick=tick,
@@ -321,7 +342,9 @@ def run_org_session(*, settings: Settings, layout: StateLayout, tick: int,
         record_org_session(layout, tick, "失败：rc=%d %s" % (call.rc, call.note))
         return run
 
-    parsed = parse_org_output(call.output, tick)
+    parsed = parse_org_output(call.output, tick,
+                              allowed_objs={k[0] for k
+                                            in subject_mod.subject_readings(subject_root)})
     run.findings = parsed.findings
     run.predictions = parsed.predictions
     run.parse_error = parsed.parse_error

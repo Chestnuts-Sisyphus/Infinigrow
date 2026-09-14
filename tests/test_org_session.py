@@ -38,7 +38,7 @@ GOOD = json.dumps({
 }, ensure_ascii=False)
 
 NO_POINTER = json.dumps({"findings": [
-    {"kind": "预测外发现", "obj": "主体/x.md", "dimension": "存在性",
+    {"kind": "预测外发现", "obj": "主体/growth-1.md", "dimension": "存在性",
      "expected": "（预测未提）", "actual": "缺失", "pointer": ""},
 ]}, ensure_ascii=False)
 
@@ -52,6 +52,7 @@ def _settings(tmp_path):
     subject = tmp_path / "subject"
     subject.mkdir(parents=True, exist_ok=True)
     (subject / "notes.md").write_text("hello", encoding="utf-8")
+    (subject / "growth-1.md").write_text("1", encoding="utf-8")
     return load_settings(env={}, state_root=str(tmp_path / "state"),
                          repo_root=str(REPO_ROOT), subject_root=str(subject))
 
@@ -182,6 +183,45 @@ def test_bad_finding_shape_is_dropped_with_visible_error(tmp_path):
     run, _layout, queue = _run(settings, 1, payload)
     assert run.findings == [] and run.sprouts == []
     assert "不合格" in run.parse_error
+
+
+def test_finding_with_fabricated_object_is_dropped_with_error(tmp_path):
+    """T5/A11 对象名机械闸：findings 引用**不可对账**的对象名 → 丢弃并记 parse_error（不产芽）。
+
+    「发明机械层读不到的对象名」是组织会话空谈的来源——对象名纪律从此不只是提示词约定。
+    """
+    payload = json.dumps({"findings": [
+        {"kind": "预测外发现", "obj": "主体/不存在的对象", "dimension": "存在性",
+         "expected": "（预测未提）", "actual": "缺失", "pointer": "p"},
+    ], "predictions": []}, ensure_ascii=False)
+    settings = _settings(tmp_path)
+    run, _layout, _queue = _run(settings, 1, payload)
+    assert run.findings == [] and run.sprouts == []
+    assert "对象名被拒" in run.parse_error
+
+
+def test_prediction_can_propose_new_subject_path(tmp_path):
+    """T5/A11：predictions 可以提议**主体内合法新相对路径**（预期=存在＝该创建它）——
+    这是「提议者」职责的合法通道，不许被闸误伤。"""
+    payload = json.dumps({"findings": [], "predictions": [
+        {"obj": "主体/journal/0001.md", "dimension": "存在性", "expected": "存在",
+         "pointer": "计划:提议创建"},
+    ]}, ensure_ascii=False)
+    settings = _settings(tmp_path)
+    run, _layout, _queue = _run(settings, 1, payload)
+    assert len(run.predictions) == 1
+    assert run.predictions[0].obj == "主体/journal/0001.md"
+
+
+def test_prediction_with_escaping_path_is_dropped(tmp_path):
+    """T5/A11：predictions 带 `..`（越界相对路径）→ 丢弃并记 parse_error。"""
+    payload = json.dumps({"findings": [], "predictions": [
+        {"obj": "主体/../逃出.md", "dimension": "存在性", "expected": "存在",
+         "pointer": "p"},
+    ]}, ensure_ascii=False)
+    settings = _settings(tmp_path)
+    run, _layout, _queue = _run(settings, 1, payload)
+    assert run.predictions == [] and "对象名被拒" in run.parse_error
 
 
 @pytest.mark.parametrize("bad", ["", "not json at all", "{}"])

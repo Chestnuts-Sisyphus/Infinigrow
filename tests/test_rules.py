@@ -39,6 +39,24 @@ def test_selftest_negative_case_hits(tmp_path):
     assert ok is False
 
 
+def test_vbs_files_are_scanned_by_static_rules(tmp_path):
+    """T10/B3：`.vbs` 已进 `SCAN_SUFFIXES` → 隐藏启动器里的病灶也会被 R1/R5 看见。"""
+    from infinigrow.rules.static_scan import rule_no_absolute_paths, rule_no_secrets
+    root = tmp_path / "v"
+    (root / "tools").mkdir(parents=True)
+    # 病灶样本按**拼装**构造：源码里不出现完整的「盘符:斜杠」形态（自匹配假阳性）
+    drive = "C" + ":" + "/" + "Users/" + "someone/launcher.vbs"
+    (root / "tools" / "run.vbs").write_text(
+        'sh.Run "%s", 0, False\n' % drive, encoding="utf-8")
+    ctx = RuleContext.from_repo(root)
+    detail, ok = rule_no_absolute_paths(ctx)
+    assert ok is False and "run.vbs" in detail
+    fake = "ghp" + "_" + ("a" * 30)
+    (root / "tools" / "run.vbs").write_text('TOKEN = "%s"\n' % fake, encoding="utf-8")
+    _, ok2 = rule_no_secrets(ctx)
+    assert ok2 is False
+
+
 @pytest.mark.parametrize("name", [n for n, _ in RULES])
 def test_every_rule_runs(name):
     """规则本身不许抛异常（抛了＝扫描器被拖崩）。"""

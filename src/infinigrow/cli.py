@@ -22,6 +22,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+from typing import Optional
 
 from . import __codename__, __version__
 from .core import exit_codes as rc
@@ -65,9 +66,10 @@ def main(argv=None) -> int:
     p_tick.add_argument("--no-org", action="store_true", help="本拍不跑组织会话")
     sub.add_parser("dry-run", help="只解析配置与路径（零写盘）")
     sub.add_parser("gardener", help="跑一次机械园丁（含轮转与看护）")
-    p_rot = sub.add_parser("rotate", help="账本轮转（只移动不删）")
+    p_rot = sub.add_parser("rotate", help="账本与留痕/报告轮转（只移动不删）")
     p_rot.add_argument("--max-bytes", type=int, default=None, help="超过这么多字节才轮转")
     p_rot.add_argument("--keep-tail", type=int, default=None, help="主账本保留尾部行数")
+    p_rot.add_argument("--keep-files", type=int, default=None, help="留痕/报告保留最近份数")
     p_rot.add_argument("--search", default=None, help="在归档区检索关键词（可检索性）")
     p_scan = sub.add_parser("scan", help="静态规则扫描")
     p_scan.add_argument("--json", action="store_true")
@@ -81,6 +83,11 @@ def main(argv=None) -> int:
     p_orgs.add_argument("--executor", default=None, help="执行者命令（同 tick）")
     p_orgs.add_argument("--json", action="store_true")
     sub.add_parser("org-status", help="看组织会话发现的结局（可被打脸的机械形态）")
+    sub.add_parser("status", help="一键总览：拍号/主体/队列/兑现率/告警一行看完")
+    p_pause = sub.add_parser("pause", help="暂停引擎（停计划任务，**不删**；可 resume 恢复）")
+    p_pause.add_argument("--task", default=None, help="计划任务名（默认 Infinigrow_tick）")
+    p_resume = sub.add_parser("resume", help="恢复引擎（启用计划任务）")
+    p_resume.add_argument("--task", default=None, help="计划任务名（默认 Infinigrow_tick）")
 
     args = ap.parse_args(argv)
     settings = load_settings(args.config, state_root=args.state_root,
@@ -161,7 +168,8 @@ def main(argv=None) -> int:
         return rc.RULES_FAIL if report.fatal else rc.OK
 
     if args.cmd == "rotate":
-        from .ledger.rotation import archived_files, rotate_all, search_archive
+        from .ledger.rotation import (archived_files, rotate_all, rotate_files,
+                                      search_archive)
         layout = resolve_state(settings.state_root, settings.repo_root, create=True)
         if args.search:
             hits = search_archive(layout, args.search)
@@ -174,13 +182,23 @@ def main(argv=None) -> int:
                                        else settings.rotate_max_bytes),
                             keep_tail=(args.keep_tail if args.keep_tail is not None
                                        else settings.rotate_keep_tail))
-        if not reports:
-            print("无账本超阈值：不动（阈值 %d 字节，保留尾部 %d 行）"
-                  % (settings.rotate_max_bytes, settings.rotate_keep_tail))
+        file_reports = rotate_files(layout,
+                                    keep_files=(args.keep_files if args.keep_files is not None
+                                                else settings.rotate_keep_files),
+                                    log_max_bytes=(args.max_bytes if args.max_bytes is not None
+                                                   else settings.rotate_max_bytes))
+        if not reports and not file_reports:
+            print("无账本/留痕超阈值：不动（账本阈值 %d 字节，保留尾部 %d 行；"
+                  "留痕/报告保留最近 %d 份）"
+                  % (settings.rotate_max_bytes, settings.rotate_keep_tail,
+                     settings.rotate_keep_files))
         for r in reports:
             print("轮转 %s：移动 %d 行 → %s（%d→%d 字节）"
                   % (r["name"], r["moved"], r["archive"], r["bytes_before"],
                      r["bytes_after"]))
+        for r in file_reports:
+            print("轮转 %s：移动 %d 份 → %s（保留 %d 份）"
+                  % (r["name"], r["moved"], r["archive"], r["kept"]))
         print("归档区现有：%s" % ("、".join(archived_files(layout)) or "（空）"))
         return rc.OK
 
@@ -264,7 +282,129 @@ def main(argv=None) -> int:
                      row.get("dimension"), row.get("pointer") or "（缺）", row["status"]))
         return rc.OK
 
+    if args.cmd == "status":
+        return _cmd_status(settings)
+
+    if args.cmd in ("pause", "resume"):
+        return _toggle_task(args.cmd, args.task)
+
     return rc.USAGE
+
+
+def _cmd_status(settings) -> int:
+    """T8/A15 一键总览：拍号／主体文件数／队列／兑现率判定／ALERT 首行／今日执行者用量。"""
+    from .core.paths import resolve_state as _resolve
+    from .engine.reconcile import redemption_report
+    from .engine.tick import read_tick_status
+    from .ledger.store import read_jsonl
+    layout = _resolve(settings.state_root, settings.repo_root, create=False)
+    status = read_tick_status(layout)
+    print("Infinigrow 状态（状态根 %s）" % layout.root)
+    print("  拍号：%s（心跳 %s；连续失败 %d；执行者连续失败 %d）"
+          % (status.get("tick", "?"), status.get("last_time") or "（无）",
+             int(status.get("consecutive_failures") or 0),
+             int(status.get("consecutive_executor_failures") or 0)))
+
+    snapshot = {}
+    if layout.subject_snapshot.is_file():
+        try:
+            snapshot = json.loads(layout.subject_snapshot.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            snapshot = {}
+    print("  主体：%s（存在=%s，文件 %s 个，共 %s 字节）"
+          % (snapshot.get("root_name") or "（无快照）",
+             snapshot.get("exists"), snapshot.get("file_count"),
+             snapshot.get("total_bytes")))
+
+    from .engine.sprout_queue import SproutQueue
+    queue = SproutQueue.load(layout.sprouts, layout.frozen_sprouts,
+                             cap=settings.queue_cap, lead_limit=settings.lead_limit,
+                             cold_start_ticks=settings.cold_start_ticks)
+    s = queue.summary()
+    print("  队列：活跃 %d／冻结 %d（芽源分布 %s）"
+          % (s["active"], s["frozen"], json.dumps(s["by_origin"], ensure_ascii=False)))
+
+    report = redemption_report(read_jsonl(layout.outcome_ledger))
+    rate = report.get("兑现率")
+    print("  兑现率：%s（样本 %d 条；%s）"
+          % (report["判定"], report["样本数"],
+             "%.2f" % rate if rate is not None else "不可计算"))
+    cap = report.get("固化边") or {}
+    if cap.get("n"):
+        print("  固化边（不可机械验证，单独列出）：%d 条" % cap["n"])
+
+    alert_line = "（无 ALERT.md）"
+    alert_path = layout.root / "ALERT.md"
+    if alert_path.is_file():
+        for line in alert_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("# "):
+                alert_line = line
+                break
+    print("  ALERT 首行：%s" % alert_line)
+
+    _print_usage_line(layout)
+    return rc.OK
+
+
+def _print_usage_line(layout) -> None:
+    """T9/A16 成本与用量：只汇总**执行者自报**的用量（`IG_USAGE`），不拿长度冒充 token。"""
+    from .ledger.store import read_jsonl as _read
+    import datetime as _dt
+    rows = _read(layout.executor_ledger)
+    today = _dt.date.today().isoformat()
+    calls = [r for r in rows if str(r.get("time", "")).startswith(today)]
+    total_tokens = 0
+    reported = 0
+    for r in calls:
+        usage = r.get("usage")
+        if isinstance(usage, dict):
+            reported += 1
+            # 接受两种自报形态：`tokens`/`total_tokens`（合并口径）或
+            # prompt/completion_tokens（分项口径）；不拿输出长度冒充 token
+            t = usage.get("tokens") or usage.get("total_tokens")
+            if t is not None:
+                total_tokens += int(t)
+            else:
+                total_tokens += int(usage.get("prompt_tokens") or 0)
+                total_tokens += int(usage.get("completion_tokens") or 0)
+    if not calls:
+        print("  今日执行者调用：0 次（今日尚未调用）")
+        return
+    if not reported:
+        print("  今日执行者调用：%d 次；执行者**未自报用量**（IG_USAGE），token/花费不可估算"
+              % len(calls))
+        return
+    print("  今日执行者调用：%d 次；自报用量 %d 次，token 合计 %d"
+          % (len(calls), reported, total_tokens))
+
+
+def _toggle_task(action: str, task: Optional[str]) -> int:
+    """T8/A15 pause/resume：停/起计划任务（**不删**；任务仍在，resume 可恢复）。
+
+    走 `Disable-ScheduledTask`/`Enable-ScheduledTask`，与 `scheduled_task.ps1` 同名约定
+    （`IG_TASK_NAME` 或默认 `Infinigrow_tick`）。非 Windows 上报「环境不满足」（rc=4）。
+    """
+    import subprocess as _sp
+    import os as _os
+    task = task or _os.environ.get("IG_TASK_NAME") or "Infinigrow_tick"
+    if sys.platform != "win32":
+        print("计划任务仅 Windows（本机：%s）；未做任何动作。"
+              "想停引擎可 Disable-ScheduledTask 或删除调度（见 docs/running.md）。" % sys.platform)
+        return rc.REFUSE
+    verb = "Disable" if action == "pause" else "Enable"
+    cmd = ["powershell", "-NoProfile", "-Command",
+           "%s-ScheduledTask -TaskName '%s' | Out-Null; "
+           "(Get-ScheduledTask -TaskName '%s').State" % (verb, task, task)]
+    proc = _sp.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                   errors="replace", timeout=60)
+    out = (proc.stdout or "").strip()
+    if proc.returncode != 0 or "Disabled" not in out and "Ready" not in out:
+        print("FAIL：%s-ScheduledTask '%s' 失败（rc=%d）：%s%s"
+              % (verb, task, proc.returncode, out, proc.stderr or ""))
+        return rc.USAGE
+    print("%s 计划任务 '%s' → %s" % ("暂停" if action == "pause" else "恢复",
+                                     task, out))
+    return rc.OK
 
 
 if __name__ == "__main__":

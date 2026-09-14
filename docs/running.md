@@ -170,3 +170,37 @@ python -m infinigrow org-status     # 组织会话发现的结局（待验/被�
 
 兑现率的分母只数**有执行者动手的拍**（`sample=true`）：
 机械拍的「打脸」不代表能力差，它只是没有手在动。
+
+## 四、一键总览与暂停/恢复（T8/A15）
+
+```bash
+python -m infinigrow status      # 拍号/主体文件数/队列/兑现率判定/ALERT 首行/今日 token
+python -m infinigrow pause       # 停计划任务（**不删**；任务仍在，可 resume）
+python -m infinigrow resume      # 恢复计划任务
+```
+
+`pause`/`resume` 只切换计划任务的 Enabled 状态（`Disable-ScheduledTask`/`Enable-ScheduledTask`），
+**不删除任务、不动账本**。非 Windows 上它们报「环境不满足」（rc=4），不假装成功。
+`status` 里的 token 数只统计执行者**自报**的用量（`IG_USAGE`）——执行者不自报就写
+「不可估算」，引擎不拿输出长度冒充 token。
+
+## 五、本机部署参考（私有部分，按你的环境照做；**别把密钥写进仓库**）
+
+引擎本身零配置可跑；让它真的动手、真的按时跑，本机需要四件事：
+
+1. **执行者适配器**（私有脚本，放仓库之外）：读你**自己的**密钥来源（只读、经环境变量、
+   不落盘不回显），把引擎的提示词（stdin）送给你的模型，把 stdout 原样返回；
+   成功时另打一行 `IG_USAGE {…}` 自报用量。契约见本文档「一、执行者通道」。
+   引擎**不写死任何厂商**：接什么模型由 `IG_EXECUTOR` 决定。
+2. **用户级环境变量**：`IG_EXECUTOR`（适配器命令）、`IG_EXECUTOR_TIMEOUT_S`（超时）、
+   以及适配器自己需要的模型档位变量（例如 `IG_MUSE_EFFORT=low`）。
+3. **计划任务**：`tools\manage_scheduled_task.bat install` 或
+   `tools\scheduled_task.ps1 -Action install`（每 10 分钟一拍，动作是**隐藏启动器**，
+   见 §2.5——别把 `.bat` 直接挂上去）。改频率：`IG_TICK_MINUTES`。
+4. **生长主体**：默认在仓库同级（`<仓库名>-subject`）；换主体＝改 `IG_SUBJECT_ROOT` 并
+   **连同换 `IG_STATE_ROOT`**（旧账本说的是旧主体的事，见 `docs/growth-subject.md`）。
+
+自检：`python <你的适配器> --selftest`（如果有）→ 应打印「在线」类回答；
+`python -m infinigrow status` → 看到拍号随时间自增、ALERT 首行「引擎正常」。
+排障顺序见 §2.5 之后的「二.5 排障顺序」。
+

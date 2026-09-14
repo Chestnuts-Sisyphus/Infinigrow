@@ -15,7 +15,7 @@
 ┌───────────┐ ┌────────────┐ ┌───────────────┐ ┌────────────┐ ┌─────────────┐
 │ scheduler │ │   engine   │ │     rules     │ │   garden   │ │    core     │
 │ triggers  │ │ tick       │ │ static_scan   │ │ gardener   │ │ paths       │
-│（对外门面）│ │ reconcile  │ │ R1-R9（零 token）│ │（免疫系统）│ │ config      │
+│（对外门面）│ │ reconcile  │ │ R1-R10（零 token）│ │（免疫系统）│ │ config      │
 │           │ │ model      │ │               │ │ + 轮转      │ │ encoding    │
 │           │ │ sprout_*   │ │               │ │             │ │ exit_codes  │
 │           │ │ org_trigger│ │               │ │             │ │ version_*   │

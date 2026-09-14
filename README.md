@@ -187,10 +187,23 @@ python tools/privacy_scan.py --root .    # paths / secrets / emails before publi
 
 ## Status & limitations
 
-v2.0.0 is the first release of the rewritten line. Known limitations are listed in
-[CHANGELOG.md](CHANGELOG.md#known-limitations-v200) — notably: the mechanical tick does no
-cognition of its own, the executor interface is a plain callable, and deployment
-integration (schedulers, proxying, multi-provider rotation) is deliberately out of scope.
+v2.2.1 is the current release. Since v2.0.0 the mechanism layer has been refined on a
+real machine (each change came from a live observation): mechanical observation now reads
+only the growth subject (the engine's own state files are watched by the gardener, not
+reconciled); observation and prediction are symmetric per object and dimension; changes
+the agent caused itself are recorded but never spawned back as new sprouts; sprouts carry
+the expectation they came from; unreachable dimensions (e.g. the "application surface"
+of a capped object) are marked `verifiable=false` and excluded from the redemption
+denominator (unreadable ≠ failure); the maturity chain advances at most one step per
+object per tick; the org session gained a proposer role and its object names are now
+machine-checked; the scheduled task runs through a hidden launcher (no console window);
+the tick number is recovered from the ledgers whenever the heartbeat is unreadable or
+behind them (no silent reset); and the executor channel retries through upstream jitter.
+
+Known limitations are listed in [CHANGELOG.md](CHANGELOG.md) — notably: the mechanical
+tick does no cognition of its own, the executor interface is a plain callable, and
+deployment integration (schedulers, proxying, multi-provider rotation) is deliberately
+out of scope.
 
 ## License
 

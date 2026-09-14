@@ -151,3 +151,26 @@ def write_jsonl_work_file(path: Path, records: Iterable[dict], root: Path) -> No
     """
     text = "".join(json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n" for r in records)
     write_work_file(path, text, root, require_markers=())
+
+
+def move_file(src: Path, dst: Path, root: Path) -> None:
+    """把文件**整体搬进**根内的另一处（文件型产物轮转用：只移动不删）。
+
+    次序：先写归档件（原子替换），**成功之后**才移除源文件——中间断电最多出现
+    「源还在、归档多一份」，绝不会出现「源没了、归档也没成」（那才是真丢）。
+    两处都过 `require_within`：调用方不许自己拼路径语义。
+    """
+    safe_src = require_within(Path(src), root)
+    safe_dst = require_within(Path(dst), root)
+    if safe_src == safe_dst:
+        return
+    try:
+        text = read_text(safe_src)
+    except OSError as exc:
+        raise LedgerError("归档源读取失败：%s（%s）" % (safe_src, exc)) from exc
+    write_work_file(safe_dst, text, root, require_markers=())
+    try:
+        safe_src.unlink()
+    except OSError as exc:
+        raise LedgerError("归档后源文件移除失败（数据已在归档件里，待人工清理）：%s（%s）"
+                          % (safe_src, exc)) from exc

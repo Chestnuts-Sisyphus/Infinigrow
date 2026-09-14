@@ -22,6 +22,7 @@
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
@@ -88,6 +89,36 @@ def subject_files(root: Path, limit: int = SUBJECT_FILE_LIMIT) -> list[SubjectFi
 def subject_object(rel_name: str) -> str:
     """主体内相对名 → 对账空间里的对象名（`主体/<相对名>`）。"""
     return SUBJECT_PREFIX + rel_name.replace("\\", "/")
+
+
+def valid_subject_object(obj: str, allowed_objs: set[str],
+                         for_proposal: bool = False) -> tuple[bool, str]:
+    """组织会话产出的对象名**机械闸**（T5/A11）。
+
+    判据（具体状态，反不完全归纳）：
+    - 对象已在可对账清单（本拍主体观测集）→ 通过；
+    - 否则必须是 `主体/<相对路径>`，且相对路径**合法**（非空、无 `..` 段、
+      不以 `/`/`\` 开头＝非绝对、无盘符前缀、不以 `.` 开头＝不藏隐藏文件）——
+      这是「**提议创建**」的合法路径（`for_proposal=True` 时放行）；
+    - findings 描述的是**已观察到的现实**，必须引用可对账清单里的对象
+      （`for_proposal=False`：不许发明机械层读不到的对象名——那是空谈的来源）。
+
+    返回 (是否通过, 理由)。此前对象名纪律只是提示词里的约定，没有机械闸。
+    """
+    if obj in allowed_objs:
+        return True, "已在可对账清单"
+    if not obj.startswith(SUBJECT_PREFIX):
+        return False, "对象名必须以 %s 开头（主体对象）" % SUBJECT_PREFIX
+    rel = obj[len(SUBJECT_PREFIX):]
+    segments = rel.split("/")
+    bad = (not rel or any(seg in ("", ".", "..") for seg in segments)
+           or rel.startswith(("/", "\\")) or rel.startswith(".")
+           or bool(re.match(r"^[A-Za-z]:", rel)))
+    if bad:
+        return False, "非法相对路径：%r（不许越界/绝对/隐藏）" % rel
+    if for_proposal:
+        return True, "主体内合法新相对路径（可提议创建）"
+    return False, "不在可对账清单（findings 必须引用现实可查的对象）"
 
 
 def observe_subject(root: Path, limit: int = SUBJECT_FILE_LIMIT) -> list[Observation]:

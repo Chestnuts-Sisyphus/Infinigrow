@@ -2,7 +2,8 @@
 """对账协议测试：四类差异、指针强制、待补指针超时。"""
 from infinigrow.engine.model import DiffKind, Observation, Prediction
 from infinigrow.engine.reconcile import (POINTER_GRACE_TICKS, diff_summary, pending_pointer,
-                                        rate_table, reconcile, redemption_rate)
+                                        rate_table, reconcile, redemption_rate,
+                                        redemption_report)
 
 
 def test_four_kinds():
@@ -56,3 +57,62 @@ def test_redemption_rate_is_recomputed():
     assert redemption_rate([]) == 0.0                    # 无样本不假装有数据
     table = rate_table(records)
     assert table["总记录"] == 2
+
+
+def test_cap_rows_are_listed_separately_and_excluded_from_rate():
+    """T6/A7：cap*（固化边/应用面）行**单独列出**，不进兑现率分母，也不算打脸。"""
+    records = [
+        # 两根可对账的样本行（真兑现）
+        {"sprout_id": "sp0001-001-x", "predicted_edge": "判读",
+         "actual_edge": "判读", "redeemed": True, "sample": True, "verifiable": True},
+        {"sprout_id": "sp0002-001-y", "predicted_edge": "行动",
+         "actual_edge": "行动", "redeemed": True, "sample": True, "verifiable": True},
+        # 一根 cap 行（不可对账：应用面）——不该影响兑现率
+        {"sprout_id": "cap0007-001-z", "predicted_edge": "固化",
+         "actual_edge": None, "redeemed": False, "sample": True, "verifiable": False},
+        # 一根 cap 行但 verifiable=True（旧行默认）→ 非样本（没有 sample 字段）不进分母
+        {"sprout_id": "cap0008-001-w", "predicted_edge": "固化",
+         "actual_edge": None, "redeemed": False},
+    ]
+    report = redemption_report(records)
+    assert report["兑现率"] == 1.0                       # 2/2，cap 不进分母
+    assert report["不可对账"] == 1                       # 只有那根 verifiable=False
+    assert report["固化边"]["n"] == 1
+    assert report["固化边"]["单独列出"] == ["cap0007-001-z"]
+    # 无样本时 cap 也照常单独列出
+    report2 = redemption_report([
+        {"sprout_id": "cap0009-001-q", "predicted_edge": "固化",
+         "actual_edge": None, "redeemed": False, "sample": False, "verifiable": False},
+    ])
+    assert report2["判定"] == "无样本" and report2["固化边"]["n"] == 1
+
+
+def test_buckets_are_object_domain_edge_actual_edge():
+    """T7/A8：桶＝**对象域 × 预测边 × 实际边**（与机制正本措辞一致）。
+
+    分桶维度是**对象域**（对象名里最后一段 `/` 之前；无 `/` 者自成域），
+    不再是芽 ID 前缀（旧口径把「芽源前缀+拍号」当桶，与文档说的对象域对不上）。
+    """
+    records = [
+        {"sprout_id": "sp0001-001-主体_notes", "obj": "主体/notes.md",
+         "predicted_edge": "判读", "actual_edge": "判读", "redeemed": True,
+         "sample": True},
+        {"sprout_id": "sp0001-002-主体_notes", "obj": "主体/notes.md",
+         "predicted_edge": "判读", "actual_edge": "行动", "redeemed": False,
+         "sample": True},
+        {"sprout_id": "sp0001-003-subject", "obj": "subject",
+         "predicted_edge": "判读", "actual_edge": "判读", "redeemed": True,
+         "sample": True},
+    ]
+    table = rate_table(records)
+    buckets = table["桶"]
+    assert "主体 × 判读 × 判读" in buckets
+    assert buckets["主体 × 判读 × 判读"]["n"] == 1
+    assert "subject × 判读 × 判读" in buckets and buckets["subject × 判读 × 判读"]["n"] == 1
+    assert "主体 × 判读 × 行动" in buckets                     # 不同实际边＝不同桶
+    assert redemption_rate(records, ("主体", "判读", "判读")) == 1.0
+    assert redemption_rate(records, ("主体", "判读", "行动")) == 0.0
+    # 旧行（无 obj 字段）→ 「（无对象）」桶，如实不猜
+    old = [{"sprout_id": "sp0001-001-x", "predicted_edge": "判读",
+            "actual_edge": "判读", "redeemed": True, "sample": True}]
+    assert "（无对象） × 判读 × 判读" in rate_table(old)["桶"]

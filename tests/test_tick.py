@@ -110,6 +110,58 @@ def test_cap_produces_application_sprout(tmp_path, settings):
     assert "成熟链封顶" in origins
 
 
+def test_maturity_cap_writes_library_entry(tmp_path, settings):
+    """对象封顶的那一拍，能力库必须出现**写入方**条目（T3/A4：芽源③不再是死路径）。
+
+    现场：`library.jsonl` 过去没有任何写入方 → `from_unused_library` 读到的永远是空表，
+    芽源③「能力库未用」永不产芽。现在封顶对象各写一条（含末次使用拍与来源），
+    芽源③从此有现实的输入；条目名必须来自可对账对象（本拍封顶的那批）。
+    """
+    for _ in range(5):
+        run_tick(settings=settings)
+    layout = resolve_state(settings.state_root, settings.repo_root)
+    rows = [json.loads(line) for line in
+            layout.library.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rows, "能力库应有封顶写入条目"
+    for rec in rows:
+        assert rec.get("source") == "maturity-cap"
+        assert isinstance(rec.get("last_used_tick"), int)
+        assert isinstance(rec.get("created_tick"), int)
+
+
+def test_pending_pointer_timeout_produces_diff_and_named_report(tmp_path, settings):
+    """待补指针超时（T4/A6）：差异账里 `pending_pointer=True` 的条目超过宽限拍数
+    → 生成「指针缺失」差异并**照样产芽**；报告点名；且不重复产（同一待补条目不刷屏）。
+
+    现场：`reconcile.pending_pointer()` 只有实现没有调用方——待补指针只登记、永不处理。
+    """
+    from infinigrow.engine.reconcile import POINTER_GRACE_TICKS
+    from infinigrow.ledger.store import append_jsonl
+    layout = resolve_state(settings.state_root, settings.repo_root, create=True)
+    append_jsonl(layout.diff_ledger, {
+        "kind": "预测内错", "obj": "主体/ghost.md", "dimension": "存在性",
+        "expected": "存在", "actual": "（指针缺失）", "evidence": "",
+        "tick": 1, "spawns": False, "source": "org-session", "pending_pointer": True,
+    }, layout.root)
+    named = None
+    for i in range(1, POINTER_GRACE_TICKS + 3):
+        r = run_tick(settings=settings, tick=i)
+        if any("待补指针超时" in n for n in r.notes):
+            named = r
+            break
+    assert named is not None, "超时后报告必须点名「待补指针超时」"
+    rows = [json.loads(line) for line in
+            layout.diff_ledger.read_text(encoding="utf-8").splitlines() if line.strip()]
+    missing = [r for r in rows if r.get("pointer_missing")]
+    assert len(missing) == 1 and missing[0]["obj"] == "主体/ghost.md"
+    # 只产一次：宽限之后再跑几拍，不重复产（去重判据＝已存在 pointer_missing 行）
+    for i in range(POINTER_GRACE_TICKS + 3, POINTER_GRACE_TICKS + 6):
+        run_tick(settings=settings, tick=i)
+    rows2 = [json.loads(line) for line in
+             layout.diff_ledger.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert len([r for r in rows2 if r.get("pointer_missing")]) == 1
+
+
 def test_steady_subject_produces_no_spurious_diffs(tmp_path, settings):
     """**预测/观测必须对称**：主体没变的一拍不许凭空长出差异。
 
@@ -288,3 +340,26 @@ def test_tick_number_recovers_from_ledgers_when_heartbeat_is_unreadable(tmp_path
     import json as _json
     status = _json.loads(layout.tick_status.read_text(encoding="utf-8"))
     assert status["tick"] == 4 and "已从账本恢复" in status["last_note"]
+
+
+def test_tick_number_recovers_when_heartbeat_sequence_went_backwards(tmp_path, settings):
+    """心跳**可读但拍号落后**（账本最大拍号 > 心跳拍号，序列倒退）也必须从账本恢复。
+
+    v2.2.1 后真机复见：心跳没坏（可读、tick=4），账本却跨拍 1-16——旧恢复逻辑只守
+    「不可读」一种触发，新序列 4、5、6… 会逐一覆写旧报告 `reconcile-00004..00016.md`。
+    """
+    for tick in (1, 2, 3):
+        run_tick(settings=settings, tick=tick)
+    layout = resolve_state(settings.state_root, settings.repo_root)
+    # 造「账本有更大拍号的历史行、心跳却停在 3」的序列倒退现场
+    import json as _json
+    with layout.diff_ledger.open("a", encoding="utf-8") as fh:
+        fh.write(_json.dumps({"tick": 16, "obj": "主体/hist.md", "dimension": "存在性",
+                              "expected": "存在", "actual": "存在", "kind": "预测内对",
+                              "evidence": "hist", "spawns": False, "source": "mechanical"},
+                             ensure_ascii=False) + "\n")
+    result = run_tick(settings=settings)                     # 不给拍号 → 走恢复路径
+    assert result.tick == 17, "应从账本最大拍号 16 恢复成第 17 拍，而不是继续新序列 4"
+    assert any("序列倒退" in n and "已从账本恢复" in n for n in result.notes)
+    status = _json.loads(layout.tick_status.read_text(encoding="utf-8"))
+    assert status["tick"] == 17 and "序列倒退" in status["last_note"]
