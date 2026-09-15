@@ -28,26 +28,41 @@ def test_domain_key_rule():
     assert domain_key("tick_status.json", "字节数") == ("tick_status.json", "字节数")
 
 
-def test_repeated_same_value_in_one_domain_does_not_grow_the_queue():
+def test_same_object_same_value_in_one_domain_does_not_grow_the_queue():
+    """同一对象同一量反复出现 → 不增长（合并律保留）。
+
+    K1 语义更新：域饱和的粒度从「同域」收到「同对象」——**不同对象＝不同的问题**，
+    各自放行（解冻④）；同对象同量同值才是真正的复述，仍被吸收。
+    """
     state = DomainState()
     first = state.gate([_diff("主体/a.md", actual="10")], tick=1)
     assert len(first.kept) == 1 and not first.absorbed
     state.claim("主体/a.md", "字节数", "sp-1", "10", tick=1)
 
-    second = state.gate([_diff("主体/b.md", actual="10")], tick=2)   # 同域同量、同值
+    second = state.gate([_diff("主体/a.md", actual="10")], tick=2)   # 同对象、同值
     assert second.kept == [] and len(second.absorbed) == 1
     claim = state.claims[encode("主体", "字节数")]
     assert claim.absorbed == 1 and claim.sprout_id == "sp-1"
 
-    third = state.gate([_diff("主体/c.md", actual="10")], tick=3)
+    third = state.gate([_diff("主体/a.md", actual="10")], tick=3)
     assert third.kept == [] and state.claims[encode("主体", "字节数")].absorbed == 2
+
+
+def test_different_object_in_same_domain_releases_and_grows():
+    """K1 解冻④：同域同量、**对象不同**＝新问题 → 放行并释放旧占用（不再永久吸收）。"""
+    state = DomainState()
+    state.gate([_diff("主体/a.md", actual="10")], tick=1)
+    state.claim("主体/a.md", "字节数", "sp-1", "10", tick=1)
+    gate = state.gate([_diff("主体/b.md", actual="10")], tick=2)     # 对象不同
+    assert len(gate.kept) == 1 and not gate.absorbed
+    assert any("对象" in r for r in gate.released)
 
 
 def test_new_quantity_unfreezes_the_domain():
     state = DomainState()
     state.gate([_diff("主体/a.md", actual="10")], tick=1)
     state.claim("主体/a.md", "字节数", "sp-1", "10", tick=1)
-    gate = state.gate([_diff("主体/b.md", actual="42")], tick=2)     # 新的量
+    gate = state.gate([_diff("主体/a.md", actual="42")], tick=2)     # 同一对象、新的量
     assert len(gate.kept) == 1 and not gate.absorbed
     assert gate.released and "产出新量" in gate.released[0]
 
@@ -124,3 +139,52 @@ def test_tick_records_absorbed_diffs_without_hiding_them(tmp_path):
     assert len(absorbed) == 1
     queue = SproutQueue.load(layout.sprouts, layout.frozen_sprouts)
     assert len(queue.sprouts) == 1
+
+
+# ---------------------------------------------------------------- K1 N41 死锁修复
+def test_different_object_in_same_domain_is_new_quantity():
+    """解冻④：同域同量、**对象不同**＝另一个问题，不再被旧占用吸收。
+
+    N41 死锁的核心：`存在性` 维度的 actual 是有穷枚举，同一对象几乎不会「产出新量」；
+    若占用还记着旧对象，新对象（如 journal 下一篇）会被永久吸收。修法＝对象不同即放行。
+    """
+    state = DomainState()
+    state.gate([_diff("主体/journal/0071-20260914.md", dimension="存在性",
+                      actual="存在")], tick=1)
+    state.claim("主体/journal/0071-20260914.md", "存在性", "sp-1",
+                "存在", tick=1)
+
+    gate = state.gate([_diff("主体/journal/0086-20260915.md", dimension="存在性",
+                             actual="存在")], tick=2)
+    assert len(gate.kept) == 1 and not gate.absorbed                # 放行，不再吸收
+    assert any("对象" in r and "占用对象" in r for r in gate.released)
+    assert encode("主体/journal", "存在性") not in state.claims       # 旧占用已释放
+
+
+def test_exhausted_holder_releases_the_domain():
+    """解冻③：持有者芽已耗尽（连领满上限且非长任务）→ 占用释放、差异放行。
+
+    N41 的另一半：占用归一根 `leads=3` 的芽，它永不再被领，但占用仍挂着——
+    新差异只能被吸收。修法＝耗尽即释放（立芽后占用登记给新芽）。
+    """
+    state = DomainState()
+    state.gate([_diff("主体/a.md", actual="10")], tick=1)
+    state.claim("主体/a.md", "字节数", "sp-1", "10", tick=1)
+
+    gate = state.gate([_diff("主体/a.md", actual="10")], tick=2,
+                      exhausted_sprout_ids={"sp-1"})
+    assert len(gate.kept) == 1 and not gate.absorbed
+    assert any("已耗尽" in r for r in gate.released)
+    assert encode("主体", "字节数") not in state.claims
+
+
+def test_sync_self_heals_exhausted_zombie_claims():
+    """存量自愈：持有者还在队列但**已耗尽**（连领满上限）的僵尸占用在 sync 时释放。"""
+    state = DomainState()
+    state.claim("主体/a.md", "字节数", "sp-dead", "10", tick=1)       # 僵尸占用（持有者在队列但耗尽）
+    state.claim("别的域/b.md", "字节数", "sp-live", "7", tick=1)      # 活占用（不同域，互不覆盖）
+    released = state.sync(live_sprout_ids=["sp-dead", "sp-live"], ok_keys=[],
+                          tick=5, exhausted_sprout_ids={"sp-dead"})
+    assert len(released) == 1 and "已耗尽" in released[0]
+    assert "sp-dead" not in {c.sprout_id for c in state.claims.values()}
+    assert state.claims[encode("别的域", "字节数")].sprout_id == "sp-live"   # 活占用保留

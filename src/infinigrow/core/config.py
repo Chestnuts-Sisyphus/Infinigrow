@@ -27,6 +27,7 @@
 | `rotate_keep_tail` | `IG_ROTATE_KEEP_TAIL` | 2000 | 轮转后主账本保留的**尾部行数**（历史行全在 `state/archive/`）|
 | `rotate_max_bytes` | `IG_ROTATE_MAX_BYTES` | 1048576 | 账本/日志超过这么多字节才轮转 |
 | `rotate_keep_files` | `IG_ROTATE_KEEP_FILES` | 200 | 留痕/报告按份数轮转后保留的**最近份数** |
+| `stall_alert_ticks` | `IG_STALL_ALERT_TICKS` | 12 | 连续「无芽可领」（接了执行者但没活干）这么多拍 → ALERT 出「空转」旗（12 拍≈2 小时）|
 """
 from __future__ import annotations
 
@@ -61,6 +62,7 @@ _FIELDS = {
     "rotate_keep_tail": (int, 2000),
     "rotate_max_bytes": (int, 1048576),
     "rotate_keep_files": (int, 200),
+    "stall_alert_ticks": (int, 12),
     # repo_root 也走同一张表：测试与嵌入使用都会显式指定它（默认＝本次安装位置）
     "repo_root": (str, str(REPO_ROOT)),
 }
@@ -91,6 +93,7 @@ class Settings:
     rotate_keep_tail: int = 2000
     rotate_max_bytes: int = 1048576
     rotate_keep_files: int = 200
+    stall_alert_ticks: int = 12
     repo_root: str = ""
     sources: list = field(default_factory=list)   # 记录每个字段来自哪里（可审计）
 

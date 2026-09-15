@@ -14,7 +14,13 @@ from infinigrow.cli import main
 
 
 def _write_state(tmp_path, state="state"):
-    """造一个最小状态根（status 只读它，不需要真实拍）。"""
+    """造一个最小状态根（status 只读它，不需要真实拍）。
+
+    时间戳用**今天**（`datetime.date.today()`）：`status` 的「今日执行者调用」按当天
+    过滤——写死历史日期会让这个测试跨天就红（不是功能回归）。
+    """
+    import datetime as _dt
+    today = _dt.date.today().isoformat()
     root = tmp_path / state
     (root / "reconcile").mkdir(parents=True, exist_ok=True)
     (root / "traces").mkdir(parents=True, exist_ok=True)
@@ -22,7 +28,8 @@ def _write_state(tmp_path, state="state"):
     (root / "archive").mkdir(parents=True, exist_ok=True)
     (root / "tick_status.json").write_text(json.dumps({
         "consecutive_failures": 0, "consecutive_executor_failures": 1,
-        "last_rc": 0, "last_executor_rc": 1, "last_time": "2026-09-14 19:00:00",
+        "last_rc": 0, "last_executor_rc": 1,
+        "last_time": "%s 19:00:00" % today,
         "tick": 17, "engine_version": "2.2.1", "engine_commit": "test"},
         ensure_ascii=False), encoding="utf-8")
     (root / "subject.json").write_text(json.dumps({
@@ -37,10 +44,10 @@ def _write_state(tmp_path, state="state"):
                    ensure_ascii=False) + "\n", encoding="utf-8")
     (root / "executor.jsonl").write_text(
         json.dumps({"command": "x", "kind": "tick", "rc": 0, "duration_ms": 100,
-                    "tick": 16, "time": "2026-09-14 19:00:00",
+                    "tick": 16, "time": "%s 19:00:00" % today,
                     "usage": {"total_tokens": 1200}}, ensure_ascii=False) + "\n",
         encoding="utf-8")
-    (root / "ALERT.md").write_text("# 引擎正常（2026-09-14 19:00:00）\n\n- 无致命旗\n",
+    (root / "ALERT.md").write_text("# 引擎正常（%s 19:00:00）\n\n- 无致命旗\n" % today,
                                    encoding="utf-8")
     return root
 

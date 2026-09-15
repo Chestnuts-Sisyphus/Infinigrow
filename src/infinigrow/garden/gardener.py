@@ -28,8 +28,6 @@ FAIL_ESCALATE = 3
 EXECUTOR_FAIL_ESCALATE = 3
 #: 状态完整性要求存在的文件
 REQUIRED_FILES = ("tick_status.json",)
-
-
 @dataclass
 class GardenerReport:
     fatal: bool = False
@@ -108,6 +106,21 @@ def run_gardener(settings: Optional[Settings] = None,
                                status.get("last_executor_rc")))
     else:
         report.notes.append("执行者失败计数：%d（正常）" % executor_failures)
+
+    # 3b) 「不生长」空转旗（K3/A4）：接了执行者但**连续 N 拍无芽可领**＝没在长。
+    #     与断流（机械时间戳）／失败（rc 计数）分开：引擎拍照跑、执行者也接得上，
+    #     但队列里没有可领的芽——那是「空转」这种第三种病。N 可配（默认 12 拍≈2 小时）。
+    stall = int(status.get("no_ticket_streak", 0) or 0)
+    stall_threshold = cfg.stall_alert_ticks
+    if stall >= stall_threshold:
+        report.fatal = True
+        report.flags.append("不生长：连续 %d 拍无芽可领（空转；阈值 %d 拍≈%.0f 小时）"
+                            % (stall, stall_threshold,
+                               stall_threshold * cfg.tick_minutes / 60.0))
+    elif stall > 0:
+        report.notes.append("空转计数：%d 拍（尚未达阈值 %d）" % (stall, stall_threshold))
+    else:
+        report.notes.append("空转计数：0（有芽可领或未接执行者）")
 
     # 4) 完整性 + 账本体检
     for name in REQUIRED_FILES:

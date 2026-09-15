@@ -100,8 +100,40 @@ def test_subject_files_are_bounded_and_stable(tmp_path):
     for i in range(30):
         (subject / ("f%02d.md" % i)).write_text("x", encoding="utf-8")
     names = [f.name for f in subject_mod.subject_files(subject, limit=10)]
-    assert names == sorted(names) and len(names) == 10
+    assert names == sorted(names, key=lambda n: -1, reverse=False)  # 不强制升序
+    assert len(names) == 10
     assert [f.name for f in subject_mod.subject_files(subject, limit=10)] == names
+
+
+def test_subject_files_prefer_newest_by_mtime(tmp_path):
+    """K2：逐文件观测按 **mtime 取最新 N 个**——旧文件不再永久霸占名额。"""
+    subject = tmp_path / "mtime"
+    subject.mkdir()
+    for i in range(5):
+        p = subject / ("old%02d.md" % i)
+        p.write_text("x", encoding="utf-8")
+        import os as _os
+        _os.utime(p, (1000000000 + i, 1000000000 + i))     # 旧 mtime
+    newest = subject / "new.md"
+    newest.write_text("y", encoding="utf-8")
+    files = subject_mod.subject_files(subject, limit=3)
+    assert files[0].name == "new.md"                        # 最新排最前
+    assert len(files) == 3                                  # 其余是 5 个旧文件里最新的 2 个
+
+
+def test_subject_count_and_total_bytes_are_real_totals(tmp_path):
+    """K2：文件数／总字节数是**真实总数**，不受观测上限影响（N42 修复）。"""
+    subject = tmp_path / "counts"
+    subject.mkdir()
+    for i in range(25):
+        (subject / ("f%02d.md" % i)).write_text("x" * (i + 1), encoding="utf-8")
+    assert subject_mod.subject_count(subject) == 25                     # 真实总数 25
+    total = sum(i + 1 for i in range(25))
+    assert subject_mod.subject_total_bytes(subject) == total
+    snapshot = subject_mod.subject_snapshot(subject, tick=1)            # 默认 limit=20
+    assert snapshot["file_count"] == 25                                 # 不受 20 上限影响
+    assert len(snapshot["files"]) == 20                                 # 逐文件观测仍 20
+    assert snapshot["observed_files"] == 20
 
 
 def test_merge_predictions_lets_planned_override_default(tmp_path):

@@ -15,8 +15,18 @@ v2 已有的三道收敛（同对象同维度合并 / 上限 50 / 冻结区）�
 | 吸收 | 饱和时的新差异**不新生芽**：登记到已有芽的 `absorbed` 计数（差异本身照旧入账，不隐藏） |
 | 解冻① | 该 (域 × 量) **产出了新的量**（新差异的 actual ≠ 立芽时的 actual） |
 | 解冻② | 该 (域 × 量) 的芽**被消解**（本拍对账为「预测内对」）或**已不在队列**（被顶替/消费） |
+| 解冻③ | 该 (域 × 量) 的**持有者芽已耗尽**（`leads≥连领上限` 且非长任务，永不再被领） |
+| 解冻④ | 该 (域 × 量) 的**差异对象 ≠ 占用对象**（不同对象＝不同的问题，视为新量） |
 
-一句话：**同一域同一量，同时只允许一个问题没解决**。要再立一根，先拿出新证据（新的量）。
+一句话：**同一域同一量，同时只允许一个问题没解决**。要再立一根，先拿出新证据
+（新的量／新对象），或等旧的问题被解决／旧的持有者耗尽。
+
+解冻③④ 是 N41 死锁的修复（K1）：`存在性` 这类维度的 actual 是**有穷枚举**
+（存在／缺失），「产出新量」对它几乎永不成立——若持有者芽又已耗尽（连领满上限
+永不再被领），该域就被**永久占用**，新差异全被吸收，引擎停摆。所以：
+- 持有者芽已耗尽＝旧的问题没人再管 → 释放该域，允许新差异立新芽接续；
+- 差异对象≠占用对象＝现实里出现了**另一个**问题（例如 journal 下一篇）→
+  不再被旧占用吸收，放行立新芽（占用在立芽后重新登记给新对象）。
 """
 from __future__ import annotations
 
@@ -135,34 +145,55 @@ class DomainState:
 
     # ------------------------------------------------------------- 同步与解冻
     def sync(self, live_sprout_ids: Iterable[str], ok_keys: Iterable[tuple[str, str]],
-             tick: int) -> list[str]:
-        """按当前事实清理占用：芽不在了 / 芽被消解了 → 释放该 (域 × 量)。
+             tick: int, exhausted_sprout_ids: Iterable[str] = ()) -> list[str]:
+        """按当前事实清理占用：芽不在了 / 芽被消解了 / **持有者芽已耗尽** → 释放该 (域 × 量)。
 
         `live_sprout_ids`＝活跃队列 ∪ 冻结区里的芽 ID（**冻结也是未完成**，不释放）；
-        `ok_keys`＝本拍对账为「预测内对」的 (对象, 维度)（＝消解）。
+        `ok_keys`＝本拍对账为「预测内对」的 (对象, 维度)（＝消解）；
+        `exhausted_sprout_ids`＝已耗尽（连领满上限且非长任务）的芽 ID——**持有者已
+        耗尽＝这个域的问题不会再有人领做**，占用必须释放（N41 死锁的侧 ③：存量
+        僵尸占用自愈，不删任何文件）。
         """
         live = set(live_sprout_ids)
         ok = set(ok_keys)
+        exhausted = set(exhausted_sprout_ids)
         released: list[str] = []
         for key, claim in list(self.claims.items()):
             gone = claim.sprout_id not in live
             done = (claim.obj, claim.dimension) in ok
-            if gone or done:
+            dead = claim.sprout_id in exhausted
+            if gone or done or dead:
                 self.claims.pop(key, None)
-                released.append("%s（%s）" % (key, "已消解" if done else "芽已不在队列"))
+                if dead:
+                    released.append("%s（持有者芽已耗尽 %s，释放）"
+                                    % (key, claim.sprout_id))
+                else:
+                    released.append("%s（%s）" % (key, "已消解" if done else "芽已不在队列"))
         return released
 
     # ------------------------------------------------------------- 过闸
-    def gate(self, diffs: Sequence[Diff], tick: int) -> GateResult:
+    def gate(self, diffs: Sequence[Diff], tick: int,
+             exhausted_sprout_ids: Iterable[str] = ()) -> GateResult:
         """把差异分成「放行立芽」与「被吸收」两堆（只对**会产芽**的差异起作用）。
 
         **同拍内也要守配额**：一拍里可能有同域的多个差异同时出现（例如主体里两个文件
         同时不对）。只有第一条放行立芽，其余进吸收计数——否则「一批差异」就能绕过
         「同一域同一量只养一根未完成芽」。顺序是确定的（差异清单本身的顺序，
         而清单来自对账，顺序可复跑）。
+
+        `exhausted_sprout_ids`＝已耗尽（连领满上限且非长任务）的芽 ID：
+        占用归它（`claims[key].sprout_id`）时，**持有者已耗尽＝这个域的问题不会再被
+        领做**，占用必须释放、本差异放行（N41 死锁的修复，见模块头解冻③）。
+        同理「差异对象 ≠ 占用对象」（解冻④）：同域同量、对象不同＝现实里的另一个
+        问题，不再被旧占用吸收。
+
+        `value_at_freeze` 是「量的证据」：只有它变了才说明**同对象**产出了新量；
+        对 `存在性` 这类有穷枚举维度（存在／缺失），它几乎不变，所以「对象不同」与
+        「持有者耗尽」两条释放通道对这类维度是生死攸关的。
         """
         result = GateResult()
         accepted: set[str] = set()
+        exhausted = set(exhausted_sprout_ids)
         for d in diffs:
             if not d.spawns:
                 result.kept.append(d)          # 不产芽的差异（如缺指针）不受域配额约束
@@ -178,6 +209,26 @@ class DomainState:
                 else:
                     accepted.add(key)
                     result.kept.append(d)
+                continue
+
+            if claim.sprout_id in exhausted:
+                # 持有者芽已耗尽（连领满上限，永不再被领）→ 这个域的问题没人再管了：
+                # 释放占用、本差异放行（立芽后重新登记给新芽）。
+                result.released.append("%s（持有者芽已耗尽 %s，释放）"
+                                       % (key, claim.sprout_id))
+                self.claims.pop(key, None)
+                accepted.add(key)
+                result.kept.append(d)
+                continue
+
+            if claim.obj != d.obj:
+                # 差异对象 ≠ 占用对象：同域同量下是**另一个**问题（例如 journal 下一篇）。
+                # 若只认「actual 变化」，存在性维度的占用永不释放——N41 死锁。
+                result.released.append("%s（对象 %s ≠ 占用对象 %s，视为新量）"
+                                       % (key, d.obj, claim.obj))
+                self.claims.pop(key, None)
+                accepted.add(key)
+                result.kept.append(d)
                 continue
 
             if claim.value_at_freeze != str(d.actual):

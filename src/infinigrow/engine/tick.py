@@ -173,7 +173,8 @@ def current_tick(layout: StateLayout) -> tuple[int, str]:
 
 
 def record_tick_result(layout: StateLayout, rc: int, tick: int, note: str = "",
-                       executor_rc: Optional[int] = None) -> int:
+                       executor_rc: Optional[int] = None,
+                       no_ticket: bool = False) -> int:
     """落心跳：rc==0 归零，否则连续失败 +1。写不进去抛 `TickHeartbeatError`。
 
     心跳里记**引擎身份**（版本 ＋ 提交号）：定规是「引擎必须是最新版才准运转」，
@@ -183,6 +184,10 @@ def record_tick_result(layout: StateLayout, rc: int, tick: int, note: str = "",
     另记**执行者连续失败**（与拍失败分开计）：机械拍跑得成、执行者起不来，
     这是两种病；混在一个计数里，园丁的告警就指不出是哪儿坏了。
     本拍没调执行者（`executor_rc=None`）时**保留原计数**（没调用不算失败，也不算成功）。
+
+    `no_ticket`（K3）：本拍**接了执行者但无芽可领**（执行者没有被调用）——
+    连续 N 拍这样＝**空转**（引擎在烧时间不生长），园丁据此出「不生长」告警旗。
+    机械拍（没接执行者）不算：零 token 本来就是它的预期，不叫空转。
     """
     from ..core.build_info import engine_identity
     status = read_tick_status(layout)
@@ -190,10 +195,13 @@ def record_tick_result(layout: StateLayout, rc: int, tick: int, note: str = "",
     executor_failures = int(status.get("consecutive_executor_failures", 0) or 0)
     if executor_rc is not None:
         executor_failures = 0 if executor_rc == 0 else executor_failures + 1
+    stall = int(status.get("no_ticket_streak", 0) or 0)
+    stall = stall + 1 if no_ticket else 0
     ident = engine_identity()
     payload = {
         TICK_STATUS_MARK: failures,
         "consecutive_executor_failures": executor_failures,
+        "no_ticket_streak": stall,
         "last_rc": rc,
         "last_executor_rc": executor_rc,
         "last_time": _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -439,8 +447,9 @@ def tick_facts(layout: StateLayout, queue: SproutQueue, tick: int,
         "最近 30 行差异账按类型：%s" % json.dumps(by_kind, ensure_ascii=False),
         "兑现账：%s（样本 %d／共 %d 行）"
         % (redemption["判定"], redemption["样本数"], redemption["总行数"]),
-        "主体读数：文件 %d 个／共 %d 字节（上限观测 %d 个文件）"
-        % (snapshot["file_count"], snapshot["total_bytes"], snapshot["file_limit"]),
+        "主体读数：文件 %d 个（真实总数，不受观测上限影响）／观测 %d 个／共 %d 字节"
+        % (snapshot["file_count"], snapshot.get("observed_files", len(snapshot["files"])),
+           snapshot["total_bytes"]),
     ]
     if snapshot["files"]:
         lines.append("主体文件：%s"
@@ -616,7 +625,8 @@ def run_tick(settings: Optional[Settings] = None,
     if recovered_note:
         result.notes.insert(0, recovered_note)          # 异常要显眼，不许静默
         record_tick_result(layout, result.rc, this_tick, note=recovered_note,
-                           executor_rc=(result.executor or {}).get("rc"))
+                           executor_rc=(result.executor or {}).get("rc"),
+                           no_ticket=result.executor_state == "no_ticket")
     return result
 
 
@@ -754,7 +764,11 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
         act_caused |= {k for k in before_act if k not in after_act}
     spawnable = [d for d in diffs if d.key not in act_caused]
 
-    gate = domains.gate(spawnable, tick)
+    # 已耗尽的芽（连领满上限且非长任务，永不再被领）＝域占用的「无人认领」信号：
+    # 域饱和闸据此释放僵尸占用（N41 死锁修复 K1——存在性维度不再靠「产出新量」解冻）。
+    exhausted_ids = {s.id for s in queue.sprouts
+                     if not s.long_task and s.leads >= queue.lead_limit}
+    gate = domains.gate(spawnable, tick, exhausted_sprout_ids=exhausted_ids)
     absorbed_keys = {(d.obj, d.dimension, d.actual) for d in gate.absorbed}
     for d in diffs:
         record = d.as_record()
@@ -819,10 +833,11 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
         if evicted is not None and probe:
             result.notes.append("队列超限 → 冻结：%s" % evicted.id)
 
-    # 域占用同步（芽被消解或已不在队列 → 释放该域，允许再立一根）
+    # 域占用同步（芽被消解 / 已不在队列 / 持有者已耗尽 → 释放该域，允许再立一根）。
+    # exhausted_ids 同上：存量僵尸占用（持有者耗尽）在此自愈，不删任何文件。
     released = domains.sync([s.id for s in queue.sprouts + queue.frozen],
                             [(d.obj, d.dimension) for d in diffs if d.kind == DiffKind.OK],
-                            tick)
+                            tick, exhausted_sprout_ids=exhausted_ids)
     result.domain = {"占用": len(domains.claims), "本拍吸收": len(gate.absorbed),
                      "本拍放行": len(gate.kept), "本拍释放": released}
     domains.save(layout)
@@ -864,5 +879,6 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
 
     result.rc = 0
     record_tick_result(layout, result.rc, tick,
-                       executor_rc=(call.rc if call is not None else None))
+                       executor_rc=(call.rc if call is not None else None),
+                       no_ticket=result.executor_state == "no_ticket")
     return result

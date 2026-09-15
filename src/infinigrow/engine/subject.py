@@ -39,6 +39,18 @@ SUBJECT_FILE_LIMIT = 20
 EXISTS = "存在"
 MISSING = "缺失"
 
+#: `journal/` 下文件的**命名规则**（K7/A8 定死并机械化）：`<创建拍号4位>-<创建日期YYYYMMDD>.md`。
+#: 拍号段＝创建它的那一拍的拍号；日期段＝创建那天的机械日期。两条线此前各写各的
+#: （执行者按拍号段、组织会话按当日日期），跨午夜会出现两种写法 → 对账当成两个对象。
+#: 本常量是机械判据；执行者提示词 / 组织会话提议 / 主体声明示例三处**写同一句**，
+#: 由 `tests/test_mechanism_docs.py` 锁定同源（改一处＝三处一起改）。
+JOURNAL_NAME_RX = re.compile(r"^\d{4}-\d{8}\.md$")
+
+
+def valid_journal_name(name: str) -> bool:
+    """`journal/` 文件名的机械校验：`<创建拍号4位>-<创建日期YYYYMMDD>.md`。"""
+    return bool(name) and bool(JOURNAL_NAME_RX.match(name))
+
 #: 「这个目录不是内容」的机械排除表（工具缓存/版本库等，不是被生长的东西）
 SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", ".ruff_cache", ".venv", "venv",
              "node_modules", ".mypy_cache"}
@@ -62,8 +74,10 @@ def subject_files(root: Path, limit: int = SUBJECT_FILE_LIMIT) -> list[SubjectFi
     """列出主体文件（有界、稳定排序、只读）。
 
     - 不存在的主体根 → 空列表（**不抛**：主体还没建起来是正常状态，该被观测成「缺失」）；
-    - 排序＝相对名升序（同输入同顺序，可复跑）；
-    - 上限 `limit`（超出的不观测，但文件数维度会显形，见 `observe_subject`）。
+    - 排序＝**mtime 降序（最新的在前）**，平局按相对名升序——旧的、很久没动的文件
+      不该永久霸占观测名额（N42 修复：按 mtime 取最新 N 个，新长出来的文件会被看见）；
+    - 上限 `limit`：只限制**逐文件**观测的数量；「文件数」维度用真实总数
+      （见 `subject_count`，不受本上限影响）。
     """
     base = Path(root)
     if not base.is_dir():
@@ -81,9 +95,43 @@ def subject_files(root: Path, limit: int = SUBJECT_FILE_LIMIT) -> list[SubjectFi
             continue                      # 读不到＝本拍不观测它（不猜、不假装）
         out.append(SubjectFile(name="/".join(rel_parts), bytes=stat.st_size,
                                mtime=stat.st_mtime))
-        if len(out) >= limit:
-            break
-    return out
+    out.sort(key=lambda f: (-f.mtime, f.name))
+    return out[:limit]
+
+
+def subject_count(root: Path) -> int:
+    """主体文件的**真实总数**（不受观测上限影响）。
+
+    N42 修复：此前「文件数」维度用的是**截断后**的 `len(files)`——主体文件超过
+    `SUBJECT_FILE_LIMIT` 时，自报数字就永远小于磁盘实数（实测：磁盘 31 文件，
+    引擎自报 20）。「文件数」是主体层面的生长读数，必须如实报总数。
+    """
+    return _subject_stats(root)[0]
+
+
+def subject_total_bytes(root: Path) -> int:
+    """主体文件的**真实总字节数**（与 `subject_count` 同一口径，不受观测上限影响）。"""
+    return _subject_stats(root)[1]
+
+
+def _subject_stats(root: Path) -> tuple[int, int]:
+    """一次遍历算「文件总数＋总字节数」（只读；跳过 SKIP_DIRS）。"""
+    base = Path(root)
+    if not base.is_dir():
+        return 0, 0
+    total, total_bytes = 0, 0
+    for path in base.rglob("*"):
+        if not path.is_file():
+            continue
+        if any(part in SKIP_DIRS for part in path.relative_to(base).parts):
+            continue
+        try:
+            stat = path.stat()
+        except OSError:
+            continue
+        total += 1
+        total_bytes += stat.st_size
+    return total, total_bytes
 
 
 def subject_object(rel_name: str) -> str:
@@ -127,6 +175,10 @@ def observe_subject(root: Path, limit: int = SUBJECT_FILE_LIMIT) -> list[Observa
     「文件数」这一条是主体层面的**生长读数**：它变了就说明主体真的长了/缩了，
     与该文件是谁、内容是什么无关（内容级判断归执行者与组织会话，这里只报可查事实）。
 
+    **N42 修复**：文件数用**真实总数**（`subject_count`，不受 `limit` 影响）——
+    主体文件超过观测上限时自报数字也必须如实；逐文件观测仍按 `limit` 有界
+    （取 **mtime 最新**的 N 个，旧的不会永久霸占名额）。
+
     **每个文件同时报「存在性」与「字节数」**：观测到的维度必须和预测的维度对称——
     只观测字节数、不观测存在性，会让「预测某文件存在」变成「预测未执行」的假差异
     （实测：首拍就因此凭空长出一根芽）。
@@ -137,7 +189,7 @@ def observe_subject(root: Path, limit: int = SUBJECT_FILE_LIMIT) -> list[Observa
     exists = base.is_dir()
     out = [
         Observation(leaf, "存在性", EXISTS if exists else MISSING, "主体根"),
-        Observation(leaf, "文件数", str(len(files)), "主体根"),
+        Observation(leaf, "文件数", str(subject_count(base)), "主体根"),
     ]
     for item in files:
         out.append(Observation(subject_object(item.name), "存在性", EXISTS,
@@ -163,7 +215,8 @@ def predict_subject_unchanged(root: Path, tick: int,
     out = [
         Prediction(leaf, "存在性", EXISTS if exists else MISSING, tick=tick,
                    evidence="预测:主体根"),
-        Prediction(leaf, "文件数", str(len(files)), tick=tick, evidence="预测:主体根"),
+        Prediction(leaf, "文件数", str(subject_count(base)), tick=tick,
+                   evidence="预测:主体根"),
     ]
     for item in files:
         out.append(Prediction(subject_object(item.name), "存在性", EXISTS, tick=tick,
@@ -181,15 +234,17 @@ def subject_snapshot(root: Path, tick: int, limit: int = SUBJECT_FILE_LIMIT) -> 
     """
     base = Path(root)
     files = subject_files(base, limit=limit)
+    count, total_bytes = _subject_stats(base)
     return {
         "tick": tick,
         "root_name": subject_leaf(base),
         "exists": base.is_dir(),
-        "file_count": len(files),
-        "total_bytes": sum(f.bytes for f in files),
+        "file_count": count,
+        "total_bytes": total_bytes,
         "files": [{"name": f.name, "bytes": f.bytes} for f in files],
         "object_prefix": SUBJECT_PREFIX,
         "file_limit": limit,
+        "observed_files": len(files),
     }
 
 
