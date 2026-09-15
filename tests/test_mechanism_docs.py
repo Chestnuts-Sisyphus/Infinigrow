@@ -71,8 +71,8 @@ def test_journal_naming_rule_is_synced_across_three_sources():
 
     执行者提示词（tick.md）／组织会话提议（org-session.md）／主体文档（growth-subject.md）
     必须写同一句；代码里 `subject.valid_journal_name` 是机械判据。改一处＝各处一起改。
-    （本机主体声明 `D:/AI/Infinigrow-subject/subject.md` 也同步该句，但它不在仓库里、
-    不在 CI 上——仓库内断言以 growth-subject.md 为准。）
+    （本机主体声明 `<仓库同级>/Infinigrow-subject/subject.md` 也同步该句，但它不在
+    仓库里、不在 CI 上——仓库内断言以 growth-subject.md 为准。）
     """
     from infinigrow.engine.subject import valid_journal_name
     # 机械判据本身
