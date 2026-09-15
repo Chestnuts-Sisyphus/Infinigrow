@@ -69,8 +69,10 @@ def test_changelog_known_limitations_exist():
 def test_journal_naming_rule_is_synced_across_three_sources():
     """K7/A8：`journal/` 命名规则 `<创建拍号4位>-<创建日期YYYYMMDD>.md` 三处同源。
 
-    执行者提示词（tick.md）／组织会话提议（org-session.md）／主体声明（subject.md）
-    必须写同一句；代码里 `subject.valid_journal_name` 是机械判据。改一处＝三处一起改。
+    执行者提示词（tick.md）／组织会话提议（org-session.md）／主体文档（growth-subject.md）
+    必须写同一句；代码里 `subject.valid_journal_name` 是机械判据。改一处＝各处一起改。
+    （本机主体声明 `D:/AI/Infinigrow-subject/subject.md` 也同步该句，但它不在仓库里、
+    不在 CI 上——仓库内断言以 growth-subject.md 为准。）
     """
     from infinigrow.engine.subject import valid_journal_name
     # 机械判据本身
@@ -80,12 +82,10 @@ def test_journal_naming_rule_is_synced_across_three_sources():
     assert not valid_journal_name("85-20260915.md")       # 拍号不足 4 位
     assert not valid_journal_name("0085-2026-09-15.md")   # 日期带横杠
     # 三处文本都必须含同一句规则说明（防一边改了另一边忘改）
-    subject_text = (REPO_ROOT.parent / "Infinigrow-subject" / "subject.md")
-    assert subject_text.is_file(), "主体声明缺失：%s" % subject_text
     texts = {
         "tick.md": (REPO_ROOT / "prompts" / "tick.md").read_text(encoding="utf-8"),
         "org-session.md": (REPO_ROOT / "prompts" / "org-session.md").read_text(encoding="utf-8"),
-        "subject.md": subject_text.read_text(encoding="utf-8"),
+        "growth-subject.md": (REPO_ROOT / "docs" / "growth-subject.md").read_text(encoding="utf-8"),
     }
     for name, text in texts.items():
         assert "<创建拍号4位>-<创建日期YYYYMMDD>.md" in text, "%s 缺命名规则" % name
