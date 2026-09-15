@@ -305,6 +305,16 @@ def _cmd_status(settings) -> int:
              int(status.get("consecutive_failures") or 0),
              int(status.get("consecutive_executor_failures") or 0)))
 
+    # K8/A6 空转成本显形：连续「无芽可领」拍数（接了执行者但没活干，零 token 但空转）。
+    # 机械拍（未接执行者）不算——零 token 本来就是它的预期。
+    stall = int(status.get("no_ticket_streak", 0) or 0)
+    if stall > 0:
+        print("  空转：连续 %d 拍无芽可领（零 token；阈值 %d 拍≈%.0f 小时告警）"
+              % (stall, settings.stall_alert_ticks,
+                 settings.stall_alert_ticks * settings.tick_minutes / 60.0))
+    else:
+        print("  空转：0 拍（有芽可领或未接执行者）")
+
     snapshot = {}
     if layout.subject_snapshot.is_file():
         try:
@@ -321,8 +331,13 @@ def _cmd_status(settings) -> int:
                              cap=settings.queue_cap, lead_limit=settings.lead_limit,
                              cold_start_ticks=settings.cold_start_ticks)
     s = queue.summary()
-    print("  队列：活跃 %d／冻结 %d（芽源分布 %s）"
-          % (s["active"], s["frozen"], json.dumps(s["by_origin"], ensure_ascii=False)))
+    # K4/A5：可领数＝`leads<3` 且非冻结（长任务芽豁免连领上限，也算可领）。
+    # 「活跃」只是非冻结行数，**不等于可领**——空转期 25 根全 leads=3，可领 0
+    # （状态面曾因此误导过：显示「活跃 25」让人以为有 25 个活可干）。
+    eligible = len(queue.eligible(0))
+    print("  队列：可领 %d 根／共 %d 根（活跃 %d／冻结 %d，芽源分布 %s）"
+          % (eligible, s["active"] + s["frozen"], s["active"], s["frozen"],
+             json.dumps(s["by_origin"], ensure_ascii=False)))
 
     report = redemption_report(read_jsonl(layout.outcome_ledger))
     rate = report.get("兑现率")
@@ -347,7 +362,11 @@ def _cmd_status(settings) -> int:
 
 
 def _print_usage_line(layout) -> None:
-    """T9/A16 成本与用量：只汇总**执行者自报**的用量（`IG_USAGE`），不拿长度冒充 token。"""
+    """T9/A16 成本与用量：只汇总**执行者自报**的用量（`IG_USAGE`），不拿长度冒充 token。
+
+    **K9/A10**：失败调用（rc≠0/超时）即使没自报也显式记 `usage="unknown"`，
+    在统计里**单列**「N 次失败未计费/未知」——成本账不许假装失败不存在。
+    """
     from .ledger.store import read_jsonl as _read
     import datetime as _dt
     rows = _read(layout.executor_ledger)
@@ -355,8 +374,12 @@ def _print_usage_line(layout) -> None:
     calls = [r for r in rows if str(r.get("time", "")).startswith(today)]
     total_tokens = 0
     reported = 0
+    failed_unknown = 0
     for r in calls:
         usage = r.get("usage")
+        if usage == "unknown":                       # K9：失败未计费/未知，单列
+            failed_unknown += 1
+            continue
         if isinstance(usage, dict):
             reported += 1
             # 接受两种自报形态：`tokens`/`total_tokens`（合并口径）或
@@ -370,12 +393,15 @@ def _print_usage_line(layout) -> None:
     if not calls:
         print("  今日执行者调用：0 次（今日尚未调用）")
         return
-    if not reported:
+    if not reported and failed_unknown == 0:
         print("  今日执行者调用：%d 次；执行者**未自报用量**（IG_USAGE），token/花费不可估算"
               % len(calls))
         return
-    print("  今日执行者调用：%d 次；自报用量 %d 次，token 合计 %d"
-          % (len(calls), reported, total_tokens))
+    base = ("  今日执行者调用：%d 次；自报用量 %d 次，token 合计 %d"
+            % (len(calls), reported, total_tokens))
+    if failed_unknown:
+        base += "；**%d 次失败未计费/未知（usage=unknown）**" % failed_unknown
+    print(base)
 
 
 def _toggle_task(action: str, task: Optional[str]) -> int:

@@ -46,6 +46,19 @@ TIMEOUT_RC = 124
 #: 找不到执行者（沿用 shell 惯例 127）
 NOT_FOUND_RC = 127
 
+#: 传输层截断/连接中断的签名（K5/A9）：执行者输出里出现这些＝响应体没读完/连接被断，
+#: **重跑大概率成功**（与 400 类「上游校验抖动」不同，那是适配器侧重试的事）。
+#: 判据要具体状态：只认这几个明确签名，不把「rc≠0」一律重试（那会把真失败放大成烧钱）。
+TRANSPORT_CUT_RX = re.compile(
+    r"IncompleteRead|ConnectionResetError|Connection reset|RemoteDisconnected|"
+    r"BrokenPipeError|Read timed out",
+    re.IGNORECASE)
+#: 传输层截断的重试上限（次）。适配器侧已有 5 次退避（400 类）；这里是引擎侧的
+#: 第二层，专门兜「截断/断连」——这两类在适配器侧**不重试**（实测 tick 50 白丢一拍）。
+TRANSPORT_RETRY_MAX = 2
+#: 传输层重试间隔（秒）：截断通常瞬时恢复，短退避即可，别拖垮一拍（60s 时限内要跑完）。
+TRANSPORT_RETRY_DELAY_S = 2.0
+
 #: 用量行的前缀（执行者可选用；不写＝账本里 usage 为 null）
 USAGE_PREFIX = "IG_USAGE "
 
@@ -77,6 +90,7 @@ class ExecutorRun:
     usage: Optional[dict] = None
     note: str = ""
     cwd_name: str = ""
+    attempt: int = 1                  # K5/A9：第几次尝试（传输层截断重试后 >1）
     time: str = field(default_factory=lambda: _dt.datetime.now()
                       .strftime("%Y-%m-%d %H:%M:%S"))
 
@@ -91,17 +105,18 @@ class ExecutorRun:
             "duration_ms": int(self.duration_s * 1000),
             "prompt_bytes": self.prompt_bytes, "output_bytes": self.output_bytes,
             "usage": self.usage, "note": self.note, "cwd_name": self.cwd_name,
-            "time": self.time,
+            "attempt": self.attempt, "time": self.time,
         }
 
     def label(self) -> str:
         """一行字的调用摘要（进对账报告；**不含本机路径**）。"""
         state = "超时" if self.timed_out else ("成功" if self.rc == 0 else "失败")
-        return ("%s（%s）rc=%d 用时=%.2fs 提示=%dB 输出=%dB%s"
+        return ("%s（%s）rc=%d 用时=%.2fs 提示=%dB 输出=%dB%s%s"
                 % (self.command_label or "（无命令）", state, self.rc, self.duration_s,
                    self.prompt_bytes, self.output_bytes,
                    " 用量=%s" % json.dumps(self.usage, ensure_ascii=False)
-                   if self.usage else ""))
+                   if self.usage else "",
+                   " 尝试=%d" % self.attempt if self.attempt > 1 else ""))
 
 
 def redact_paths(text: str, roots: Iterable = ()) -> str:
@@ -186,9 +201,9 @@ def parse_usage(output: str) -> Optional[dict]:
     return None
 
 
-def run_command(command: str, prompt: str, *, tick: int, kind: str, cwd: Path,
-                state_root: Path, subject_root: Path, timeout_s: int = 120,
-                model: str = "") -> ExecutorRun:
+def _run_command_once(command: str, prompt: str, *, tick: int, kind: str, cwd: Path,
+                      state_root: Path, subject_root: Path, timeout_s: int,
+                      model: str) -> ExecutorRun:
     """起一次执行者子进程。**不抛异常**——失败也返回 ExecutorRun（rc/timed_out 标明）。"""
     argv = split_command(command)
     label = command_label(command)
@@ -230,6 +245,43 @@ def run_command(command: str, prompt: str, *, tick: int, kind: str, cwd: Path,
                        prompt_bytes=len(prompt or ""), output_bytes=len(output),
                        output=output, usage=parse_usage(output), note=note,
                        cwd_name=cwd_name)
+
+
+def _is_transport_cut(run: ExecutorRun) -> bool:
+    """判据（K5/A9）：这次失败是不是**传输层截断/断连**——重跑大概率成功。
+
+    只认明确签名（`IncompleteRead`／连接重置／远端断开／读超时），且必须 rc≠0
+    （rc=0 但有这些词＝输出里恰好提到，不是失败）。不把一切失败都重试：
+    400 类校验抖动在适配器侧已有 5 次退避；这里是引擎侧的第二层，只兜传输层。
+    """
+    if run.ok:
+        return False
+    return bool(TRANSPORT_CUT_RX.search(run.output or ""))
+
+
+def run_command(command: str, prompt: str, *, tick: int, kind: str, cwd: Path,
+                state_root: Path, subject_root: Path, timeout_s: int = 120,
+                model: str = "") -> ExecutorRun:
+    """起执行者子进程；**传输层截断（IncompleteRead 等）自动重试**（K5/A9）。
+
+    - 截断＝响应体没读完/连接被断，重跑大概率成功（实测 tick 50 因此白丢一拍）；
+    - 重试上限 `TRANSPORT_RETRY_MAX`，间隔 `TRANSPORT_RETRY_DELAY_S`；
+    - 每次尝试都记进账（`attempt` 字段：第几次尝试）；不把「尝试过又失败」隐藏成
+      「只试了一次」——截断后的成功在账本里 `attempt>1`，失败也如实记录次数。
+    - 其余失败（超时/起不来/非零退出）与旧行为一致：不重试，一次性记清。
+    """
+    run = _run_command_once(command, prompt, tick=tick, kind=kind, cwd=cwd,
+                            state_root=state_root, subject_root=subject_root,
+                            timeout_s=timeout_s, model=model)
+    attempt = 1
+    while _is_transport_cut(run) and attempt < TRANSPORT_RETRY_MAX:
+        time.sleep(TRANSPORT_RETRY_DELAY_S)
+        run = _run_command_once(command, prompt, tick=tick, kind=kind, cwd=cwd,
+                                state_root=state_root, subject_root=subject_root,
+                                timeout_s=timeout_s, model=model)
+        attempt += 1
+        run.attempt = attempt
+    return run
 
 
 def run_callable(fn: Callable[[str], str], prompt: str, *, tick: int, kind: str,
@@ -287,9 +339,17 @@ def write_trace(layout: StateLayout, run: ExecutorRun, prompt: str,
 
 
 def record_executor_run(layout: StateLayout, run: ExecutorRun) -> None:
-    """把一次调用记进账（失败也记——「没做成」是事实，不该消失）。"""
+    """把一次调用记进账（失败也记——「没做成」是事实，不该消失）。
+
+    **K9/A10 成本诚实**：失败调用（rc≠0 或超时）即使没有自报用量，也**显式记
+    `"usage":"unknown"`**——失败是否已在上游计费不可知，成本账不能假装它不存在；
+    统计里单列「失败未计费/未知」。「成功但没自报」仍是 `null`（执行者没报，
+    不拿长度冒充 token——既有纪律不变）。旧行（无 usage 字段）读作 null，不破坏。
+    """
     record = run.as_record()
     record["note"] = redact_paths(record.get("note") or "")
+    if not run.ok and record.get("usage") is None:
+        record["usage"] = "unknown"
     append_jsonl(layout.executor_ledger, record, layout.root)
 
 

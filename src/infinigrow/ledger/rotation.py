@@ -240,6 +240,40 @@ def rotate_files(layout: StateLayout, keep_files: int = 200,
     return reports
 
 
+def rotate_journal(subject_root: Path, keep_files: int = 200,
+                   stamp: Optional[str] = None) -> Optional[dict]:
+    """轮转主体 `journal/`（K6/A7）：超上限（默认 200 篇，可配）时**只移动**进归档。
+
+    - 主体是「被长的现实」，它的 `journal/` 归它自己管；归档放**主体根自己的**
+      `archive/journal/`（不混进引擎状态根——那是另一套账）。
+    - 只移动不删；按**文件名字典序**（`<创建拍号4位>-<日期>.md`，拍号小的＝更旧）
+      移走最旧的，保留最近 N 篇。
+    - 与 K2 的关系：观测按 mtime 取最新 N 个文件——轮转把最旧的移走不会影响
+      新内容的可见性；归档后 `journal/` 里的仍是「最新的那一批」。
+    - 归档名带时间戳（同秒重跑换后缀，不覆盖）。
+    """
+    journal = subject_root / "journal"
+    if not journal.is_dir():
+        return None
+    files = sorted(p for p in journal.glob("*.md") if p.is_file())
+    if len(files) <= keep_files:
+        return None
+    moved = files[:len(files) - keep_files]
+    dest_dir = subject_root / "archive" / "journal"
+    safe_stamp = _safe_component(stamp or _dt.datetime.now().strftime("%Y%m%d-%H%M%S"),
+                                 fallback="stamp")
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    for p in moved:
+        dest = dest_dir / ("%s.%s" % (p.name, safe_stamp))
+        suffix = 1
+        while dest.exists():
+            suffix += 1
+            dest = dest_dir / ("%s.%s-%d" % (p.name, safe_stamp, suffix))
+        move_file(p, dest, subject_root)
+    return {"name": "journal", "moved": len(moved), "kept": len(files) - len(moved),
+            "archive": str(dest_dir.relative_to(subject_root).as_posix())}
+
+
 def ledger_sizes(layout: StateLayout) -> dict:
     """账本体检（园丁报告用）：名字 → 字节数。"""
     return {name: (layout.root / name).stat().st_size

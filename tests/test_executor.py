@@ -258,3 +258,69 @@ def test_executor_env_forces_utf8_stdio(tmp_path):
     # 其余注入上下文仍在（不回归）
     assert env["IG_TICK"] == "1" and env["IG_PASS_KIND"] == "tick"
     assert env["IG_SUBJECT_ROOT"] == str(tmp_path / "subject")
+
+
+# ---------------------------------------------------------------- K5/A9 传输层重试
+def test_transport_cut_is_retried_and_succeeds(tmp_path):
+    """K5/A9：首次 `IncompleteRead`（传输层截断）→ 自动重试 → 第二次成功 rc=0。
+
+    计数文件跨进程记次数（子进程间不共享内存）；`attempt=2` 进账本。
+    """
+    count_file = tmp_path / "flaky-count.txt"
+    layout = resolve_state(str(tmp_path / "state"), str(REPO_ROOT), create=True)
+    cmd = _cmd("flaky") + ' --count-file "%s"' % count_file
+    run = exec_mod.run_command(cmd, "提示词", tick=1, kind="tick", cwd=tmp_path,
+                               state_root=layout.root, subject_root=tmp_path,
+                               timeout_s=30)
+    assert run.ok and run.rc == 0
+    assert run.attempt == 2                                # 第二次尝试成功
+    assert "重试" in run.output or "成功" in run.output
+    exec_mod.record_executor_run(layout, run)
+    rows = [json.loads(line) for line in
+            layout.executor_ledger.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rows[-1]["attempt"] == 2                        # 账本记 attempt，不破坏旧行
+
+
+def test_transport_cut_failure_records_attempt_count(tmp_path):
+    """K5/A9：截断持续失败时如实记尝试次数（不把重试藏起来）。"""
+    layout = resolve_state(str(tmp_path / "state"), str(REPO_ROOT), create=True)
+    # 用「总是截断」的命令：起不来/失败与截断无关，这里直接造一个输出恒含签名的
+    run = exec_mod.run_command(
+        'python -c "import sys; sys.stderr.write(\'EXECUTOR-ERROR: IncompleteRead(1 bytes read, 9 more expected)\n\'); sys.exit(1)"',
+        "提示词", tick=2, kind="tick", cwd=tmp_path,
+        state_root=layout.root, subject_root=tmp_path, timeout_s=30)
+    assert not run.ok
+    assert run.attempt == exec_mod.TRANSPORT_RETRY_MAX     # 试满上限次数
+
+
+def test_non_transport_failure_is_not_retried(tmp_path):
+    """K5/A9：非传输层失败（普通 rc≠0，无截断签名）不重试——一次记清。"""
+    layout = resolve_state(str(tmp_path / "state"), str(REPO_ROOT), create=True)
+    run = exec_mod.run_command(_cmd("fail"), "提示词", tick=3, kind="tick",
+                               cwd=tmp_path, state_root=layout.root,
+                               subject_root=tmp_path, timeout_s=30)
+    assert run.rc == 2 and run.attempt == 1                # 不重试
+
+
+def test_failed_run_records_usage_unknown(tmp_path):
+    """K9/A10：失败调用（无自报用量）→ 账本显式记 `usage="unknown"`。"""
+    layout = resolve_state(str(tmp_path / "state"), str(REPO_ROOT), create=True)
+    run = exec_mod.run_command(_cmd("fail"), "提示词", tick=4, kind="tick",
+                               cwd=tmp_path, state_root=layout.root,
+                               subject_root=tmp_path, timeout_s=30)
+    exec_mod.record_executor_run(layout, run)
+    rows = [json.loads(line) for line in
+            layout.executor_ledger.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rows[-1]["rc"] == 2 and rows[-1]["usage"] == "unknown"
+
+
+def test_success_without_usage_stays_null(tmp_path):
+    """K9/A10：成功但执行者没自报用量 → 仍是 null（不拿长度冒充 token 的纪律不变）。"""
+    layout = resolve_state(str(tmp_path / "state"), str(REPO_ROOT), create=True)
+    run = exec_mod.run_command(_cmd("empty"), "提示词", tick=5, kind="tick",
+                               cwd=tmp_path, state_root=layout.root,
+                               subject_root=tmp_path, timeout_s=30)
+    exec_mod.record_executor_run(layout, run)
+    rows = [json.loads(line) for line in
+            layout.executor_ledger.read_text(encoding="utf-8").splitlines() if line.strip()]
+    assert rows[-1]["rc"] == 0 and rows[-1]["usage"] is None

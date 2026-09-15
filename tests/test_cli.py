@@ -62,6 +62,56 @@ def test_status_prints_required_fields(tmp_path, capsys):
     assert "兑现率：有样本" in out and "1.00" in out            # 兑现率判定
     assert "ALERT 首行：# 引擎正常" in out          # ALERT 首行
     assert "今日执行者调用：1 次" in out and "token 合计 1200" in out  # 用量段
+    assert "可领 0 根／共 0 根" in out              # K4/A5：队列口径（空队列）
+
+
+def test_status_shows_claimable_count(tmp_path, capsys):
+    """K4/A5：status 显示「可领 N 根／共 M 根」——可领≠活跃（leads<3 才算）。"""
+    root = _write_state(tmp_path)
+    from infinigrow.engine.model import Sprout, SproutOrigin
+    rows = [
+        Sprout(id="sp0001-001-x", obj="主体/a.md", dimension="存在性", pointer="p",
+               origin=SproutOrigin.DIFF, created_tick=10, leads=3).as_record(),  # 已耗尽
+        Sprout(id="sp0001-002-y", obj="主体/b.md", dimension="存在性", pointer="p",
+               origin=SproutOrigin.DIFF, created_tick=11, leads=1).as_record(),  # 可领
+    ]
+    (root / "sprouts.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
+        encoding="utf-8")
+    code = main(["--state-root", str(root), "status"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "可领 1 根／共 2 根" in out              # 1 根可领（leads=1），共 2 根
+    assert "活跃 2" in out                         # 活跃仍是 2（非冻结行数）
+
+
+def test_status_shows_idle_streak(tmp_path, capsys):
+    """K8/A6：status 显示「连续 N 拍无芽可领」（空转成本显形）。"""
+    root = _write_state(tmp_path)
+    status = json.loads((root / "tick_status.json").read_text(encoding="utf-8"))
+    status["no_ticket_streak"] = 9
+    (root / "tick_status.json").write_text(json.dumps(status, ensure_ascii=False),
+                                           encoding="utf-8")
+    code = main(["--state-root", str(root), "status"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "空转：连续 9 拍无芽可领" in out
+
+
+def test_status_lists_failed_unknown_usage(tmp_path, capsys):
+    """K9/A10：失败调用 usage=unknown 单列（成本账不假装失败不存在）。"""
+    root = _write_state(tmp_path)
+    import datetime as _dt
+    today = _dt.date.today().isoformat()
+    (root / "executor.jsonl").write_text(
+        json.dumps({"command": "x", "kind": "tick", "rc": 1, "duration_ms": 100,
+                    "tick": 17, "time": "%s 19:05:00" % today,
+                    "usage": "unknown"}, ensure_ascii=False) + "\n",
+        encoding="utf-8")
+    code = main(["--state-root", str(root), "status"])
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "失败未计费/未知" in out and "usage=unknown" in out
 
 
 def test_status_shows_alert_line_even_when_state_minimal(tmp_path, capsys):

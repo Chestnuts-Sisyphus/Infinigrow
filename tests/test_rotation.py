@@ -16,7 +16,8 @@ from infinigrow.core.paths import REPO_ROOT, resolve_state
 from infinigrow.core.config import load_settings
 from infinigrow.engine.tick import maturity_of, run_tick
 from infinigrow.ledger.rotation import (LEDGER_POLICY, TAIL, archived_files,
-                                        rotate_all, rotate_ledger, search_archive)
+                                        rotate_all, rotate_ledger, rotate_journal,
+                                        search_archive)
 from infinigrow.ledger.store import append_jsonl, read_jsonl
 
 
@@ -179,3 +180,52 @@ def test_rotate_files_rotates_tick_log_by_bytes(tmp_path):
                             stamp="20260101-000005")
     assert reports2 and reports2[0]["moved"] == 1
     assert len(list((layout.archive_dir / "files" / "logs").glob("tick.log.*"))) == 2
+
+
+def test_rotate_journal_moves_excess_into_subject_archive(tmp_path):
+    """K6/A7：主体 journal 超上限 → 只移动进 `<主体根>/archive/journal/`（不删）。"""
+    subject = tmp_path / "subject"
+    journal = subject / "journal"
+    journal.mkdir(parents=True, exist_ok=True)
+    for i in range(205):                       # 205 篇 > 默认 200
+        (journal / ("%04d-20260915.md" % i)).write_text("x", encoding="utf-8")
+    report = rotate_journal(subject, keep_files=200, stamp="20260915-120000")
+    assert report and report["moved"] == 5
+    assert report["kept"] == 200
+    kept = sorted(p.name for p in journal.glob("*.md"))
+    assert len(kept) == 200
+    assert kept[0] == "0005-20260915.md"                 # 最旧 5 篇被移走
+    archived = list((subject / "archive" / "journal").glob("*.md.*"))
+    assert len(archived) == 5                            # 5 篇都在归档里（只移动不删）
+    all_names = kept + [a.name.split(".")[0] for a in archived]
+    assert len(set(all_names)) == 205                    # 一篇没丢
+
+
+def test_rotate_journal_noop_below_limit(tmp_path):
+    """K6/A7：低于上限（或 journal 不存在）＝不动（幂等）。"""
+    subject = tmp_path / "subject2"
+    journal = subject / "journal"
+    journal.mkdir(parents=True, exist_ok=True)
+    for i in range(50):
+        (journal / ("%04d-20260915.md" % i)).write_text("x", encoding="utf-8")
+    assert rotate_journal(subject, keep_files=200) is None
+    assert not (subject / "archive").exists()
+    assert rotate_journal(tmp_path / "no-such-subject", keep_files=200) is None
+
+
+def test_gardener_rotates_subject_journal(tmp_path):
+    """K6/A7：园丁顺手轮转主体 journal（`journal_keep_files` 可配）。"""
+    settings, layout = _layout(tmp_path)
+    subject = settings.subject_path()
+    journal = subject / "journal"
+    journal.mkdir(parents=True, exist_ok=True)
+    for i in range(15):                          # 超过可配的 10 篇
+        (journal / ("%04d-20260915.md" % i)).write_text("x", encoding="utf-8")
+    from infinigrow.core.config import load_settings as _ls
+    s2 = _ls(env={}, state_root=str(tmp_path / "state"), repo_root=str(REPO_ROOT),
+             subject_root=str(subject), journal_keep_files=10)
+    from infinigrow.garden.gardener import run_gardener
+    report = run_gardener(settings=s2, write_alert=False)
+    kept = list(journal.glob("*.md"))
+    assert len(kept) == 10
+    assert any("journal 轮转" in n for n in report.notes)

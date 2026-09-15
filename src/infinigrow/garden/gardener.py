@@ -17,7 +17,7 @@ from typing import Optional
 from ..core.config import Settings, load_settings
 from ..core.paths import StateLayout, guard, resolve_state
 from ..engine.tick import LOCK_STALE_SECONDS, read_tick_status
-from ..ledger.rotation import rotate_all, rotate_files
+from ..ledger.rotation import rotate_all, rotate_files, rotate_journal
 from ..ledger.store import ledger_stats, write_work_file
 
 #: 断流阈值（小时）：最后一拍超过这么久没更新 → 致命旗
@@ -155,6 +155,19 @@ def run_gardener(settings: Optional[Settings] = None,
                             % "、".join("%s→%s(移 %d 份)"
                                        % (r["name"], r["archive"], r["moved"])
                                        for r in report.rotated_files))
+
+    # 5c) 主体 journal 轮转（K6/A7）：超上限只移动进 `<主体根>/archive/journal/`。
+    #     主体是「被长的现实」，它的 archive 归它自己，不混进引擎状态根。
+    journal_report = rotate_journal(cfg.subject_path(),
+                                    keep_files=cfg.journal_keep_files)
+    if journal_report:
+        report.rotated_files.append(journal_report)
+        report.notes.append("主体 journal 轮转：%s→%s(移 %d 篇)"
+                            % (journal_report["name"], journal_report["archive"],
+                               journal_report["moved"]))
+    elif cfg.journal_keep_files > 0:
+        report.notes.append("主体 journal 轮转：未超上限（保留 %d 篇）"
+                            % cfg.journal_keep_files)
 
     if write_alert:
         _write_alert(layout, report, status)
