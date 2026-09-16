@@ -73,18 +73,23 @@ def should_run_org_session(layout: StateLayout, tick: int,
     last = _last_org_record(tries)
     diffs = read_jsonl(layout.diff_ledger)
     pending = [d for d in diffs if not d.get("evidence") and d.get("spawns") is False]
-    zero_streak = 0
+    # 连续「零差异」的读数：**按行**数（差异账一行一个差异点，一拍几十行）——
+    # 名字里的单位必须与计数方式一致（N56：原先叫「连续 N 拍」，数的是行，
+    # 报出来的「86 拍」其实是 86 行 ≈ 2 拍，等于在报数时说假话）。
+    zero_rows = 0
     for rec in reversed(diffs):
         if rec.get("kind") == "预测内对":
-            zero_streak += 1
+            zero_rows += 1
         elif rec.get("kind") in ("预测内错", "预测外发现", "预测未执行"):
             break
+    zero_ticks = len({d.get("tick") for d in diffs[-zero_rows:]}) if zero_rows else 0
 
     criteria = {
         "从未跑过": last is None,
         "距上次拍号差": None if last is None else tick - int(last.get("tick") or 0),
         "待补指针": len(pending),
-        "连续预测内对拍数": zero_streak,
+        "连续预测内对行数": zero_rows,
+        "连续零差异拍数": zero_ticks,
         "上次时间戳": None if last is None else last.get("time"),
     }
 
@@ -103,9 +108,9 @@ def should_run_org_session(layout: StateLayout, tick: int,
                                   % (tick - last_tick, gap), criteria)
     if pending:
         return OrgTriggerDecision(True, "③待补指针差异 %d 条" % len(pending), criteria)
-    if zero_streak >= zero_gap:
-        return OrgTriggerDecision(True, "④连续 %d 拍零差异（该看语义层了）" % zero_streak,
-                                  criteria)
+    if zero_rows >= zero_gap:
+        return OrgTriggerDecision(True, "④连续 %d 行零差异（约 %d 拍；该看语义层了）"
+                                  % (zero_rows, zero_ticks), criteria)
     return OrgTriggerDecision(False, "无条件成立：空窗 %s < %d，待补指针 0"
                               % (criteria["距上次拍号差"], gap), criteria)
 

@@ -83,7 +83,12 @@ def test_pending_pointer_criterion(tmp_path):
 
 
 def test_zero_diff_streak_criterion(tmp_path):
-    """连续零差异（具体计数）≥ 阈值 → 触发：工程上「安静得可疑」是要看的信号。"""
+    """连续零差异（具体计数）≥ 阈值 → 触发：工程上「安静得可疑」是要看的信号。
+
+    **单位要报对（N56）**：阈值数的是**差异账的行数**（一拍几十行），所以读数里
+    同时给出「行数」与它覆盖的「拍数」——原先叫「连续 N 拍」却数行，报出来的
+    「86 拍」其实是 86 行 ≈ 2 拍（在报数时说假话）。
+    """
     settings = _settings(tmp_path, "zero")
     layout = resolve_state(settings.state_root, settings.repo_root, create=True)
     warm = (_dt.datetime.now() - _dt.timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
@@ -94,7 +99,9 @@ def test_zero_diff_streak_criterion(tmp_path):
                       "evidence": "文件:x", "spawns": False, "tick": 21 + i}, layout.root)
     decision = should_run_org_session(layout, tick=21)
     assert decision.should_run is True and "零差异" in decision.reason
-    assert decision.criteria["连续预测内对拍数"] == 10
+    assert decision.criteria["连续预测内对行数"] == 10
+    assert decision.criteria["连续零差异拍数"] == 10        # 这 10 行来自 10 个不同拍
+    assert "约 10 拍" in decision.reason
 
 
 def test_decision_is_recomputed_every_tick(tmp_path):
