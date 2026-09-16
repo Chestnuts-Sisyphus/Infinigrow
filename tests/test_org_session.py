@@ -233,29 +233,56 @@ def test_missing_json_is_not_guessed(tmp_path, bad):
 
 # ---------------------------------------------------------------- N43 / K14
 def test_prompt_shows_dir_objects_and_reality_delta(tmp_path):
-    """N43/K14 的输入块：目录对象（可对账量＝文件数）＋「上一拍快照 vs 本拍清单」对比。
+    """N43/K14 的输入块：目录对象（可对账量＝文件数）＋「上一拍**动手前 → 动手后**」对比。
 
     没有这两块，组织会话既无法提议「往 journal/ 里再长一格」（N43），
     也看不见新出现的现实（K14）。
+
+    **N55（本会话抓到的真缺陷）**：对比窗口必须是**同一拍的两份快照**
+    （动手前 `subject-before.json` / 动手后 `subject.json`）——原先拿「上一拍快照」
+    跟「本拍动手前清单」比，两者之间什么也没发生，这块**恒为空**（K14 等于没接上）。
     """
     settings = _settings(tmp_path)
     layout = resolve_state(settings.state_root, settings.repo_root, create=True)
     subject = settings.subject_path()
     (subject / "journal").mkdir(parents=True, exist_ok=True)
     (subject / "journal" / "0001-20260916.md").write_text("x", encoding="utf-8")
-    # 上一拍快照（引擎每拍末尾写；这里造一份「还没长 journal/0001」的旧快照）
-    layout.subject_snapshot.write_text(json.dumps({
+    # 上一拍的两份快照：动手前还没有 journal/0001，动手后有了（那一手动作的结果）
+    layout.subject_before_snapshot.write_text(json.dumps({
         "tick": 1, "root_name": "subject", "exists": True, "file_count": 2,
         "total_bytes": 6, "files": [{"name": "notes.md", "bytes": 5},
                                     {"name": "growth-1.md", "bytes": 1}],
-        "dirs": [],
+        "dirs": [{"name": "journal", "files": 0}],
+    }, ensure_ascii=False), encoding="utf-8")
+    layout.subject_snapshot.write_text(json.dumps({
+        "tick": 1, "root_name": "subject", "exists": True, "file_count": 3,
+        "total_bytes": 7, "files": [{"name": "journal/0001-20260916.md", "bytes": 1},
+                                    {"name": "notes.md", "bytes": 5}],
+        "dirs": [{"name": "journal", "files": 1}],
     }, ensure_ascii=False), encoding="utf-8")
     prompt = org_mod.build_org_prompt(settings, layout, 2, subject, {})
     assert "主体/journal/（1 格）" in prompt                        # 目录对象＋格数
     delta = prompt.split("### 本拍现实变化")[1]
     assert "主体/journal/0001-20260916.md" in delta                # 新出现的对象被点名
+    assert "动手前 → 动手后" in delta                              # 对比窗口写清楚
     assert "新出现" in delta and "从清单里消失" in delta
     assert "不等于被删" in delta                                   # 有界清单的诚实声明
+
+
+def test_reality_delta_is_honest_when_the_before_snapshot_is_missing(tmp_path):
+    """N55 的诚实面：只有「上一拍动手后」快照、没有「动手前」那一份 → 如实说这块空着，
+    不许拿别的读数凑一个假对比（那正是原先那条恒为空判据的教训）。"""
+    settings = _settings(tmp_path)
+    layout = resolve_state(settings.state_root, settings.repo_root, create=True)
+    subject = settings.subject_path()
+    (subject / "journal").mkdir(parents=True, exist_ok=True)
+    layout.subject_snapshot.write_text(json.dumps({
+        "tick": 1, "root_name": "subject", "exists": True, "file_count": 1,
+        "total_bytes": 1, "files": [{"name": "journal/0001-20260916.md", "bytes": 1}],
+        "dirs": [{"name": "journal", "files": 1}],
+    }, ensure_ascii=False), encoding="utf-8")
+    text = org_mod._render_reality_delta(layout, subject)
+    assert "无「上一拍动手前」快照" in text and "不拿别的读数凑" in text
 
 
 def test_delta_proposal_on_dir_object_spawns_a_sprout(tmp_path):

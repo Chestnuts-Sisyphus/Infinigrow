@@ -83,6 +83,7 @@ class StateLayout:
     traces_dir: Path = None             # type: ignore[assignment]  执行者留痕（每拍一份）
     logs_dir: Path = None               # type: ignore[assignment]  调度器/看护日志
     subject_snapshot: Path = None       # type: ignore[assignment]  主体快照（工作文件）
+    subject_before_snapshot: Path = None  # type: ignore[assignment]  主体**动手前**快照（N55/K14）
     executor_ledger: Path = None        # type: ignore[assignment]  执行者调用账（追加型）
     org_findings: Path = None           # type: ignore[assignment]  组织会话发现账（追加型）
     settings_file: Path = None          # type: ignore[assignment]  生效配置快照（工作文件）
@@ -101,6 +102,7 @@ def _fill(layout: StateLayout) -> StateLayout:
         "traces_dir": root / "traces",
         "logs_dir": root / "logs",
         "subject_snapshot": root / "subject.json",
+        "subject_before_snapshot": root / "subject-before.json",
         "executor_ledger": root / "executor.jsonl",
         "org_findings": root / "org-findings.jsonl",
         "settings_file": root / "settings.json",

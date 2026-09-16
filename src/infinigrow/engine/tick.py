@@ -839,6 +839,14 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
         preds = (subject_mod.merge_predictions(defaults, org_run.predictions)
                  if org_run else defaults)
     before_act = subject_mod.subject_readings(subject_root)
+    # **动手前快照**（N55/K14）：组织会话下轮要看的「那一手动作造成了什么」＝
+    # 动手前 vs 动手后两份快照之差。原先只写「动手后」一份，而组织会话拿它跟
+    # **本拍动手前**的清单比 —— 两者之间什么也没发生，那块判据恒为空（实测三次全是
+    # 「无新出现无变化」）。所以动手前这一份必须留：它才是「动作造成的现实变化」的左端。
+    write_work_file(layout.subject_before_snapshot,
+                    json.dumps(subject_mod.subject_snapshot(subject_root, tick),
+                               ensure_ascii=False, indent=2),
+                    layout.root, require_markers=("root_name",))
     result.predictions = {"total": len(preds), "planned": planned}
 
     # 3) 取题
