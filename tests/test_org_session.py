@@ -304,7 +304,7 @@ def test_reality_delta_window_covers_every_tick_since_the_last_org_session(tmp_p
         "dirs": [{"name": "journal", "files": 1}],
     }, ensure_ascii=False), encoding="utf-8")
     text = org_mod._render_reality_delta(layout, subject)
-    assert "自上次组织会话以来" in text and "锚点＝拍 10" in text
+    assert "自上次组织会话以来" in text and "起点＝拍 10" in text
     assert "主体/journal/0001-20260917.md" in text
     assert "主体/journal/0002-20260917.md" in text
     assert "主体/journal/0003-20260917.md" in text                 # 中间几拍也不漏

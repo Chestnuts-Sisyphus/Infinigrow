@@ -236,8 +236,8 @@ def _render_reality_delta(layout: StateLayout, subject_root: Path) -> str:
     # 现在补上（仍在有界清单里比：同在两边、字节不同的那些）。
     changed = sorted(n for n in (prev_files & now_files)
                      if prev_bytes.get(n) != now_bytes.get(n))
-    lines = ["对比窗口：**%s**（锚点＝拍 %s 的清单；本拍清单＝拍 %s／各取最新 %d 个文件；"
-             "读数是真实总数）" % (window, before.get("anchor_tick", before.get("tick")),
+    lines = ["对比窗口：**%s**（起点＝拍 %s 的清单；本拍清单＝拍 %s／各取最新 %d 个文件；"
+             "读数是真实总数）" % (window, before.get("tick"),
                                 after.get("tick"), SUBJECT_FILE_LIMIT),
              "主体读数：文件 %s → %s／字节 %s → %s"
              % (before.get("file_count"), after.get("file_count"),
@@ -312,7 +312,7 @@ def build_org_prompt(settings: Settings, layout: StateLayout, tick: int,
         "",
         _render_subject(subject_root),
         "",
-        "### 本拍现实变化（K14 扫现实：上一拍**动手前 → 动手后**；机械对比）",
+        "### 本拍现实变化（K14 扫现实：机械对比；窗口写在下一行）",
         "",
         _render_reality_delta(layout, subject_root),
         "",
