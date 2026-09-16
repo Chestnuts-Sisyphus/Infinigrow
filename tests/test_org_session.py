@@ -269,6 +269,30 @@ def test_prompt_shows_dir_objects_and_reality_delta(tmp_path):
     assert "不等于被删" in delta                                   # 有界清单的诚实声明
 
 
+def test_reality_delta_reports_byte_level_changes(tmp_path):
+    """N59：提示词承诺「新出现／**有变化**的东西是候选」，而对比原先只比名字集合与格数
+    ——**改名没改的改写/追加**（字节数变了）一条都不报，等于漏掉「有变化」这半边。
+    现在多一行「有变化（动手前后字节数不同、名字没变）」。"""
+    settings = _settings(tmp_path)
+    layout = resolve_state(settings.state_root, settings.repo_root, create=True)
+    subject = settings.subject_path()
+    (subject / "journal").mkdir(parents=True, exist_ok=True)
+    (subject / "journal" / "0001-20260916.md").write_text("xx", encoding="utf-8")
+    layout.subject_before_snapshot.write_text(json.dumps({
+        "tick": 1, "root_name": "subject", "exists": True, "file_count": 1,
+        "total_bytes": 1, "files": [{"name": "journal/0001-20260916.md", "bytes": 1}],
+        "dirs": [{"name": "journal", "files": 1}],
+    }, ensure_ascii=False), encoding="utf-8")
+    layout.subject_snapshot.write_text(json.dumps({
+        "tick": 1, "root_name": "subject", "exists": True, "file_count": 1,
+        "total_bytes": 2, "files": [{"name": "journal/0001-20260916.md", "bytes": 2}],
+        "dirs": [{"name": "journal", "files": 1}],
+    }, ensure_ascii=False), encoding="utf-8")
+    text = org_mod._render_reality_delta(layout, subject)
+    assert "有变化（动手前后字节数不同、名字没变）：主体/journal/0001-20260916.md（1→2 字节）" in text
+    assert "新出现（上一拍动手前没有、动手后有了）：（无）" in text     # 名字没变 → 不算新出现
+
+
 def test_reality_delta_is_honest_when_the_before_snapshot_is_missing(tmp_path):
     """N55 的诚实面：只有「上一拍动手后」快照、没有「动手前」那一份 → 如实说这块空着，
     不许拿别的读数凑一个假对比（那正是原先那条恒为空判据的教训）。"""

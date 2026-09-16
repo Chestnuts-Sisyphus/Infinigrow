@@ -200,22 +200,33 @@ def _render_reality_delta(layout: StateLayout, subject_root: Path) -> str:
         return "（无「上一拍动手后」快照：快照缺失或还没跑过拍——这块本轮空着）"
     prev_files = {str(f.get("name")) for f in before.get("files", [])}
     now_files = {str(f.get("name")) for f in after.get("files", [])}
+    prev_bytes = {str(f.get("name")): f.get("bytes") for f in before.get("files", [])}
+    now_bytes = {str(f.get("name")): f.get("bytes") for f in after.get("files", [])}
     prev_dirs = {str(d.get("name")): d.get("files") for d in before.get("dirs", [])}
     now_dirs = {str(d.get("name")): d.get("files") for d in after.get("dirs", [])}
     added = sorted(now_files - prev_files)
     dropped = sorted(prev_files - now_files)
+    # N59：提示词写的是「新出现／**有变化**的东西是候选」，而早先这里只比名字集合与格数
+    # ——**字节数变了但名字没变**的文件（改写/追加）一条都不报，等于把「有变化」漏掉了。
+    # 现在补上（仍在有界清单里比：同在两边、字节不同的那些）。
+    changed = sorted(n for n in (prev_files & now_files)
+                     if prev_bytes.get(n) != now_bytes.get(n))
     lines = ["对比窗口：上一拍（拍 %s）**动手前 → 动手后**两份快照"
              "（各取最新 %d 个文件；读数是真实总数）" % (before.get("tick"),
                                                     SUBJECT_FILE_LIMIT),
              "主体读数：文件 %s → %s／字节 %s → %s"
              % (before.get("file_count"), after.get("file_count"),
                 before.get("total_bytes"), after.get("total_bytes"))]
-    changed = ["%s：%s → %s 格" % (subject_dir_object(name), prev_dirs.get(name), n)
-               for name, n in sorted(now_dirs.items()) if prev_dirs.get(name) != n]
-    lines.append("目录格数变化：%s" % ("；".join(changed) if changed else "（无）"))
+    dir_changes = ["%s：%s → %s 格" % (subject_dir_object(name), prev_dirs.get(name), n)
+                   for name, n in sorted(now_dirs.items()) if prev_dirs.get(name) != n]
+    lines.append("目录格数变化：%s" % ("；".join(dir_changes) if dir_changes else "（无）"))
     lines.append("新出现（上一拍动手前没有、动手后有了）：%s"
                  % ("、".join("%s%s" % (SUBJECT_PREFIX, n) for n in added) if added
                     else "（无）"))
+    lines.append("有变化（动手前后字节数不同、名字没变）：%s"
+                 % ("、".join("%s%s（%s→%s 字节）" % (SUBJECT_PREFIX, n,
+                                                   prev_bytes.get(n), now_bytes.get(n))
+                              for n in changed) if changed else "（无）"))
     lines.append("从清单里消失（动手前有、动手后没有；**可能只是被更新的文件挤出观测名额**，"
                  "不等于被删）：%s"
                  % ("、".join("%s%s" % (SUBJECT_PREFIX, n) for n in dropped) if dropped
