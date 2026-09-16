@@ -825,6 +825,13 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
                               "parse_error": org_run.parse_error,
                               "trace": org_run.trace.name if org_run.trace else ""}
                 result.notes.append("组织会话：%s" % org_run.summary())
+                # N58：把「组织会话此刻看到的清单」存成锚点——它下一次跑时，
+                # 「本拍现实变化」块比的就是「自上次组织会话以来」（它缺席期间的全部变化）。
+                # 窗口＝1 拍时，组织会话（每 3~5 拍才跑一次）天然错过其余几拍的变化。
+                write_work_file(layout.subject_org_anchor,
+                                json.dumps(subject_mod.subject_snapshot(subject_root, tick),
+                                           ensure_ascii=False, indent=2),
+                                layout.root, require_markers=("root_name",))
 
     # 2) B猜：默认「主体保持不变」＋ 组织会话的规划值覆盖。
     #    刻意**不把引擎自身状态**放进默认预测/观测：那些文件是引擎自己写的，
@@ -839,10 +846,8 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
         preds = (subject_mod.merge_predictions(defaults, org_run.predictions)
                  if org_run else defaults)
     before_act = subject_mod.subject_readings(subject_root)
-    # **动手前快照**（N55/K14）：组织会话下轮要看的「那一手动作造成了什么」＝
-    # 动手前 vs 动手后两份快照之差。原先只写「动手后」一份，而组织会话拿它跟
-    # **本拍动手前**的清单比 —— 两者之间什么也没发生，那块判据恒为空（实测三次全是
-    # 「无新出现无变化」）。所以动手前这一份必须留：它才是「动作造成的现实变化」的左端。
+    # **动手前快照**（N55/K14）：它有两个用处——①组织会话锚点缺失时的回退窗口；
+    # ②排查「那一手动作造成了什么」（动手前 vs 动手后，步 8 那份）。
     write_work_file(layout.subject_before_snapshot,
                     json.dumps(subject_mod.subject_snapshot(subject_root, tick),
                                ensure_ascii=False, indent=2),

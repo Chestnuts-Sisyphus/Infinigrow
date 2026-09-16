@@ -170,34 +170,59 @@ def _render_subject(subject_root: Path) -> str:
     return "\n".join(lines)
 
 
+def _current_listing(subject_root: Path, reference: dict) -> dict:
+    """此刻的主体清单（快照形状），拍号沿用参考快照（它是「清单」不是「那一拍的账」）。"""
+    from .subject import subject_snapshot
+    return subject_snapshot(subject_root, int(reference.get("tick") or 0))
+
+
 def _render_reality_delta(layout: StateLayout, subject_root: Path) -> str:
-    """上一拍**动手前 → 动手后**（K14 扫现实）：**机械对比**，供组织会话抓候选。
+    """**自上次组织会话以来**（K14 扫现实）：**机械对比**，供组织会话抓候选。
 
     为什么要有它：对账只看「预测 vs 现实」，动作自己造成的变化（`act_caused`）会被
     中和掉——于是「主体里新出现的东西」在差异账里看不见（它是动作的后果，不派芽）。
     现实的变化照样是事实，值得长不值得长是**语义判断**（归组织会话），
-    但对比本身可以是机械的：这里只报「新出现／从清单里消失／格数变化」。
+    但对比本身可以是机械的：这里只报「新出现／有变化／从清单里消失／格数变化」。
 
-    **对比窗口必须先想清楚（N55，实测抓到的真缺陷）**：原先比的是「上一拍快照 vs 本拍清单」
-    ——而上一拍快照是**动手之后**写的、本拍清单是**本拍动手之前**读的，两者之间
-    什么也没发生 → 这块**在正常连续运转下恒为空**（实测三次组织会话都是「无新出现无变化」，
-    K14 等于没接上）。现在比的是**同一拍的两份快照**：`subject-before.json`（动手前，
-    `tick.py` 步 2）vs `subject.json`（动手后，步 8）——那正好是「那一手动作造成的现实变化」。
+    **对比窗口必须先想清楚（N55＋N58 两次实测换来的）**：
 
-    两条诚实约束：
+    - N55：原先比「上一拍快照 vs 本拍清单」——上一拍快照是**动手之后**写的、本拍清单是
+      **本拍动手之前**读的，两者之间什么也没发生 → 这块**恒为空**（K14 等于没接上）；
+    - N58：改成「上一拍动手前 → 动手后」之后**仍然几乎看不到东西**——因为组织会话
+      **每 3~5 拍才跑一次**（冷却闸＋触发判据），而窗口只有 **1 拍**：
+      它天然错过其余几拍的变化（实测拍 340/344/348/352/357/362/367 **七次全部为空**）。
+      再叠一层：触发判据④要求「上一拍安静」，而**生长拍必然写非「预测内对」行** →
+      经 ④ 触发的组织会话，窗口永远是安静的那一拍（两者反相关）。
+      **所以窗口＝「自上次组织会话以来」**——消费者是它，它就该看到自己缺席期间发生的事
+      （锚点 `subject-org-anchor.json` ＝上次它跑时读到的清单；每次它跑完由拍循环刷新）。
+
+    三条诚实约束：
     - 对比用的是**有界清单**（各取最新 20 个文件）：一个旧文件「从清单里消失」可能
       只是被更新的文件挤出了观测名额，**不等于它被删了**——这一点必须写给他看；
-    - 读数取**真实总数**（不受观测上限影响），格数变化因此是可信的。
+    - 读数取**真实总数**（不受观测上限影响），格数变化因此是可信的；
+    - 锚点缺失（首次跑／旧状态根）→ 退回「上一拍动手前 → 动手后」并把窗口如实写在行里，
+      **不假装看过**。
     """
+    window = "自上次组织会话以来"
     try:
-        before = json.loads(read_text(layout.subject_before_snapshot))
-    except (OSError, ValueError):
-        return ("（无「上一拍动手前」快照（%s）：快照缺失或还没跑过拍——这块本轮空着；"
-                "不拿别的读数凑）" % getattr(layout, "subject_before_snapshot", "?"))
+        anchor = json.loads(read_text(layout.subject_org_anchor))
+    except (OSError, ValueError, AttributeError):
+        anchor = None
+    if anchor is None:                      # 回退：上一拍的动手前 → 动手后（并如实说明）
+        window = "上一拍动手前 → 动手后（无锚点：首次跑或旧状态根）"
+        try:
+            anchor = json.loads(read_text(layout.subject_before_snapshot))
+        except (OSError, ValueError):
+            return ("（无「上次组织会话」锚点、也没有「上一拍动手前」快照："
+                    "这块本轮空着；不拿别的读数凑）")
     try:
-        after = json.loads(read_text(layout.subject_snapshot))
+        reference = json.loads(read_text(layout.subject_snapshot))
     except (OSError, ValueError):
-        return "（无「上一拍动手后」快照：快照缺失或还没跑过拍——这块本轮空着）"
+        reference = {}                      # 拿不到上一拍快照 → 拍号按 0（清单仍照读）
+    # 锚点是「上次组织会话时读到的清单」，now 是**此刻**的主体清单——
+    # 两者之差正是组织会话缺席期间的全部现实变化（消费者是它，就该看到自己缺席时发生的事）。
+    before = anchor
+    after = _current_listing(subject_root, reference)
     prev_files = {str(f.get("name")) for f in before.get("files", [])}
     now_files = {str(f.get("name")) for f in after.get("files", [])}
     prev_bytes = {str(f.get("name")): f.get("bytes") for f in before.get("files", [])}
@@ -211,23 +236,23 @@ def _render_reality_delta(layout: StateLayout, subject_root: Path) -> str:
     # 现在补上（仍在有界清单里比：同在两边、字节不同的那些）。
     changed = sorted(n for n in (prev_files & now_files)
                      if prev_bytes.get(n) != now_bytes.get(n))
-    lines = ["对比窗口：上一拍（拍 %s）**动手前 → 动手后**两份快照"
-             "（各取最新 %d 个文件；读数是真实总数）" % (before.get("tick"),
-                                                    SUBJECT_FILE_LIMIT),
+    lines = ["对比窗口：**%s**（锚点＝拍 %s 的清单；本拍清单＝拍 %s／各取最新 %d 个文件；"
+             "读数是真实总数）" % (window, before.get("anchor_tick", before.get("tick")),
+                                after.get("tick"), SUBJECT_FILE_LIMIT),
              "主体读数：文件 %s → %s／字节 %s → %s"
              % (before.get("file_count"), after.get("file_count"),
                 before.get("total_bytes"), after.get("total_bytes"))]
     dir_changes = ["%s：%s → %s 格" % (subject_dir_object(name), prev_dirs.get(name), n)
                    for name, n in sorted(now_dirs.items()) if prev_dirs.get(name) != n]
     lines.append("目录格数变化：%s" % ("；".join(dir_changes) if dir_changes else "（无）"))
-    lines.append("新出现（上一拍动手前没有、动手后有了）：%s"
+    lines.append("新出现（锚点里没有、本拍清单里有）：%s"
                  % ("、".join("%s%s" % (SUBJECT_PREFIX, n) for n in added) if added
                     else "（无）"))
-    lines.append("有变化（动手前后字节数不同、名字没变）：%s"
+    lines.append("有变化（前后字节数不同、名字没变）：%s"
                  % ("、".join("%s%s（%s→%s 字节）" % (SUBJECT_PREFIX, n,
                                                    prev_bytes.get(n), now_bytes.get(n))
                               for n in changed) if changed else "（无）"))
-    lines.append("从清单里消失（动手前有、动手后没有；**可能只是被更新的文件挤出观测名额**，"
+    lines.append("从清单里消失（锚点里有、本拍没有；**可能只是被更新的文件挤出观测名额**，"
                  "不等于被删）：%s"
                  % ("、".join("%s%s" % (SUBJECT_PREFIX, n) for n in dropped) if dropped
                     else "（无）"))
