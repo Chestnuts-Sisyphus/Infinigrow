@@ -439,3 +439,111 @@ def test_tick_number_recovers_when_heartbeat_sequence_went_backwards(tmp_path, s
     assert any("序列倒退" in n and "已从账本恢复" in n for n in result.notes)
     status = _json.loads(layout.tick_status.read_text(encoding="utf-8"))
     assert status["tick"] == 17 and "序列倒退" in status["last_note"]
+
+
+# ---------------------------------------------------------------- N48：提醒的出口
+def _library_state(layout):
+    import json as _json
+    return [_json.loads(line) for line in
+            layout.library.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def test_unused_library_sprout_is_not_respawned_when_one_already_exists(tmp_path, settings):
+    """M1（N48 真凶）：某对象已在活跃**或冻结**里有一根芽 → 不再立新的。
+
+    现场：库 91 条条目全部已有芽，却每拍再立 ~36 根（去重只扫活跃队列）→ 队列被占满。
+    """
+    settings.cold_start_ticks = 0
+    layout = resolve_state(settings.state_root, settings.repo_root, create=True)
+    for tick in (1, 2):
+        run_tick(settings=settings, tick=tick)
+    # 造一条「闲置很久」的库条目：它的芽已经躺在冻结区（挂起≠死亡）
+    from infinigrow.ledger.store import append_jsonl
+    from infinigrow.engine.model import Sprout, SproutOrigin
+    from infinigrow.engine.sprout_queue import SproutQueue
+    append_jsonl(layout.library, {"name": "主体/old.md", "created_tick": 0,
+                                  "last_used_tick": 0, "source": "maturity-cap"},
+                 layout.root)
+    queue = SproutQueue.load(layout.sprouts, layout.frozen_sprouts, cap=50)
+    queue.frozen.append(Sprout(id="lib0002-001-主体_old_md", obj="主体/old.md",
+                               dimension="可用性", pointer="p",
+                               origin=SproutOrigin.LIBRARY_UNUSED, created_tick=2))
+    queue.save(layout.sprouts, layout.frozen_sprouts, layout.root)
+
+    result = run_tick(settings=settings, tick=3, org_session=False)
+    assert not any("lib" in s for s in result.new_sprouts), \
+        "冻结区已有芽的对象不许再立新芽（N48 的洪泛就是这个缺口）"
+
+
+def test_library_question_is_closed_after_three_asks(tmp_path, settings):
+    """M2：同一库条目被问满 3 次仍无消费 → **结案**（写 `closed_tick`＋结案指针），
+    在队芽退场（只移动进冻结区），且此后**不再产芽**。
+
+    这是 G2「提醒没有出口」的机械判据：没有它，「能力库未用」是一条永真、可无限重生的
+    提醒——做多少次都不算完成。
+    """
+    settings.cold_start_ticks = 0
+    layout = resolve_state(settings.state_root, settings.repo_root, create=True)
+    run_tick(settings=settings, tick=1)
+    from infinigrow.ledger.store import append_jsonl
+    from infinigrow.engine.model import Sprout, SproutOrigin
+    from infinigrow.engine.sprout_queue import SproutQueue
+    append_jsonl(layout.library, {"name": "主体/old.md", "created_tick": 0,
+                                  "last_used_tick": 0, "source": "maturity-cap"},
+                 layout.root)
+    # 一根已经连领满 3 次的库芽（＝被问满上限仍无消费）
+    queue = SproutQueue.load(layout.sprouts, layout.frozen_sprouts, cap=50)
+    sprout = Sprout(id="lib0002-001-主体_old_md", obj="主体/old.md", dimension="可用性",
+                    pointer="能力库:主体/old.md(末次使用拍0)",
+                    origin=SproutOrigin.LIBRARY_UNUSED, created_tick=2, leads=3,
+                    last_lead_tick=2)
+    queue.sprouts.append(sprout)
+    queue.save(layout.sprouts, layout.frozen_sprouts, layout.root)
+
+    result = run_tick(settings=settings, tick=3, llm=lambda p: "不动手（夹具）",
+                      org_session=False)
+    assert "主体/old.md" in result.library.get("closed", [])
+    rows = _library_state(layout)
+    closed = [r for r in rows if r.get("name") == "主体/old.md" and r.get("closed_tick")]
+    assert closed and closed[0]["closed_by"] == "asked-out"
+    assert closed[0]["asked"] == 3
+    assert closed[0]["closure_pointer"].startswith("留痕:traces/")   # 结案指针指向留痕
+    assert sprout.id in result.library.get("retired_by_close", [])   # 在队芽退场（只移动）
+    queue2 = SproutQueue.load(layout.sprouts, layout.frozen_sprouts, cap=50)
+    assert sprout.id not in {s.id for s in queue2.sprouts}
+    assert sprout.id in {s.id for s in queue2.frozen}                # 冻结≠删除
+
+    # 出口是**永久的**：后续各拍不再为这条已结案的条目产芽
+    for tick in (4, 5, 6):
+        later = run_tick(settings=settings, tick=tick, org_session=False)
+        assert not any("主体_old_md" in s for s in later.new_sprouts)
+
+
+def test_executor_output_marks_library_entry_as_used(tmp_path, settings):
+    """M3①：执行者留痕**输出**里出现条目名 → `last_used_tick` 更新（真实更新方），
+    且该条目在队的芽退场（问题答完了）；提示词里的题面不算（那是自证）。"""
+    settings.cold_start_ticks = 0
+    layout = resolve_state(settings.state_root, settings.repo_root, create=True)
+    run_tick(settings=settings, tick=1)
+    from infinigrow.ledger.store import append_jsonl
+    from infinigrow.engine.model import Sprout, SproutOrigin
+    from infinigrow.engine.sprout_queue import SproutQueue
+    append_jsonl(layout.library, {"name": "主体/journal/0001-20260915.md",
+                                  "created_tick": 0, "last_used_tick": 0,
+                                  "source": "maturity-cap"}, layout.root)
+    queue = SproutQueue.load(layout.sprouts, layout.frozen_sprouts, cap=50)
+    sprout = Sprout(id="lib0002-001-主体_journal_0001", obj="主体/journal/0001-20260915.md",
+                    dimension="可用性", pointer="p", origin=SproutOrigin.LIBRARY_UNUSED,
+                    created_tick=2)
+    queue.sprouts.append(sprout)
+    queue.save(layout.sprouts, layout.frozen_sprouts, layout.root)
+
+    result = run_tick(settings=settings, tick=3,
+                      llm=lambda p: "本轮动手：读了 journal/0001-20260915.md 并复用它的结论",
+                      org_session=False)
+    assert "主体/journal/0001-20260915.md" in result.library.get("consumed_this_tick", [])
+    rows = _library_state(layout)
+    used = [r for r in rows if r.get("name") == "主体/journal/0001-20260915.md"
+            and r.get("usage_pointer")]
+    assert used and used[0]["last_used_tick"] == 3 and used[0]["source"] == "trace"
+    assert sprout.id in result.library.get("retired_by_consumption", [])

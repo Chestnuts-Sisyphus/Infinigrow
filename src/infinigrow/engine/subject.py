@@ -25,7 +25,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Optional
 
 from .model import Observation, Prediction
 
@@ -56,6 +56,16 @@ DIR_OBJECT_SUFFIX = "/"
 
 #: 一次观测最多列多少个子目录（同「有界」纪律：主体可以很宽，一拍不能没完没了）。
 #: 目录按**名字**升序取前 N 个（同输入同顺序，可复跑）。
+#:
+#: **边界写死（M6）**：这是**有界观测面**的机械边界，不是「大概这么多」：
+#: 主体目录多于 `SUBJECT_DIR_LIMIT` 时，**名字靠后**的目录不进观测面——后果是
+#: 对它的提议/发现会被对象名机械闸（`valid_subject_object`）拒收（不在可对账清单里）。
+#: 当前主体只有 2 个目录（journal／archive），离边界很远；这里选**最小改法**：
+#: 不改排序、不提高上限，只把边界写在代码与文档里（`docs/mechanism.md` §2.1 ＋
+#: `docs/growth-subject.md`），并用 `tests/test_subject.py` 把行为**测住**
+#: （12 个目录 → 恰好观测前 10 个、第 11 个的名字过不了闸）。
+#: 真到了那一天要改（例如「出现过提议/差异的目录优先」），改的是这一条判据，
+#: 不是「顺手调个数字」——判据改了要同步文档与测试。
 SUBJECT_DIR_LIMIT = 10
 
 
@@ -154,16 +164,22 @@ def subject_dirs(root: Path, limit: int = SUBJECT_DIR_LIMIT) -> list[SubjectDir]
         rel_parts = path.relative_to(base).parts
         if any(part in SKIP_DIRS for part in rel_parts):
             continue
-        count = 0
-        for sub in path.rglob("*"):
-            if not sub.is_file():
-                continue
-            if any(part in SKIP_DIRS for part in sub.relative_to(base).parts):
-                continue
-            count += 1
-        out.append(SubjectDir(name="/".join(rel_parts), files=count))
+        out.append(SubjectDir(name="/".join(rel_parts),
+                              files=_dir_file_count(path, base)))
     out.sort(key=lambda d: d.name)
     return out[:limit]
+
+
+def _dir_file_count(path: Path, base: Path) -> int:
+    """某个目录下的文件数（递归，跳过 SKIP_DIRS；与 `_subject_stats` 同一口径）。"""
+    count = 0
+    for sub in path.rglob("*"):
+        if not sub.is_file():
+            continue
+        if any(part in SKIP_DIRS for part in sub.relative_to(base).parts):
+            continue
+        count += 1
+    return count
 
 
 def _subject_stats(root: Path) -> tuple[int, int]:
@@ -231,6 +247,57 @@ def valid_subject_object(obj: str, allowed_objs: set[str],
         return True, ("主体内合法新目录（可提议往它里面长一格）" if is_dir
                       else "主体内合法新相对路径（可提议创建）")
     return False, "不在可对账清单（findings 必须引用现实可查的对象）"
+
+
+def observe_object(root: Path, obj: str, dimension: str) -> Optional[Observation]:
+    """**定键补观测**（M7/N45）：只读「这一个对象 × 这一个维度」，不扩观测面。
+
+    为什么需要：观测（`observe_subject`）与默认预测（`predict_subject_unchanged`）都取
+    「mtime 最新 N 个」——主体新增一个文件会把边界上的文件**挤出观测名额**，那一拍它
+    既没被观测、又被预测「不变」→ 对账记成「预测未执行」（它其实存在）。
+    实测 8 行假差异（拍 267/271/272/274/290/302/306/311），只在中和掉派芽（`act_caused`）
+    后留下账本噪声。补观测把这类假差异从根上消掉。
+
+    边界纪律不变：本函数**只按调用方给的键读**，调用方（`engine/tick.augment_observations`）
+    只喂**预测里出现过的键**（该集合本来就有界）——不是「把整个主体扫一遍」。
+
+    读不到（对象名不合法/维度不认识/没有这个路径）→ 返回 `None`：不猜、不假装有读数；
+    真的缺失仍会被对账如实记成「预测未执行」（拒收≠丢弃）。
+    """
+    base = Path(root)
+    leaf = subject_leaf(base)
+    if obj == leaf:                                   # 主体根（存在性／文件数）
+        if dimension == "存在性":
+            return Observation(leaf, "存在性", EXISTS if base.is_dir() else MISSING, "主体根")
+        if dimension == "文件数":
+            return Observation(leaf, "文件数", str(subject_count(base)), "主体根")
+        return None
+    if not obj.startswith(SUBJECT_PREFIX):
+        return None
+    rel = obj[len(SUBJECT_PREFIX):].replace("\\", "/")
+    is_dir = rel.endswith(DIR_OBJECT_SUFFIX)
+    if is_dir:
+        rel = rel[:-len(DIR_OBJECT_SUFFIX)]
+    if not rel or any(seg in ("", ".", "..") for seg in rel.split("/")):
+        return None                                   # 非法相对路径：不越界读
+    path = base / rel
+    if is_dir:
+        if dimension != "文件数":
+            return None
+        if not path.is_dir():
+            return Observation(subject_dir_object(rel), "文件数", "0", "目录不存在")
+        return Observation(subject_dir_object(rel), "文件数",
+                           str(_dir_file_count(path, base)), "主体目录:%s" % rel)
+    if dimension == "存在性":
+        return Observation(subject_object(rel), "存在性",
+                           EXISTS if path.is_file() else MISSING, "主体:%s" % rel)
+    if dimension == "字节数":
+        try:
+            return Observation(subject_object(rel), "字节数", str(path.stat().st_size),
+                               "主体:%s" % rel)
+        except OSError:
+            return None
+    return None
 
 
 def observe_subject(root: Path, limit: int = SUBJECT_FILE_LIMIT) -> list[Observation]:

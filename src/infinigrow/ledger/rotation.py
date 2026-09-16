@@ -240,6 +240,50 @@ def rotate_files(layout: StateLayout, keep_files: int = 200,
     return reports
 
 
+def rotate_frozen_sprouts(layout: StateLayout, cap: int = 5000, keep_tail: int = 4000,
+                          stamp: Optional[str] = None) -> Optional[dict]:
+    """冻结区容量与整理（M5/N48-4）：超上限时把**最旧的**移动进归档，只移动不删。
+
+    - 冻结区（`state/sprouts-frozen.jsonl`）是「挂起的芽」的落点：**它没有容量判据时
+      每拍 +36~38 行单调增长**（实测 3711 行），最后没人翻、也翻不动——与账本轮转
+      同一个病，用同一套纪律治：**只移动不删**，先落归档件再缩主件（断电最多多一份归档）。
+    - 「最旧的」判据＝**文件里的次序**（冻结区按被挤出的先后追加，前面的＝更早挂起的）；
+      保留尾部 `keep_tail` 行。
+    - 与 M4（重问判据）的关系：某对象的芽被移出冻结区后，它不再拦「重新立芽」——
+      这是**有意的**：容量整理只该丢历史，不该让 4000 行旧挂起把新问题永久压住。
+    - 归档落在 `state/archive/files/frozen/`，与其它文件型产物同一片归档区，可检索。
+    """
+    path = Path(layout.frozen_sprouts)
+    if not path.is_file():
+        return None
+    lines = _lines(path)
+    if len(lines) <= max(cap, 0):
+        return None
+    keep = max(keep_tail, 0)
+    moved_lines = lines[:len(lines) - keep]
+    kept_lines = lines[len(lines) - keep:]
+    safe_stamp = _safe_component(stamp or _dt.datetime.now().strftime("%Y%m%d-%H%M%S"),
+                                 fallback="stamp")
+    dest_dir = require_within(layout.archive_dir / "files" / "frozen", layout.root)
+    dest = require_within(dest_dir / ("sprouts-frozen.%s.jsonl" % safe_stamp), layout.root)
+    suffix = 1
+    while dest.exists():                # 同秒重跑：换后缀，不覆盖已有归档
+        suffix += 1
+        dest = require_within(dest_dir / ("sprouts-frozen.%s-%d.jsonl"
+                                          % (safe_stamp, suffix)), layout.root)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    header = ARCHIVE_HEADER % (path.name, len(moved_lines), len(kept_lines), safe_stamp)
+    # 先落归档、再缩主件（与账本同一套次序：不丢是第一位）
+    write_lines(dest, moved_lines, layout.root, header=header)
+    try:
+        write_work_file(path, "\n".join(kept_lines), layout.root, require_markers=())
+    except (LedgerError, OSError) as exc:
+        return {"name": path.name, "moved": 0, "kept": len(kept_lines),
+                "archive": dest.name, "error": "归档已写但冻结区重写失败：%s" % exc}
+    return {"name": path.name, "moved": len(moved_lines), "kept": len(kept_lines),
+            "archive": "files/frozen/%s" % dest.name}
+
+
 def rotate_journal(subject_root: Path, keep_files: int = 200,
                    stamp: Optional[str] = None) -> Optional[dict]:
     """轮转主体 `journal/`（K6/A7）：超上限（默认 200 篇，可配）时**只移动**进归档。

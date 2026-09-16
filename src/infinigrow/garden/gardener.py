@@ -17,7 +17,8 @@ from typing import Optional
 from ..core.config import Settings, load_settings
 from ..core.paths import StateLayout, guard, resolve_state
 from ..engine.tick import LOCK_STALE_SECONDS, read_tick_status
-from ..ledger.rotation import rotate_all, rotate_files, rotate_journal
+from ..ledger.rotation import (rotate_all, rotate_files, rotate_frozen_sprouts,
+                               rotate_journal)
 from ..ledger.store import ledger_stats, write_work_file
 
 #: 断流阈值（小时）：最后一拍超过这么久没更新 → 致命旗
@@ -168,6 +169,19 @@ def run_gardener(settings: Optional[Settings] = None,
     elif cfg.journal_keep_files > 0:
         report.notes.append("主体 journal 轮转：未超上限（保留 %d 篇）"
                             % cfg.journal_keep_files)
+
+    # 5d) 冻结区整理（M5/N48-4）：超上限只移动最旧的进归档。冻结区此前**没有容量判据**
+    #     ——每拍 +36~38 行单调增长（实测 3711 行），与账本轮转同一个病、同一套纪律。
+    if cfg.frozen_cap > 0:
+        frozen_report = rotate_frozen_sprouts(layout, cap=cfg.frozen_cap,
+                                              keep_tail=cfg.frozen_keep_tail)
+        if frozen_report:
+            report.rotated_files.append(frozen_report)
+            report.notes.append("冻结区整理：%s→%s(移 %d 行／保留 %d 行)"
+                                % (frozen_report["name"], frozen_report["archive"],
+                                   frozen_report["moved"], frozen_report["kept"]))
+        else:
+            report.notes.append("冻结区整理：未超上限（%d 行）" % cfg.frozen_cap)
 
     if write_alert:
         _write_alert(layout, report, status)

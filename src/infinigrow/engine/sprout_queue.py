@@ -30,10 +30,11 @@ class SproutQueue:
     frozen: list[Sprout] = field(default_factory=list)
 
     # ---------------------------------------------------------------- 增删
-    def add(self, sprout: Sprout) -> tuple[str, Optional[Sprout]]:
+    def add(self, sprout: Sprout, tick: Optional[int] = None) -> tuple[str, Optional[Sprout]]:
         """加入一根芽。返回 (动作, 被挤出的芽)。
 
         动作取值：`added`｜`replaced`（同对象同维度，新顶旧）｜`duplicate`（同 id 已存在）。
+        `tick`＝本次加入发生在哪一拍——被挤出的芽据此记 `frozen_tick`（M4 的重问判据锚在它上面）。
         """
         for i, exist in enumerate(self.sprouts):
             if exist.id == sprout.id:
@@ -42,22 +43,66 @@ class SproutQueue:
                 self.sprouts[i] = sprout          # 同对象同维度：新顶旧（单槽语义）
                 return "replaced", None
         self.sprouts.append(sprout)
-        return "added", self._enforce_cap()
+        # 没给 tick 时用「刚加进来的这根芽的出生拍」——挤出发生在这根芽被加入的那一拍，
+        # 两者同拍；不这样兜底会留下 frozen_tick=None（M4 的重问判据就要回退到出生拍，
+        # 而那是**不准确**的锚）。调用方（拍循环）都会显式给 tick。
+        return "added", self._enforce_cap(sprout.created_tick if tick is None else tick)
 
-    def _enforce_cap(self) -> Optional[Sprout]:
+    def _enforce_cap(self, tick: Optional[int] = None) -> Optional[Sprout]:
         """超限把**最旧**的挤出到冻结区（按 created_tick 升序，稳定可预期）。"""
         if len(self.sprouts) <= self.cap:
             return None
         self.sprouts.sort(key=lambda s: (s.created_tick, s.id))
         moved = self.sprouts.pop(0)
+        if tick is not None:
+            moved.frozen_tick = tick
         self.frozen.append(moved)
         return moved
+
+    def freeze(self, sprout: Sprout, tick: int) -> bool:
+        """把一根**在活跃队列里**的芽移进冻结区（挂起，只移动不删）。
+
+        M2 用：条目已结案（问满上限仍无消费）或已消费 → 它在队的芽不再占取题位
+        ——那个问题已经有结论了，让它继续占位才是把队列当仓库使。
+        """
+        for i, exist in enumerate(self.sprouts):
+            if exist.id == sprout.id:
+                self.sprouts.pop(i)
+                sprout.frozen_tick = tick
+                self.frozen.append(sprout)
+                return True
+        return False
+
+    def known_objects(self, tick: int, requestion_ticks: int) -> set[str]:
+        """**既生对象集合**：哪些对象不该再立新芽（活跃 ∪ 冻结里已有它的芽）。
+
+        M1（N48 修复）：去重必须**含冻结区**——「同对象同维度只有一根芽，挂起≠死亡」
+        是既有的合并律；只扫活跃队列会让被挤出的对象下一拍又被当成「没生过」重新立芽
+        （实测：能力库 91 条条目**全部**已有芽，却每拍再立 ~36 根，把上限 50 的队列占满、
+        主芽源「差异对账」自 tick 189 起零取题）。
+
+        M4（重问判据）：冻结不是永久封存——某对象**最近一根芽**也已冻结满
+        `requestion_ticks` 拍且没被点亮（点亮＝回到活跃队列）→ 不再拦它，允许重新立芽。
+        判据取**该对象全部冻结芽里最新的那次冻结**：只要还有一根是新近的，就说明这个对象
+        刚被问过，不重复立（否则积压的旧冻结芽会在同一拍把同一批对象全部放行 → 又是一次洪泛）。
+        旧行没有 `frozen_tick`（升级前的冻结芽）→ 回退到 `created_tick`，不假装它刚冻结。
+        """
+        known: set[str] = {s.obj for s in self.sprouts}
+        newest: dict[str, int] = {}
+        for s in self.frozen:
+            frozen_at = s.frozen_tick if s.frozen_tick is not None else s.created_tick
+            newest[s.obj] = max(newest.get(s.obj, frozen_at), frozen_at)
+        for obj, frozen_at in newest.items():
+            if obj not in known and tick - frozen_at < requestion_ticks:
+                known.add(obj)
+        return known
 
     def revive(self, sprout: Sprout, tick: int) -> None:
         """冻结区轮转：差异重新出现＝**重新点亮**（挂起≠死亡）。
 
         重新点亮会把 `created_tick` 刷成当前拍、并清掉连领计数——否则一根很旧的芽
         刚复活就会因为「最旧」被再次挤出队列（冻结-复活的无意义抖动）。
+        `frozen_tick` 一并清空：它已不在冻结区，重问计时由下一次冻结重新开始。
         """
         for i, f in enumerate(self.frozen):
             if f.id == sprout.id:
@@ -66,7 +111,8 @@ class SproutQueue:
         sprout.created_tick = tick
         sprout.leads = 0
         sprout.last_lead_tick = None
-        self.add(sprout)
+        sprout.frozen_tick = None
+        self.add(sprout, tick)
 
     def review_frozen(self, recent_diffs, tick: int, max_relight: int = 3) -> list[str]:
         """冻结区重看（T4/A5）：每 `frozen_review_every` 拍重看一次冻结区。

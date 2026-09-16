@@ -127,3 +127,72 @@ def test_ordering_is_not_biased_by_id_prefix():
 
     assert q.order_key(earlier) == q.order_key(earlier)   # 全可复现（不引入随机）
     assert q.order_key(earlier) != q.order_key(later)
+
+
+# ---------------------------------------------------------------- N48：去重含冻结区 + 重问
+def test_known_objects_includes_frozen_zone():
+    """M1（N48 真凶修复）：去重集合必须**含冻结区**——「挂起≠死亡」。
+
+    现场（可复跑）：只扫活跃队列时，能力库 91 条条目**全部**已有芽，却每拍再立 ~36 根
+    （被挤出的对象下一拍又被当成「没生过」）→ 上限 50 的队列被占满、主芽源「差异对账」
+    自 tick 189 起零取题。合并律的完整形态是「同对象同维度只有一根芽，**活跃或冻结里都算**」。
+    """
+    q = SproutQueue(cap=2)
+    q.add(_sprout("s1", "A", tick=1))
+    q.add(_sprout("s2", "B", tick=2))
+    q.add(_sprout("s3", "C", tick=3))          # s1 被挤出到冻结区
+    assert [s.id for s in q.frozen] == ["s1"]
+    known = q.known_objects(tick=4, requestion_ticks=10_000)
+    assert {"A", "B", "C"} <= known            # 冻结里的 A 照样算「已生」
+
+
+def test_frozen_sprout_is_reasked_after_requestion_ticks():
+    """M4（G9）：冻结**不是永久封存**——冻结满 `requestion_ticks` 拍且未被点亮 →
+    不再拦它（允许重新立芽）；没满 → 继续拦（刚问过的不重复问）。"""
+    q = SproutQueue(cap=1)
+    q.add(_sprout("s1", "A", tick=1))
+    q.add(_sprout("s2", "B", tick=2))          # s1 在拍 2 被冻结（frozen_tick=2）
+    assert q.frozen[0].frozen_tick == 2        # 冻结时刻是机械记录，不靠猜
+    assert "A" in q.known_objects(tick=100, requestion_ticks=300)      # 未满年限 → 拦
+    assert "A" not in q.known_objects(tick=302, requestion_ticks=300)  # 满 300 拍 → 放行
+
+
+def test_requestion_uses_the_newest_freeze_of_that_object():
+    """重问判据取「该对象全部冻结芽里**最新的那次冻结**」——否则积压的旧冻结芽会在同一拍
+    把同一批对象全部放行（一次洪泛，等于把 N48 请回来）。"""
+    q = SproutQueue(cap=10)
+    old = _sprout("lib0001-001-A", "A", tick=1)
+    fresh = _sprout("lib0100-001-A", "A", tick=100)
+    q.frozen.extend([old, fresh])
+    old.frozen_tick, fresh.frozen_tick = 1, 100
+    assert "A" in q.known_objects(tick=350, requestion_ticks=300)   # 最新一次冻结只过去 250 拍
+
+
+def test_old_frozen_rows_without_frozen_tick_fall_back_to_created_tick():
+    """升级前的旧行没有 `frozen_tick` → 回退到 `created_tick`（不假装它刚冻结）。"""
+    q = SproutQueue(cap=10)
+    legacy = _sprout("lib0005-001-A", "A", tick=5)          # frozen_tick 缺省 None
+    q.frozen.append(legacy)
+    assert legacy.frozen_tick is None
+    assert "A" not in q.known_objects(tick=400, requestion_ticks=300)
+
+
+def test_freeze_moves_active_sprout_to_frozen_and_frees_the_slot():
+    """M2 的退场动作：条目结案/消费后，它在队的芽**只移动**进冻结区（不删）。"""
+    q = SproutQueue(cap=10)
+    s = _sprout("lib0001-001-A", "A")
+    q.add(s)
+    assert q.freeze(s, tick=7) is True
+    assert q.sprouts == [] and [x.id for x in q.frozen] == ["lib0001-001-A"]
+    assert q.frozen[0].frozen_tick == 7
+    assert q.freeze(_sprout("lib9999-001-Z", "Z"), tick=8) is False    # 不在队 → 不动别人
+
+
+def test_revive_clears_frozen_tick_and_refreshes_age():
+    """重新点亮（挂起≠死亡的另一半）：回活跃队列、清连领计数、**清冻结时刻**。"""
+    q = SproutQueue(cap=1)
+    q.add(_sprout("s1", "A", tick=1))
+    q.add(_sprout("s2", "B", tick=2))
+    s1 = q.frozen[0]
+    q.revive(s1, tick=9)
+    assert s1.frozen_tick is None and s1.created_tick == 9 and s1.leads == 0

@@ -183,6 +183,11 @@ class Sprout:
     expected_value: Optional[str] = None   # 产出它的差异的预期值（可空）
     leads: int = 0                   # 已被领取次数（防霸占）
     last_lead_tick: Optional[int] = None
+    #: `frozen_tick`＝**被挤进冻结区的那一拍**（M4「冻结满 N 拍」判据的机械锚）。
+    #: 为什么单列一个字段而不是复用 `created_tick`：一根芽可能在活跃队列里活了很久才被挤出，
+    #: 「冻结满 N 拍」说的是**挂起时长**，拿出生拍当锚会把它算成冻了很久（判据失真）。
+    #: 旧行没有这个字段（读作 None）→ 判据回退到 `created_tick`（不猜、不假装它刚冻结）。
+    frozen_tick: Optional[int] = None
     #: `long_task`＝**预留字段（K16：登记为预留，不接线、不删）**：长任务芽豁免连领上限。
     #: 当前**没有任何写入方**（永远是 False），也不该有：连领上限（3 拍）已能防霸占，
     #: 且芽会随「对象不同即新量」不断新立，不存在「一根芽必须连领超过 3 拍」的现实需求。
@@ -203,6 +208,7 @@ class Sprout:
             "maturity_step": self.maturity_step, "leads": self.leads,
             "last_lead_tick": self.last_lead_tick, "long_task": self.long_task,
             "expected_value": self.expected_value,
+            "frozen_tick": self.frozen_tick,
         }
 
     @classmethod
@@ -217,6 +223,7 @@ class Sprout:
             last_lead_tick=rec.get("last_lead_tick"),
             long_task=rec.get("long_task", False),
             expected_value=rec.get("expected_value"),
+            frozen_tick=rec.get("frozen_tick"),
         )
 
 

@@ -46,7 +46,7 @@ from . import sprout_sources
 from . import subject as subject_mod
 from .domain_saturation import DomainState, value_at_freeze
 from .model import (Diff, DiffKind, MATURITY_CAP, Observation, OutcomeRecord,
-                    Prediction, Sprout, parse_delta)
+                    Prediction, Sprout, SproutOrigin, parse_delta)
 from .org_trigger import should_run_org_session
 from .reconcile import diff_summary, pending_pointer, reconcile, redemption_report
 from .sprout_queue import SproutQueue
@@ -56,6 +56,15 @@ LOCK_STALE_SECONDS = 900          # 15 分钟＝一拍超时上限量级；超�
 ORG_DUE_FILE = "org-due.json"     # 组织段到期提示（工作文件，每拍覆写）
 TICK_PROMPT_FILE = "tick.md"      # 执行会话提示词（机制正本的一部分，**真被发出去**）
 PROMPT_INPUT_MAX_CHARS = 6000     # 题面+预测块的规模上限（提示词要有界）
+
+#: 留痕里「输出段」的起始标记（M3②：「本拍用过」这道闸只读输出，不读提示词——
+#: 提示词的题面里点着对象名，把它也算进来，任何被问过的条目都会被读成「做过」）
+TRACE_OUTPUT_MARK = "## 输出（原样）"
+#: 「最近用过」这道闸看最近几份**执行者**留痕（组织会话的留痕是「提议」，不是「动手」）
+TRACE_GATE_FILES = 5
+#: 执行者留痕的文件名前缀（与 `engine/executor.py` 的 KIND_TICK 同值；此处不导入那个模块，
+#: 保持「机械拍连执行者模块都不加载」这条结构性质）
+TRACE_TICK_GLOB = "tick-*.md"
 
 #: 差异来源标记（账本里区分机械对账与组织会话）
 SOURCE_MECHANICAL = "mechanical"
@@ -91,6 +100,8 @@ class TickResult:
     domain: dict = field(default_factory=dict)
     predictions: dict = field(default_factory=dict)
     act_caused: list[str] = field(default_factory=list)   # 本拍动作自己造成的读数变化
+    #: 能力库提醒的出口动作（M2 结案／M3 消费退场）——本拍做了什么都落这里，可复查
+    library: dict = field(default_factory=dict)
 
     def executor_line(self) -> str:
         """执行者一行字（**三种状态分开说**：未接 ≠ 接了但没活干 ≠ 跑过了）。"""
@@ -116,6 +127,7 @@ class TickResult:
             "executor_state": self.executor_state,
             "org": self.org, "domain": self.domain, "predictions": self.predictions,
             "act_caused": self.act_caused, "notes": self.notes,
+            "library": self.library,
         }
 
 
@@ -507,6 +519,105 @@ def _observable_keys(snapshot: dict) -> list[tuple[str, str]]:
     return keys
 
 
+def recent_trace_output(layout: StateLayout, files: int = TRACE_GATE_FILES) -> str:
+    """最近几份**执行者**留痕的「输出段」原文（M3②：「本拍用过」这道闸的输入）。
+
+    此前这道闸读的是**差异账最后 20 行的 `note`**——实测那串文本总长 19 个字符，
+    闸从不生效（N48-2）。现在读留痕输出：
+
+    - **只读输出段**（`## 输出（原样）` 之后）：留痕里还有提示词，题面点名了对象——
+      把提示词也算进来，任何被问过的条目都会被读成「做过」，闸就白设了；
+    - **只读执行者留痕**（`tick-*.md`）：组织会话的留痕是「提议」不是「动手」，
+      提议里提到某个对象不等于它被用过；
+    - 读不到/没留痕 → 空串（不猜）。
+    """
+    traces = getattr(layout, "traces_dir", None)
+    if traces is None or not Path(traces).is_dir():
+        return ""
+    paths = [p for p in Path(traces).glob(TRACE_TICK_GLOB) if p.is_file()]
+    if not paths:
+        return ""
+    try:
+        paths.sort(key=lambda p: p.stat().st_mtime)
+    except OSError:
+        paths.sort()
+    chunks: list[str] = []
+    for path in paths[-max(1, files):]:
+        try:
+            text = read_text(path)
+        except OSError:
+            continue
+        idx = text.find(TRACE_OUTPUT_MARK)
+        chunks.append(text[idx:] if idx >= 0 else "")
+    return "\n".join(chunks)
+
+
+def augment_observations(observations: Sequence[Observation],
+                         predictions: Sequence[Prediction],
+                         subject_root: Path) -> list[Observation]:
+    """**定键补观测**（M7/N45）：对**预测里出现过的键**补一条观测，只读这些键。
+
+    治的是「观测边界造成的假差异」：观测与默认预测都取「mtime 最新 N 个」，
+    主体新增一个文件会把边界上的文件挤出观测名额 → 那一拍它既没被观测、又被预测
+    「不变」→ 对账记成「预测未执行」（它其实存在，实测 8 行：拍 267/271/272/274/290/302/306/311）。
+
+    边界纪律不变：补观测**只针对预测里出现过的键**（该集合本来就因为有界预测而有界），
+    不扩大观测面、不去扫整个主体；真的缺失仍如实记成「预测未执行」（拒收≠丢弃）。
+    """
+    known = {o.key for o in observations}
+    out = list(observations)
+    for pred in predictions:
+        if pred.key in known:
+            continue
+        extra = subject_mod.observe_object(subject_root, pred.obj, pred.dimension)
+        if extra is None:
+            continue
+        known.add(extra.key)
+        out.append(extra)
+    return out
+
+
+def exit_library_reminders(layout: StateLayout, queue: SproutQueue, entries: dict,
+                           tick: int, lead_limit: int) -> dict:
+    """能力库提醒的**出口**（M2 结案 ＋ M3 消费退场）——「提醒」必须能结束。
+
+    - **结案**（M2）：条目被问满上限（复用连领上限 N＝3）仍无消费 → 写 `closed_tick`
+      ＋结案指针（指向最后一次被问的留痕；「为什么没用上／别域是否成立」的答复原文在那里）
+      → 该条目移出候选池（`from_unused_library` 不再为它产芽）；
+    - **消费退场**（M3）：条目被消费（留痕命中 → `last_used_tick` 更新）→ 问题答完了，
+      在队芽同样退场——否则同一根芽还会被再问两次，白烧两轮。
+
+    两条出口都**只移动不删**：在队的库芽进冻结区（挂起，可被重看/重问）。
+    `entries` 是本拍合并后的能力库视图（读侧唯一入口），本函数就地更新它，
+    调用方同一拍内后续读到的就是最新状态。
+    """
+    closed = sprout_sources.entries_to_close(entries, queue.sprouts + queue.frozen,
+                                             tick, lead_limit)
+    for row in closed:
+        append_jsonl(layout.library, row, layout.root)
+        entry = entries.get(row["name"])
+        if entry is not None:                       # 本拍内即刻生效（不再产芽/不再更新）
+            entry["closed_tick"] = tick
+            entry["closed_by"] = row["closed_by"]
+            entry["closure_pointer"] = row["closure_pointer"]
+    closed_names = {row["name"] for row in closed}
+    consumed = sprout_sources.consumed_entries(entries)
+    retired_close: list[str] = []
+    retired_consumed: list[str] = []
+    for sprout in list(queue.sprouts):
+        if sprout.origin != SproutOrigin.LIBRARY_UNUSED:
+            continue
+        if sprout.obj in closed_names:
+            if queue.freeze(sprout, tick):
+                retired_close.append(sprout.id)
+        elif sprout.obj in consumed:
+            if queue.freeze(sprout, tick):
+                retired_consumed.append(sprout.id)
+    return {"closed": sorted(closed_names), "consumed": sorted(consumed),
+            "retired_by_close": retired_close,
+            "retired_by_consumption": retired_consumed}
+
+
 def _engine_label() -> str:
     """引擎身份一行字（延迟导入，避免 import 期循环）。"""
     from ..core.build_info import engine_label
@@ -552,6 +663,15 @@ def _redemption_lines(layout: StateLayout) -> list[str]:
     return lines
 
 
+def _short_names(names: Optional[Sequence[str]], limit: int = 6) -> str:
+    """把一长串条目名压成一行可读摘要（报告是给人看的，别把 40 个名字全铺上去）。"""
+    items = list(names or [])
+    if not items:
+        return ""
+    head = "、".join(items[:limit])
+    return "（%s%s）" % (head, " 等 %d 条" % len(items) if len(items) > limit else "")
+
+
 def write_reconcile_report(layout: StateLayout, result: TickResult) -> Path:
     """写对账报告：**文件名带拍号**（同拍重跑＝同一个文件，不会互相覆盖）。"""
     from ..core.build_info import engine_label
@@ -567,6 +687,13 @@ def write_reconcile_report(layout: StateLayout, result: TickResult) -> Path:
              "- 域饱和：%s" % json.dumps(result.domain, ensure_ascii=False),
              "- 本拍动作造成的读数变化（入账、不派芽）：%s"
              % (json.dumps(result.act_caused, ensure_ascii=False) or "（无）"),
+             "- 能力库出口（M2 结案／M3 消费）：结案 %d 条%s｜在队芽退场 %d 根（结案 %d／消费 %d）"
+             % (len(result.library.get("closed") or []),
+                _short_names(result.library.get("closed")),
+                len(result.library.get("retired_by_close") or [])
+                + len(result.library.get("retired_by_consumption") or []),
+                len(result.library.get("retired_by_close") or []),
+                len(result.library.get("retired_by_consumption") or [])),
              "- 差异总览：%s" % json.dumps(result.diff_summary, ensure_ascii=False), ""]
     if result.diffs:
         lines += ["## 差异点（机械对账）", ""]
@@ -670,6 +797,9 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
                              cap=cfg.queue_cap, lead_limit=cfg.lead_limit,
                              cold_start_ticks=cfg.cold_start_ticks)
     domains = DomainState.load(layout.domains)
+    # 能力库的**合并视图**（M2/M3 的读侧唯一入口）：追加型账本按名字合并成当前状态
+    # （创建 / 消费更新 / 结案都写新行；逐行读会让结案失效、把「已用」读回旧值）
+    lib_entries = sprout_sources.library_entries(read_jsonl(layout.library))
     command = (executor_cmd if executor_cmd is not None else cfg.executor_command())
 
     # 1) 组织会话（可选）：从 B猜/留痕/W回 里找语义差异、写规划预测。
@@ -755,6 +885,23 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
                                "trace": "%s-%05d.md" % (call.kind, call.tick)}
             result.notes.append("执行者：%s" % call.label())
             result.executor_state = "ran"
+            # M3①：**留痕命中 → 记为已用**——`last_used_tick` 的真实更新方。
+            # 此前它只在创建那一拍写一次，此后没有任何更新方 →「闲置 ≥20 拍」永久为真
+            # （N48-1：一条永真的提醒）。只扫**执行者输出**：题面里点着对象名，
+            # 把提示词也算进来就成了自证（任何被问过的条目都会立刻「已用」）。
+            usage_rows = sprout_sources.library_usage_updates(
+                lib_entries, call.output, tick,
+                "留痕:traces/%s-%05d.md" % (call.kind, call.tick))
+            for row in usage_rows:
+                append_jsonl(layout.library, row, layout.root)
+                entry = lib_entries.get(row["name"])
+                if entry is not None:               # 同一拍内后续判据读到最新状态
+                    entry["last_used_tick"] = max(int(entry.get("last_used_tick") or 0),
+                                                  tick)
+            if usage_rows:
+                names = [row["name"] for row in usage_rows]
+                result.library["consumed_this_tick"] = names
+                result.notes.append("能力库消费（留痕命中）：%s" % "、".join(names))
     elif runner is not None:
         result.executor_state = "no_ticket"
         result.notes.append("无芽可领：本拍未调执行者（不硬造活干）")
@@ -765,6 +912,9 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
         obs = list(observations)
     else:
         obs = subject_mod.observe_subject(subject_root)
+        # M7：**定键补观测**——预测里出现过的键若被观测名额挤出去，补一条（只读这些键）。
+        # 不补的话，新增文件会把边界文件挤出观测面 → 它被记成「预测未执行」（它其实存在）。
+        obs = augment_observations(obs, preds, subject_root)
     diffs = reconcile(preds, obs, tick)
 
     # 待补指针超时（T4/A6）：差异账里 `pending_pointer=True` 的条目超过宽限拍数
@@ -845,17 +995,23 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
         }, layout.root)
 
     new = sprout_sources.from_diffs(gate.kept, tick)
-    known = [s.obj for s in queue.sprouts]
+    # **既生对象集合**（M1）＝活跃 ∪ 冻结里已有它的芽（「同对象同维度只有一根芽，挂起≠死亡」）；
+    # M4：某对象最近一根芽也已冻结满 `frozen_requestion_ticks` 拍且没被点亮 → 不再拦它。
+    # 此前只扫活跃队列：被挤出的同一对象下一拍又被当「没生过」重新立芽——实测每拍 ~36 根，
+    # 把上限 50 的队列占满、主芽源（差异对账）自 tick 189 起零取题（N48 的真凶）。
+    known = sorted(queue.known_objects(tick, cfg.frozen_requestion_ticks))
     new += sprout_sources.from_maturity_cap(
         [{"obj": o, "step": MATURITY_CAP, "tick": tick} for o in capped_now], tick,
         known_objects=known, start_seq=len(new) + 1)
-    liuhen = "\n".join(r.get("note", "") for r in read_jsonl(layout.diff_ledger)[-20:])
+    # M3②：「本拍用过」这道闸改读**执行者留痕输出**（最近 `TRACE_GATE_FILES` 份），
+    # 不再读差异账的 `note`（实测那串文本总长 19 个字符，闸从不生效）。
+    liuhen = recent_trace_output(layout)
     new += sprout_sources.from_unused_library(
         read_jsonl(layout.library), liuhen, tick,
         known_objects=known + [s.obj for s in new], start_seq=len(new) + 1)
 
     for s in new:
-        action, evicted = queue.add(s)
+        action, evicted = queue.add(s, tick)
         if s.origin.value == "差异对账":
             value = value_at_freeze(gate.kept, s.obj, s.dimension)
             if value != "":
@@ -869,6 +1025,20 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
                                 % (s.origin.value, s.obj, s.dimension, action))
         if evicted is not None and probe:
             result.notes.append("队列超限 → 冻结：%s" % evicted.id)
+
+    # 6b) 能力库提醒的**出口**（M2 结案／M3 消费退场）：一个提醒要么被消费、要么被结案，
+    #     两条出口都让它在队的芽退场（只移动进冻结区）——「可用性」读不到兑现，
+    #     没有出口它就是一条永真、可无限重生的提醒（N48 的根）。
+    result.library.update(exit_library_reminders(layout, queue, lib_entries, tick,
+                                                 cfg.lead_limit))
+    if result.library.get("closed"):
+        result.notes.append("能力库结案 %d 条：%s"
+                            % (len(result.library["closed"]),
+                               "、".join(result.library["closed"][:6])))
+    if result.library.get("retired_by_close") or result.library.get("retired_by_consumption"):
+        result.notes.append("能力库在队芽退场：结案 %d 根／消费 %d 根"
+                            % (len(result.library.get("retired_by_close") or []),
+                               len(result.library.get("retired_by_consumption") or [])))
 
     # 域占用同步（芽被消解 / 已不在队列 / 持有者已耗尽 → 释放该域，允许再立一根）。
     # exhausted_ids 同上：存量僵尸占用（持有者耗尽）在此自愈，不删任何文件。

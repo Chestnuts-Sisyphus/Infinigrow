@@ -16,7 +16,8 @@ from infinigrow.core.paths import REPO_ROOT, resolve_state
 from infinigrow.core.config import load_settings
 from infinigrow.engine.tick import maturity_of, run_tick
 from infinigrow.ledger.rotation import (LEDGER_POLICY, TAIL, archived_files,
-                                        rotate_all, rotate_ledger, rotate_journal,
+                                        rotate_all, rotate_frozen_sprouts,
+                                        rotate_ledger, rotate_journal,
                                         search_archive)
 from infinigrow.ledger.store import append_jsonl, read_jsonl
 
@@ -211,6 +212,49 @@ def test_rotate_journal_noop_below_limit(tmp_path):
     assert rotate_journal(subject, keep_files=200) is None
     assert not (subject / "archive").exists()
     assert rotate_journal(tmp_path / "no-such-subject", keep_files=200) is None
+
+
+# ---------------------------------------------------------------- M5：冻结区容量与整理
+def test_rotate_frozen_sprouts_moves_oldest_and_keeps_every_line(tmp_path):
+    """M5/N48-4：冻结区超上限 → 最旧的**只移动**进 `state/archive/files/frozen/`。
+
+    判据：①主件缩短到尾部 `keep_tail` 行；②归档件 ∪ 主件 ＝ 原文件（逐字，一行不丢）；
+    ③低于上限＝不动（幂等）——冻结区此前**没有任何容量判据**（实测每拍 +36~38 行单调增长）。
+    """
+    settings, layout = _layout(tmp_path)
+    lines = ["{\"id\": \"lib%04d-001-A\", \"obj\": \"A\"}" % i for i in range(10)]
+    layout.frozen_sprouts.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    assert rotate_frozen_sprouts(layout, cap=50, keep_tail=40) is None   # 未超上限 → 不动
+    report = rotate_frozen_sprouts(layout, cap=5, keep_tail=4,
+                                   stamp="20260916-220000")
+    assert report and report["moved"] == 6 and report["kept"] == 4
+    kept = [ln for ln in layout.frozen_sprouts.read_text(encoding="utf-8").splitlines()
+            if ln.strip()]
+    assert kept == lines[-4:]                                  # 保留的是**最新的**尾部
+    archive = (layout.archive_dir / "files" / "frozen"
+               / "sprouts-frozen.20260916-220000.jsonl")
+    assert archive.is_file()
+    archived = [ln for ln in archive.read_text(encoding="utf-8").splitlines()
+                if ln.strip() and not ln.startswith("#")]
+    assert archived == lines[:6]                               # 移走的是最旧的 6 行
+    assert archived + kept == lines                            # 一行不丢、顺序不变
+
+
+def test_gardener_rotates_frozen_sprouts(tmp_path):
+    """M5 接线：园丁每次跑顺手整理冻结区（阈值是配置项 `frozen_cap`／`frozen_keep_tail`）。"""
+    settings, layout = _layout(tmp_path)
+    layout.frozen_sprouts.write_text(
+        "\n".join("{\"id\": \"s%d\"}" % i for i in range(12)) + "\n", encoding="utf-8")
+    from infinigrow.core.config import load_settings as _ls
+    from infinigrow.garden.gardener import run_gardener
+    s2 = _ls(env={}, state_root=str(tmp_path / "state"), repo_root=str(REPO_ROOT),
+             subject_root=str(settings.subject_path()), frozen_cap=10, frozen_keep_tail=8)
+    report = run_gardener(settings=s2, write_alert=False)
+    kept = [ln for ln in layout.frozen_sprouts.read_text(encoding="utf-8").splitlines()
+            if ln.strip()]
+    assert len(kept) == 8
+    assert any("冻结区整理" in n for n in report.notes)
 
 
 def test_gardener_rotates_subject_journal(tmp_path):

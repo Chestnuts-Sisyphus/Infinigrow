@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 
 from infinigrow.core.config import load_settings
 from infinigrow.core.paths import REPO_ROOT, default_subject_root, resolve_state
@@ -189,3 +191,83 @@ def test_dir_object_passes_the_mechanical_gate():
     # findings（描述已观察到的现实）仍必须引用可对账清单里的对象
     assert subject_mod.valid_subject_object("主体/journal/", set())[0] is False
     assert subject_mod.valid_subject_object("主体/journal/", {"主体/journal/"})[0] is True
+
+
+# ---------------------------------------------------------------- M6：观测面边界写死
+def test_dir_observation_limit_is_pinned_to_name_order(tmp_path):
+    """M6/N48-5：目录观测面的边界**写死并测住**——上限 10 个、按**名字**升序取前 10。
+
+    超出的目录不进观测面 → 对它的提议/发现会被对象名机械闸拒收。这是**已知边界**
+    （当前主体只有 2 个目录），不是隐患藏身处：改它＝改判据（文档＋代码＋测试一起改）。
+    """
+    subject = tmp_path / "manydirs"
+    for i in range(12):                       # 12 个目录 > 上限 10
+        (subject / ("d%02d" % i)).mkdir(parents=True)
+    dirs = subject_mod.subject_dirs(subject)
+    assert subject_mod.SUBJECT_DIR_LIMIT == 10
+    assert [d.name for d in dirs] == ["d%02d" % i for i in range(10)]   # 名字序前 10 个
+    observed = {(o.obj, o.dimension) for o in subject_mod.observe_subject(subject)}
+    assert ("主体/d09/", "文件数") in observed
+    assert ("主体/d10/", "文件数") not in observed          # 第 11 个：不进观测面
+    # 不在可对账清单里的目录，作为「已观察到的现实」被拒（findings）；作为提议放行
+    assert subject_mod.valid_subject_object("主体/d10/", {o for o, _ in observed})[0] is False
+    assert subject_mod.valid_subject_object("主体/d10/", set(), for_proposal=True)[0] is True
+
+
+# ---------------------------------------------------------------- M7：定键补观测
+def test_observe_object_reads_one_key_only(tmp_path):
+    """M7：定键补观测只读**给它的那一个键**，不扩观测面；读不到不猜（返回 None）。"""
+    subject = tmp_path / "onekey"
+    (subject / "journal").mkdir(parents=True)
+    (subject / "journal" / "0001-20260915.md").write_text("abc", encoding="utf-8")
+    leaf = subject_mod.subject_leaf(subject)
+    root_obs = subject_mod.observe_object(subject, leaf, "文件数")
+    assert root_obs is not None and root_obs.actual == "1"
+    exist = subject_mod.observe_object(subject, "主体/journal/0001-20260915.md", "存在性")
+    assert exist is not None and exist.actual == subject_mod.EXISTS
+    size = subject_mod.observe_object(subject, "主体/journal/0001-20260915.md", "字节数")
+    assert size is not None and size.actual == "3"
+    dirs = subject_mod.observe_object(subject, "主体/journal/", "文件数")
+    assert dirs is not None and dirs.actual == "1"
+    # 真的缺失 → 如实报「缺失」（不是 None：那是「这个键不该被读」的语义）
+    miss = subject_mod.observe_object(subject, "主体/journal/nope.md", "存在性")
+    assert miss is not None and miss.actual == subject_mod.MISSING
+    # 不认识的对象名/维度 → None（不猜、不假装有读数）
+    assert subject_mod.observe_object(subject, "引擎状态/tick.json", "存在性") is None
+    assert subject_mod.observe_object(subject, leaf, "颜色") is None
+    assert subject_mod.observe_object(subject, "主体/../escape.md", "存在性") is None
+
+
+def test_keyed_supplement_kills_boundary_false_diff(tmp_path):
+    """M7/N45 的端到端判据：**同一拍内**新增文件把边界文件挤出观测名额 → 它被记成
+    「预测未执行」（它其实存在）＝假差异。定键补观测之后不再出现。
+
+    现场（可复跑）：拍 267/271/272/274/290/302/306/311 共 8 行同类假差异。
+    """
+    from infinigrow.engine.tick import augment_observations
+    from infinigrow.engine.reconcile import reconcile
+
+    subject = tmp_path / "boundary"
+    subject.mkdir(parents=True)
+    base_mtime = time.time() - 3600          # 只用来定序（不参与任何「距今多久」判据）
+    for i in range(20):                      # 正好占满逐文件观测名额（N＝20）
+        path = subject / ("f%02d.md" % i)
+        path.write_text("x", encoding="utf-8")
+        os.utime(path, (base_mtime + i, base_mtime + i))     # f00 最旧、f19 最新
+    preds = subject_mod.predict_subject_unchanged(subject, tick=1)
+    assert ("主体/f00.md", "存在性") in {p.key for p in preds}      # 动手前：它在预测里
+
+    (subject / "f20.md").write_text("x", encoding="utf-8")          # 动手：新增一格
+    raw = subject_mod.observe_subject(subject)
+    assert ("主体/f00.md", "存在性") not in {o.key for o in raw}    # 最旧的被挤出名额
+    # 对照：不补观测 → 假差异（文件其实存在）
+    false_diffs = [d for d in reconcile(preds, raw, tick=1)
+                   if d.kind.value == "预测未执行" and d.obj == "主体/f00.md"]
+    assert false_diffs, "夹具前提：不补观测时必须能造出这条假差异"
+    # 补观测之后：预测里出现过的键被读到 → 不再有假差异
+    fixed = augment_observations(raw, preds, subject)
+    assert [d for d in reconcile(preds, fixed, tick=1)
+            if d.kind.value == "预测未执行" and d.obj == "主体/f00.md"] == []
+    # 补观测**不扩面**：只加「被预测过、又被名额挤出去」的那些键，别的一律不加
+    added = {o.key for o in fixed} - {o.key for o in raw}
+    assert added == {("主体/f00.md", "存在性"), ("主体/f00.md", "字节数")}

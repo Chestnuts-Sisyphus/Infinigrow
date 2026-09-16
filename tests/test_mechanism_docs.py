@@ -90,3 +90,38 @@ def test_journal_naming_rule_is_synced_across_three_sources():
     for name, text in texts.items():
         assert "<创建拍号4位>-<创建日期YYYYMMDD>.md" in text, "%s 缺命名规则" % name
         assert "YYYYMMDD" in text, "%s 缺日期段说明" % name
+
+
+def test_reminder_exit_and_requestion_are_documented():
+    """N48 修复（v2.2.7）：**提醒的出口**与**冻结芽的重问**必须三处同源。
+
+    为什么锁这两条：它们治的是同一个病的两半——
+    ① 去重缺口（只扫活跃队列 → 每拍重立 ~36 根重复芽，把队列占满）；
+    ② 提醒没有出口（「可用性」机械层读不到兑现 → 一条永真、可无限重生的提醒）。
+    只修 ① 不修 ② ＝ 把这条渠道断电（队列 ~150 拍后见底 → 空转）。
+    所以正本、提示词、代码三处都必须写着「结案」与「重问」，缺一处就是漂移。
+    """
+    words = {"结案": "engine/sprout_sources.py", "重问": "engine/sprout_queue.py"}
+    for term, owner in words.items():
+        assert term in MECHANISM, "机制正本缺：%s" % term
+        assert term in PROMPTS, "提示词缺：%s" % term
+        assert term in (REPO_ROOT / "src" / "infinigrow" / owner).read_text(encoding="utf-8")
+
+
+def test_observation_surface_boundary_is_documented():
+    """M6/M7 的文档面：观测面**有界**（目录 10／文件 20）与**定键补观测**必须写在正本里，
+    并且和代码里的常量同源——「边界」这种东西不写下来就等于不存在。"""
+    from infinigrow.engine.subject import SUBJECT_DIR_LIMIT, SUBJECT_FILE_LIMIT
+    assert str(SUBJECT_DIR_LIMIT) in MECHANISM and str(SUBJECT_FILE_LIMIT) in MECHANISM
+    assert "定键补观测" in MECHANISM
+    architecture = (REPO_ROOT / "docs" / "architecture.md").read_text(encoding="utf-8")
+    assert "目录对象" in architecture, "架构文档的观测面摘要必须含目录对象（M9）"
+    assert str(SUBJECT_DIR_LIMIT) in architecture
+
+
+def test_frozen_zone_has_a_capacity_rule_documented():
+    """M5：冻结区容量判据（超上限只移动最旧的进归档）必须写在正本与配置表里。"""
+    from infinigrow.core.config import Settings
+    assert "frozen_cap" in MECHANISM and "frozen_requestion_ticks" in MECHANISM
+    assert hasattr(Settings, "frozen_cap") and hasattr(Settings, "frozen_requestion_ticks")
+    assert hasattr(Settings, "frozen_keep_tail")

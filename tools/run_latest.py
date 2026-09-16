@@ -185,10 +185,14 @@ def main(argv=None):
 
     repo = Path(args.repo).resolve()
     if not (repo / ".git").is_dir():
-        print("FAIL：%s 不是 git 仓库——本入口需要 git 历史来判定版本" % repo)
+        print("FAIL：%s 不是 git 仓库——本入口需要 git 历史来判定版本" % repo.name)
         return 4
 
-    print("引擎：%s（%s）" % (engine_label(repo), repo))
+    # N47/M8：**不打印仓库的绝对路径**。计划任务把本入口的输出整份重定向进
+    # `state/logs/tick.log`（启动器就是这么写的），一打印就等于把本机目录结构长久写进
+    # 状态产物——而状态产物是「可以分享/迁移」的东西（`tools/check_no_abs_paths.py` 管着它）。
+    # 需要认仓库时用**目录名**就够（人在本机，知道自己在哪个仓库）。
+    print("引擎：%s（%s）" % (engine_label(repo), repo.name))
 
     if args.update:
         return update_only(repo, check=args.check, require_latest=args.require_latest)

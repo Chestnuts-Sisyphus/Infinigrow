@@ -132,6 +132,31 @@ def test_env_error_is_not_treated_as_selftest_failure():
     assert "env_error" in src and "No module named" in src
 
 
+def test_launcher_output_never_carries_the_absolute_repo_path(tmp_path):
+    """M8/N47：启动器的输出**不许带仓库绝对路径**。
+
+    为什么这条是硬判据：计划任务把本入口的 stdout/stderr 整份重定向进
+    `state/logs/tick.log`——一打印就等于把本机目录结构长久写进**可被分享/迁移**的
+    状态产物（实测 `state/logs/tick.log` 里 306 行带盘符路径）。
+    """
+    import os
+    import shutil
+    repo_copy = tmp_path / "repo-copy"
+    shutil.copytree(REPO_ROOT, repo_copy,
+                    ignore=shutil.ignore_patterns(".git", "state", "archive",
+                                                  "__pycache__", ".pytest_cache",
+                                                  ".ruff_cache"))
+    assert (repo_copy / ".git").is_dir() is False
+    env = dict(os.environ)
+    p = subprocess.run([sys.executable, str(repo_copy / "tools" / "run_latest.py"),
+                        "--check", "--repo", str(repo_copy)],
+                       capture_output=True, text=True, encoding="utf-8",
+                       errors="replace", timeout=180, env=env)
+    out = (p.stdout or "") + (p.stderr or "")
+    assert str(repo_copy) not in out, "启动器把仓库绝对路径打印出来了"
+    assert repo_copy.name in out                     # 用目录名说明「是哪个仓库」就够
+
+
 def test_child_env_makes_the_package_importable_without_install():
     env = run_latest.child_env(REPO_ROOT)
     first = env["PYTHONPATH"].split(__import__("os").pathsep)[0]

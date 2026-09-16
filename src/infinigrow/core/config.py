@@ -24,6 +24,9 @@
 | `queue_cap` | `IG_QUEUE_CAP` | 50 | 活跃芽队列上限 |
 | `lead_limit` | `IG_LEAD_LIMIT` | 3 | 同一芽连领上限（拍）|
 | `cold_start_ticks` | `IG_COLD_START_TICKS` | 50 | 冷启动随机化拍数（之后走字典序）|
+| `frozen_requestion_ticks` | `IG_FROZEN_REQUESTION_TICKS` | 300 | 冻结芽**重问**年限（拍）：冻结满这么多拍仍未被点亮 → 允许重新立芽（挂起≠永久封存）|
+| `frozen_cap` | `IG_FROZEN_CAP` | 5000 | 冻结区行数上限（超限＝最旧的**移动**进 `state/archive/`，只移不删）|
+| `frozen_keep_tail` | `IG_FROZEN_KEEP_TAIL` | 4000 | 冻结区整理后保留的**尾部行数**（历史行全在归档）|
 | `rotate_keep_tail` | `IG_ROTATE_KEEP_TAIL` | 2000 | 轮转后主账本保留的**尾部行数**（历史行全在 `state/archive/`）|
 | `rotate_max_bytes` | `IG_ROTATE_MAX_BYTES` | 1048576 | 账本/日志超过这么多字节才轮转 |
 | `rotate_keep_files` | `IG_ROTATE_KEEP_FILES` | 200 | 留痕/报告按份数轮转后保留的**最近份数** |
@@ -60,6 +63,9 @@ _FIELDS = {
     "lead_limit": (int, 3),
     "cold_start_ticks": (int, 50),
     "frozen_review_every": (int, 20),
+    "frozen_requestion_ticks": (int, 300),
+    "frozen_cap": (int, 5000),
+    "frozen_keep_tail": (int, 4000),
     "rotate_keep_tail": (int, 2000),
     "rotate_max_bytes": (int, 1048576),
     "rotate_keep_files": (int, 200),
@@ -92,6 +98,9 @@ class Settings:
     lead_limit: int = 3
     cold_start_ticks: int = 50
     frozen_review_every: int = 20
+    frozen_requestion_ticks: int = 300
+    frozen_cap: int = 5000
+    frozen_keep_tail: int = 4000
     rotate_keep_tail: int = 2000
     rotate_max_bytes: int = 1048576
     rotate_keep_files: int = 200
