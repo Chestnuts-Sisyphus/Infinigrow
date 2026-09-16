@@ -18,7 +18,8 @@ from __future__ import annotations
 
 from typing import Iterable, Optional, Sequence
 
-from .model import (Diff, DiffKind, Edge, MATURITY_CAP, Sprout, SproutOrigin)
+from .model import (COUNT_DIMENSIONS, Diff, DiffKind, Edge, MATURITY_CAP, Sprout,
+                    SproutOrigin, forward_delta, parse_delta)
 
 #: 能力库条目「长期未用」的拍数阈值（具体状态判据，不是「频率高」式归纳）
 LIBRARY_IDLE_TICKS = 20
@@ -43,14 +44,33 @@ def from_diffs(diffs: Sequence[Diff], tick: int, start_seq: int = 1) -> list[Spr
             obj=d.obj, dimension=d.dimension,
             pointer=d.evidence, origin=SproutOrigin.DIFF, created_tick=tick,
             predicted_edge=predicted, maturity_step=None,
-            # 芽**带着**产出它的那个预期——但只在「预期还没被现实回答」的那类差异上
-            # （`预测未执行`：承诺在先、现实没读到）。`预测内错` 不并：那时现实已经
-            # **推翻了**预期，把旧值当目标派回去等于让执行者把现实改回错的样子
-            # （实测踩到过：文件数从 1 变 2 是生长，却派了一根「改回 1」的芽）。
-            expected_value=d.expected if d.kind == DiffKind.NOT_EXECUTED else None,
+            expected_value=_carry_expected(d),
         ))
         seq += 1
     return out
+
+
+def _carry_expected(diff: Diff) -> Optional[str]:
+    """芽**带着**产出它的那个预期（N43 修正：绝对值 → 差额）。
+
+    - `预测未执行`（承诺在先、现实没读到）：原样带走——「存在」这类名义目标没有快照问题；
+    - 计数型维度的**前向目标**（预期 > 实际）：带走**差额**（`+N`）而不是绝对值——
+      绝对值是提议那一拍的快照，等芽被领到时现实早已走过它（实测：提议拍写「文件数＝97」，
+      领做时已 103 → 永远判打脸）；差额在领做那一拍按当时现实重新锚定
+      （`engine/tick.resolve_relative_predictions`），目标不会过期；
+    - 其余（含 `预测内错` 且预期 < 实际＝现实已超过预期）：不带——
+      把旧值当目标派回去等于让执行者把现实改回错的样子（实测踩到过：文件数从 1 变 2
+      是生长，却派了一根「改回 1」的芽）。
+    """
+    if diff.kind == DiffKind.NOT_EXECUTED:
+        return diff.expected
+    if diff.dimension not in COUNT_DIMENSIONS:
+        return None
+    delta = parse_delta(diff.expected)          # 已经是差额写法 → 原样带走
+    if delta is not None:
+        return diff.expected
+    delta = forward_delta(diff.expected, diff.actual)
+    return "+%d" % delta if delta else None
 
 
 def _predict_edge(diff: Diff) -> Optional[Edge]:
@@ -63,7 +83,16 @@ def _predict_edge(diff: Diff) -> Optional[Edge]:
         return Edge.READ          # 现实给了新东西而没预测到 → 先看懂（判读）
     if diff.kind == DiffKind.NOT_EXECUTED:
         return Edge.ACT           # 说要做的没做 → 先把动作落成现实变化（行动）
+    if _is_forward_target(diff):
+        return Edge.ACT           # 「该再长一格」同样是动作型的活（N43）
     return Edge.PRINCIPLE         # 预测内错 → 多半要从已有认知推新认知（原理）
+
+
+def _is_forward_target(diff: Diff) -> bool:
+    """这根差异是不是「现实还没长到预期」的前向目标（计数型维度，N43）。"""
+    return (diff.dimension in COUNT_DIMENSIONS
+            and (parse_delta(diff.expected) is not None
+                 or forward_delta(diff.expected, diff.actual) is not None))
 
 
 def from_maturity_cap(maturity_records: Iterable[dict], tick: int,

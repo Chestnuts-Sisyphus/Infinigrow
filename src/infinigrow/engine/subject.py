@@ -46,6 +46,18 @@ MISSING = "缺失"
 #: 由 `tests/test_mechanism_docs.py` 锁定同源（改一处＝三处一起改）。
 JOURNAL_NAME_RX = re.compile(r"^\d{4}-\d{8}\.md$")
 
+#: **目录对象**的命名（N43）：`主体/<相对路径>/`——结尾的 `/` 是「这是目录」的机械标记，
+#: 与文件对象（`主体/<相对路径>`）在同一对账空间里**永不撞名**。
+#: 目录观测量＝**文件数**：它让「往某个目录里再长一格」成为一个**名字无关**的可对账量。
+#: 为什么需要它：提议「新建某个文件」必须点名文件名，而文件名里的拍号段是**创建拍**的
+#: （K7），提议方不知道未来的创建拍 → 提议名与真实产物名永远对不上（实测：提议
+#: `journal/0257-….md`，执行者在拍 291 建出 `0291-….md`，芽连领 3 拍耗尽，白烧）。
+DIR_OBJECT_SUFFIX = "/"
+
+#: 一次观测最多列多少个子目录（同「有界」纪律：主体可以很宽，一拍不能没完没了）。
+#: 目录按**名字**升序取前 N 个（同输入同顺序，可复跑）。
+SUBJECT_DIR_LIMIT = 10
+
 
 def valid_journal_name(name: str) -> bool:
     """`journal/` 文件名的机械校验：`<创建拍号4位>-<创建日期YYYYMMDD>.md`。"""
@@ -63,6 +75,14 @@ class SubjectFile:
     name: str          # 相对名（POSIX 分隔符）
     bytes: int
     mtime: float
+
+
+@dataclass(frozen=True)
+class SubjectDir:
+    """主体里一个子目录的可查事实（N43 目录对象；同样只记相对名）。"""
+
+    name: str          # 相对名（POSIX 分隔符，不带结尾 `/`）
+    files: int         # 目录下的文件数（递归，跳过 SKIP_DIRS）
 
 
 def subject_leaf(root: Path) -> str:
@@ -114,6 +134,38 @@ def subject_total_bytes(root: Path) -> int:
     return _subject_stats(root)[1]
 
 
+def subject_dirs(root: Path, limit: int = SUBJECT_DIR_LIMIT) -> list[SubjectDir]:
+    """列出主体子目录（有界、稳定排序、只读；N43 目录对象）。
+
+    - 不存在的主体根 → 空列表（不抛，同 `subject_files`）；
+    - 每个目录报**文件数**（递归计数，跳过 SKIP_DIRS）——这是「这个目录长了几格」的
+      机械读数，与文件名无关（提议「再长一格」靠它验收，见模块头 N43）；
+    - 排序＝**名字升序**（同输入同顺序，可复跑），上限 `limit`。目录很多时以名字序
+      取前 N 个：观测面必须**有界**，没被观测到的目录不会被提议（对象名机械闸只放行
+      可对账清单里的对象）。
+    """
+    base = Path(root)
+    if not base.is_dir():
+        return []
+    out: list[SubjectDir] = []
+    for path in sorted(base.rglob("*")):
+        if not path.is_dir():
+            continue
+        rel_parts = path.relative_to(base).parts
+        if any(part in SKIP_DIRS for part in rel_parts):
+            continue
+        count = 0
+        for sub in path.rglob("*"):
+            if not sub.is_file():
+                continue
+            if any(part in SKIP_DIRS for part in sub.relative_to(base).parts):
+                continue
+            count += 1
+        out.append(SubjectDir(name="/".join(rel_parts), files=count))
+    out.sort(key=lambda d: d.name)
+    return out[:limit]
+
+
 def _subject_stats(root: Path) -> tuple[int, int]:
     """一次遍历算「文件总数＋总字节数」（只读；跳过 SKIP_DIRS）。"""
     base = Path(root)
@@ -139,6 +191,14 @@ def subject_object(rel_name: str) -> str:
     return SUBJECT_PREFIX + rel_name.replace("\\", "/")
 
 
+def subject_dir_object(rel_name: str) -> str:
+    """主体内相对目录名 → 对账空间里的**目录对象**名（`主体/<相对名>/`，N43）。
+
+    结尾的 `/` 是判据的一部分：同一个相对名的文件与目录是两个对象，不许撞名。
+    """
+    return SUBJECT_PREFIX + rel_name.replace("\\", "/").rstrip("/") + DIR_OBJECT_SUFFIX
+
+
 def valid_subject_object(obj: str, allowed_objs: set[str],
                          for_proposal: bool = False) -> tuple[bool, str]:
     r"""组织会话产出的对象名**机械闸**（T5/A11）。
@@ -158,6 +218,9 @@ def valid_subject_object(obj: str, allowed_objs: set[str],
     if not obj.startswith(SUBJECT_PREFIX):
         return False, "对象名必须以 %s 开头（主体对象）" % SUBJECT_PREFIX
     rel = obj[len(SUBJECT_PREFIX):]
+    is_dir = rel.endswith(DIR_OBJECT_SUFFIX)            # `主体/<相对路径>/`＝目录对象（N43）
+    if is_dir:
+        rel = rel[:-len(DIR_OBJECT_SUFFIX)]
     segments = rel.split("/")
     bad = (not rel or any(seg in ("", ".", "..") for seg in segments)
            or rel.startswith(("/", "\\")) or rel.startswith(".")
@@ -165,12 +228,13 @@ def valid_subject_object(obj: str, allowed_objs: set[str],
     if bad:
         return False, "非法相对路径：%r（不许越界/绝对/隐藏）" % rel
     if for_proposal:
-        return True, "主体内合法新相对路径（可提议创建）"
+        return True, ("主体内合法新目录（可提议往它里面长一格）" if is_dir
+                      else "主体内合法新相对路径（可提议创建）")
     return False, "不在可对账清单（findings 必须引用现实可查的对象）"
 
 
 def observe_subject(root: Path, limit: int = SUBJECT_FILE_LIMIT) -> list[Observation]:
-    """机械观测主体 → W回 清单（存在性 / 文件数 / 每个文件的字节数与存在性）。
+    """机械观测主体 → W回 清单（存在性 / 文件数 / 每个文件 / 每个子目录的格数）。
 
     「文件数」这一条是主体层面的**生长读数**：它变了就说明主体真的长了/缩了，
     与该文件是谁、内容是什么无关（内容级判断归执行者与组织会话，这里只报可查事实）。
@@ -182,15 +246,23 @@ def observe_subject(root: Path, limit: int = SUBJECT_FILE_LIMIT) -> list[Observa
     **每个文件同时报「存在性」与「字节数」**：观测到的维度必须和预测的维度对称——
     只观测字节数、不观测存在性，会让「预测某文件存在」变成「预测未执行」的假差异
     （实测：首拍就因此凭空长出一根芽）。
+
+    **每个子目录报「文件数」（N43）**：目录对象 `主体/<相对路径>/` 让「往这个目录里
+    再长一格」成为一个**名字无关**的可对账量——提议新建文件时点不出未来的创建拍
+    （K7 的拍号段＝创建拍），点名就必然对不上（见 `DIR_OBJECT_SUFFIX` 的注释）。
     """
     base = Path(root)
     leaf = subject_leaf(base)
     files = subject_files(base, limit=limit)
+    dirs = subject_dirs(base)
     exists = base.is_dir()
     out = [
         Observation(leaf, "存在性", EXISTS if exists else MISSING, "主体根"),
         Observation(leaf, "文件数", str(subject_count(base)), "主体根"),
     ]
+    for item in dirs:
+        out.append(Observation(subject_dir_object(item.name), "文件数", str(item.files),
+                               "主体目录:%s" % item.name))
     for item in files:
         out.append(Observation(subject_object(item.name), "存在性", EXISTS,
                                "主体:%s" % item.name))
@@ -207,10 +279,16 @@ def predict_subject_unchanged(root: Path, tick: int,
     差异就是生长信号。执行者/组织会话可以**覆盖**这里的任何一条（写更精确的预期），
     也可以预测**尚不存在的文件**（预期=存在）——那是「该创建它」的合法提议：
     现实侧读不到它 → 「预测未执行」→ 照样产芽。
+
+    **目录对象（N43）与观测对称**：每个子目录一条 `文件数` 预测。组织会话提议
+    「往 `主体/journal/` 里再长一格」时，写差额（`+1`）覆盖默认值——
+    领做/对账时按当时现实锚定（见 `engine/tick.resolve_relative_predictions`），
+    文件名由执行者按其真实创建拍命名（K7），验收不含文件名。
     """
     base = Path(root)
     leaf = subject_leaf(base)
     files = subject_files(base, limit=limit)
+    dirs = subject_dirs(base)
     exists = base.is_dir()
     out = [
         Prediction(leaf, "存在性", EXISTS if exists else MISSING, tick=tick,
@@ -218,6 +296,9 @@ def predict_subject_unchanged(root: Path, tick: int,
         Prediction(leaf, "文件数", str(subject_count(base)), tick=tick,
                    evidence="预测:主体根"),
     ]
+    for item in dirs:
+        out.append(Prediction(subject_dir_object(item.name), "文件数", str(item.files),
+                              tick=tick, evidence="预测:主体目录:%s" % item.name))
     for item in files:
         out.append(Prediction(subject_object(item.name), "存在性", EXISTS, tick=tick,
                               evidence="预测:主体:%s" % item.name))
@@ -231,9 +312,13 @@ def subject_snapshot(root: Path, tick: int, limit: int = SUBJECT_FILE_LIMIT) -> 
 
     **只记目录名与相对名**——不记绝对路径（见模块头）。人要看绝对路径，
     用 `infinigrow dry-run`（控制台输出，不落盘）。
+
+    `dirs`（N43）＝子目录与各自的文件数（目录对象 `主体/<相对路径>/` 的读数）。
+    组织会话扫现实（K14）与「再长一格」的提议都读它。
     """
     base = Path(root)
     files = subject_files(base, limit=limit)
+    dirs = subject_dirs(base)
     count, total_bytes = _subject_stats(base)
     return {
         "tick": tick,
@@ -242,9 +327,12 @@ def subject_snapshot(root: Path, tick: int, limit: int = SUBJECT_FILE_LIMIT) -> 
         "file_count": count,
         "total_bytes": total_bytes,
         "files": [{"name": f.name, "bytes": f.bytes} for f in files],
+        "dirs": [{"name": d.name, "files": d.files} for d in dirs],
         "object_prefix": SUBJECT_PREFIX,
+        "dir_object_suffix": DIR_OBJECT_SUFFIX,
         "file_limit": limit,
         "observed_files": len(files),
+        "observed_dirs": len(dirs),
     }
 
 

@@ -323,6 +323,82 @@ def test_explicit_predictions_are_not_extended(tmp_path, settings):
     assert result.diff_summary["by_kind"] == {"预测内对": 1}
     assert "topic_expectation" not in result.predictions
 
+
+# ---------------------------------------------------------------- N43 提议闭环
+def _journal_subject(tmp_path, name="subject", entries=1):
+    """造一个「主体/journal/ 里有 N 格」的现场（测试用，不碰真实主体）。"""
+    subject = tmp_path / name
+    (subject / "journal").mkdir(parents=True)
+    for i in range(entries):
+        (subject / "journal" / ("%04d-20260916.md" % (i + 1))).write_text(
+            "x\n", encoding="utf-8")
+    return subject
+
+
+def test_relative_expectation_is_anchored_to_pre_action_reality(tmp_path):
+    """N43：差额预期（`+1`）在**动手前**的读数上锚成绝对值。
+
+    它承诺的是「再推进一格」，不是提议那一拍的快照——这样芽被领到时目标不会过期。
+    """
+    subject = _journal_subject(tmp_path)
+    settings = load_settings(env={}, state_root=str(tmp_path / "state"),
+                             repo_root=str(REPO_ROOT), subject_root=str(subject))
+    result = run_tick(settings=settings,
+                      predictions=[Prediction("主体/journal/", "文件数", "+1", tick=1,
+                                              evidence="计划：本拍在 journal/ 里再长一格")],
+                      observations=[Observation("主体/journal/", "文件数", "1",
+                                                "主体目录:journal")])
+    diff = [d for d in result.diffs if d.key == ("主体/journal/", "文件数")][0]
+    assert diff.kind.value == "预测内错"           # 没长出来 → 差异
+    assert diff.expected == "2"                    # 锚定成「当前 1 + 1」，不是字面 `+1`
+
+
+def test_unanchorable_delta_is_left_as_is(tmp_path, settings):
+    """锚不上（该量本拍读不到）→ 差额原样保留，不假装成可对账的承诺。"""
+    result = run_tick(settings=settings,
+                      predictions=[Prediction("主体/nowhere/", "文件数", "+1", tick=1,
+                                              evidence="计划：缺依据")],
+                      observations=[])
+    diff = [d for d in result.diffs if d.key == ("主体/nowhere/", "文件数")][0]
+    assert diff.kind.value == "预测未执行" and diff.expected == "+1"
+
+
+def test_proposal_sprout_is_redeemed_when_the_entry_is_written(tmp_path):
+    """N43 端到端：提议「再长一格」→ 芽带差额 → 执行者按**自己的创建拍**命名建下一格 →
+    对账判「预测内对」、芽**兑现**（不再有「名字对不上→连领 3 拍耗尽」的白烧）。
+
+    这是 v2.2.5 真机现场的复刻：提议拍 257 写下 `journal/0257-….md`，执行者在拍 291 建出
+    `0291-….md` → 芽对象与产物永远对不上。
+    """
+    subject = _journal_subject(tmp_path)
+    settings = load_settings(env={}, state_root=str(tmp_path / "state"),
+                             repo_root=str(REPO_ROOT), subject_root=str(subject))
+    settings.cold_start_ticks = 0
+    # 拍 1：提议（差额）→ 现实没长 → 差异 → 芽（带 `+1`）
+    run_tick(settings=settings, tick=1,
+             predictions=[Prediction("主体/journal/", "文件数", "+1", tick=1,
+                                     evidence="计划：本拍在 journal/ 里再长一格")],
+             observations=[Observation("主体/journal/", "文件数", "1", "主体目录:journal")])
+    from infinigrow.engine.sprout_queue import SproutQueue
+    layout = resolve_state(settings.state_root, settings.repo_root)
+    queue = SproutQueue.load(layout.sprouts, layout.frozen_sprouts)
+    assert [s.expected_value for s in queue.sprouts] == ["+1"]      # 芽带的是差额
+    assert queue.sprouts[0].dimension == "文件数"
+
+    def executor(prompt: str) -> str:
+        # 执行者动手：写下一格，文件名按**自己这一拍**的拍号（K7）
+        (subject / "journal" / "0002-20260916.md").write_text("下一格\n", encoding="utf-8")
+        return "动手：journal/ 再长一格"
+
+    # 拍 2：领到那根芽 → 动手 → W回 → 对账
+    result = run_tick(settings=settings, tick=2, llm=executor, org_session=False)
+    assert result.topic_sprout == queue.sprouts[0].id
+    diff = [d for d in result.diffs if d.key == ("主体/journal/", "文件数")][0]
+    assert diff.kind.value == "预测内对" and diff.expected == "2"   # 目标在领做这拍锚定
+    assert result.outcomes and result.outcomes[0].redeemed is True
+    assert result.outcomes[0].verifiable is True                   # 这个量机械层读得到
+
+
 def test_tick_number_recovers_from_ledgers_when_heartbeat_is_unreadable(tmp_path, settings):
     """心跳读不出来时**从账本恢复拍号**，不许静默回到 1（否则报告同名覆写）。
 

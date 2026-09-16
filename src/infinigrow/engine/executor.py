@@ -49,9 +49,14 @@ NOT_FOUND_RC = 127
 #: 传输层截断/连接中断的签名（K5/A9）：执行者输出里出现这些＝响应体没读完/连接被断，
 #: **重跑大概率成功**（与 400 类「上游校验抖动」不同，那是适配器侧重试的事）。
 #: 判据要具体状态：只认这几个明确签名，不把「rc≠0」一律重试（那会把真失败放大成烧钱）。
+#:
+#: `SSLEOFError` / `UNEXPECTED_EOF_WHILE_READING`（K5 覆盖面缺口补齐）：TLS 读期间被对端
+#: 半途关连接——同一类截断，只是报在 SSL 层。实测证据：拍 296/297 两次失败签名都是
+#: `URLError(SSLEOFError(8, '[SSL: UNEXPECTED_EOF_WHILE_READING] ...'))`，旧正则不含它，
+#: 引擎侧没兜住（297 之后自动恢复＝典型瞬时抖动，本该被重试吃掉）。
 TRANSPORT_CUT_RX = re.compile(
     r"IncompleteRead|ConnectionResetError|Connection reset|RemoteDisconnected|"
-    r"BrokenPipeError|Read timed out",
+    r"BrokenPipeError|Read timed out|SSLEOFError|UNEXPECTED_EOF_WHILE_READING",
     re.IGNORECASE)
 #: 传输层截断的重试上限（次）。适配器侧已有 5 次退避（400 类）；这里是引擎侧的
 #: 第二层，专门兜「截断/断连」——这两类在适配器侧**不重试**（实测 tick 50 白丢一拍）。

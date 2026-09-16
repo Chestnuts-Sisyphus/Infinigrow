@@ -229,3 +229,59 @@ def test_missing_json_is_not_guessed(tmp_path, bad):
     settings = _settings(tmp_path)
     run, _layout, _queue = _run(settings, 1, bad)
     assert run.findings == [] and (run.parse_error or bad == "{}")
+
+
+# ---------------------------------------------------------------- N43 / K14
+def test_prompt_shows_dir_objects_and_reality_delta(tmp_path):
+    """N43/K14 的输入块：目录对象（可对账量＝文件数）＋「上一拍快照 vs 本拍清单」对比。
+
+    没有这两块，组织会话既无法提议「往 journal/ 里再长一格」（N43），
+    也看不见新出现的现实（K14）。
+    """
+    settings = _settings(tmp_path)
+    layout = resolve_state(settings.state_root, settings.repo_root, create=True)
+    subject = settings.subject_path()
+    (subject / "journal").mkdir(parents=True, exist_ok=True)
+    (subject / "journal" / "0001-20260916.md").write_text("x", encoding="utf-8")
+    # 上一拍快照（引擎每拍末尾写；这里造一份「还没长 journal/0001」的旧快照）
+    layout.subject_snapshot.write_text(json.dumps({
+        "tick": 1, "root_name": "subject", "exists": True, "file_count": 2,
+        "total_bytes": 6, "files": [{"name": "notes.md", "bytes": 5},
+                                    {"name": "growth-1.md", "bytes": 1}],
+        "dirs": [],
+    }, ensure_ascii=False), encoding="utf-8")
+    prompt = org_mod.build_org_prompt(settings, layout, 2, subject, {})
+    assert "主体/journal/（1 格）" in prompt                        # 目录对象＋格数
+    delta = prompt.split("### 本拍现实变化")[1]
+    assert "主体/journal/0001-20260916.md" in delta                # 新出现的对象被点名
+    assert "新出现" in delta and "从清单里消失" in delta
+    assert "不等于被删" in delta                                   # 有界清单的诚实声明
+
+
+def test_delta_proposal_on_dir_object_spawns_a_sprout(tmp_path):
+    """N43：组织会话对目录对象下**差额**预测（`+1`）→ 现实没长 → 差异 → 一支芽。
+
+    芽带的是差额（领做那拍才锚定），所以不会出现「提议拍 ≠ 创建拍」的名字错位。
+    """
+    payload = json.dumps({"findings": [], "predictions": [
+        {"obj": "主体/journal/", "dimension": "文件数", "expected": "+1",
+         "pointer": "计划：本拍在 journal/ 里再长一格（文件名由执行者按创建拍定）"},
+    ], "notes": "提议长一格"}, ensure_ascii=False)
+    settings = _settings(tmp_path)
+    subject = settings.subject_path()
+    (subject / "journal").mkdir(parents=True, exist_ok=True)
+    (subject / "journal" / "0001-20260916.md").write_text("x", encoding="utf-8")
+
+    # 组织的规划值只在**它自己那一拍**生效（预测是那一拍的承诺）——所以走 run_tick 默认路径
+    def fake(prompt: str) -> str:
+        if "组织会话" in prompt and "输出协议" in prompt:
+            return payload
+        return "执行者：不动手（夹具）"
+
+    result = run_tick(settings=settings, tick=1, llm=fake)
+    assert result.org is not None and result.org["predictions"] == 1
+    diff = [d for d in result.diffs if d.key == ("主体/journal/", "文件数")][0]
+    assert diff.expected == "2" and diff.kind.value == "预测内错"   # 锚定成 1+1
+    rows = read_jsonl(resolve_state(settings.state_root, settings.repo_root).sprouts)
+    assert rows and rows[-1]["expected_value"] == "+1"             # 芽带差额，不带快照
+    assert rows[-1]["dimension"] == "文件数"

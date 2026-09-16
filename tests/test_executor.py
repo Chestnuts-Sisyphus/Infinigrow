@@ -293,6 +293,25 @@ def test_transport_cut_failure_records_attempt_count(tmp_path):
     assert run.attempt == exec_mod.TRANSPORT_RETRY_MAX     # 试满上限次数
 
 
+def test_ssl_eof_signature_is_retried(tmp_path):
+    """K5 覆盖面缺口：TLS 层截断（`SSLEOFError` / `UNEXPECTED_EOF_WHILE_READING`）也要重试。
+
+    实测证据（拍 296/297）：失败签名是
+    `URLError(SSLEOFError(8, '[SSL: UNEXPECTED_EOF_WHILE_READING] ...'))`——
+    旧正则只认 IncompleteRead/连接重置/远端断开/读超时，这一类漏在网外。
+    两次尝试都截断 → 如实记 `attempt=TRANSPORT_RETRY_MAX`（与其它截断签名同一判据）。
+    """
+    layout = resolve_state(str(tmp_path / "state"), str(REPO_ROOT), create=True)
+    run = exec_mod.run_command(
+        'python -c "import sys; sys.stderr.write(\'EXECUTOR-ERROR: URLError(SSLEOFError(8, '
+        '\\\'[SSL: UNEXPECTED_EOF_WHILE_READING] EOF occurred in violation of protocol '
+        '(_ssl.c:1032)\\\'))\\n\'); sys.exit(1)"',
+        "提示词", tick=6, kind="tick", cwd=tmp_path,
+        state_root=layout.root, subject_root=tmp_path, timeout_s=30)
+    assert not run.ok
+    assert run.attempt == exec_mod.TRANSPORT_RETRY_MAX     # 认出来了 → 试满上限
+
+
 def test_non_transport_failure_is_not_retried(tmp_path):
     """K5/A9：非传输层失败（普通 rc≠0，无截断签名）不重试——一次记清。"""
     layout = resolve_state(str(tmp_path / "state"), str(REPO_ROOT), create=True)

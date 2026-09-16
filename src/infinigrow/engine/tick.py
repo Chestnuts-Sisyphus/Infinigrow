@@ -46,7 +46,7 @@ from . import sprout_sources
 from . import subject as subject_mod
 from .domain_saturation import DomainState, value_at_freeze
 from .model import (Diff, DiffKind, MATURITY_CAP, Observation, OutcomeRecord,
-                    Prediction, Sprout)
+                    Prediction, Sprout, parse_delta)
 from .org_trigger import should_run_org_session
 from .reconcile import diff_summary, pending_pointer, reconcile, redemption_report
 from .sprout_queue import SproutQueue
@@ -349,6 +349,35 @@ def evaluate_outcome(sprout: Sprout, diffs: Sequence[Diff], tick: int,
 
 
 # --------------------------------------------------------------------- 提示词
+def resolve_relative_predictions(preds: Sequence[Prediction],
+                                 readings: Optional[dict] = None) -> list[Prediction]:
+    """把 B猜里的**差额预期**（`+N`）按**动手前**的现实锚定成绝对值（N43）。
+
+    差额预期＝「在动手前的读数上再推进 N」（组织会话提议「往 journal/ 里再长一格」时
+    写的就是它）。为什么不在提议时写死绝对数字：提议拍 ≠ 创建拍（K7 的拍号段＝
+    **创建**拍），写死等于把一个会过期的快照当承诺——等芽被领到时现实早已走过它。
+
+    - 锚不上（该量本拍读不到 / 读数不是整数）→ **原样保留**：不做假装可对账的承诺，
+      对账会如实记成未执行；机械层读不到的量本来就不该被算进兑现率（`verifiable`）。
+    - 不是差额写法的预测原样返回（默认预测全是绝对值，走这条）。
+    """
+    readings = readings if readings is not None else {}
+    out: list[Prediction] = []
+    for item in preds:
+        delta = parse_delta(item.expected)
+        if delta is None:
+            out.append(item)
+            continue
+        current = readings.get(item.key)
+        try:
+            base = int(str(current).strip())
+        except (TypeError, ValueError):
+            out.append(item)                       # 读不到 → 锚不上，原样保留
+            continue
+        out.append(replace(item, expected=str(base + delta)))
+    return out
+
+
 def build_tick_prompt(settings: Settings, layout: StateLayout, tick: int,
                       sprout: Optional[Sprout], predictions: Sequence[Prediction],
                       subject_root: Path, facts: Optional[dict] = None) -> str:
@@ -470,6 +499,8 @@ def _observable_keys(snapshot: dict) -> list[tuple[str, str]]:
     """主体快照 → 明早会对账的 (对象, 维度) 清单（与 `observe_subject` 对称）。"""
     leaf = snapshot["root_name"]
     keys = [(leaf, "存在性"), (leaf, "文件数")]
+    for item in snapshot.get("dirs", []):
+        keys.append((subject_mod.subject_dir_object(item["name"]), "文件数"))
     for item in snapshot["files"]:
         obj = subject_mod.subject_object(item["name"])
         keys += [(obj, "存在性"), (obj, "字节数")]
@@ -697,6 +728,12 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
                            evidence="芽承诺:%s" % (topic.pointer or topic.id))]
             result.predictions["topic_expectation"] = topic.expected_value
             result.predictions["total"] = len(preds)
+
+    # 2b) **差额预期锚定**（N43）：`+N` 型的承诺（组织会话的提议、芽带的增量目标）
+    #     在**动手前**的读数上锚成绝对值——锚的是「再推进 N」，不是提议那一拍的快照。
+    #     放在取题之后：领到的芽自带的预期（上面那段）也走同一条锚定，不留特例。
+    preds = resolve_relative_predictions(preds, before_act)
+    result.predictions["total"] = len(preds)
 
     # 4) 动手（执行者通道；不给执行者＝机械拍，不烧认知）
     runner = _make_runner(cfg, layout, subject_root, tick, KIND_TICK, command, llm)

@@ -146,3 +146,46 @@ def test_merge_predictions_lets_planned_override_default(tmp_path):
     assert merged[("主体/a.md", "字节数")].expected == "20"
     assert merged[("主体/a.md", "字节数")].evidence == "规划:a"
     assert merged[("主体/a.md", "存在性")].expected == "存在"
+
+
+# ---------------------------------------------------------------- N43 目录对象
+def test_dir_objects_are_observed_and_predicted_symmetrically(tmp_path):
+    """N43：子目录也是**对象**（`主体/<相对路径>/`），可对账量＝它里面的文件数。
+
+    对称律同样适用：观测有它、默认预测就必须有它（否则每拍一条假差异）。
+    """
+    subject = tmp_path / "withdirs"
+    (subject / "journal").mkdir(parents=True)
+    for i in range(3):
+        (subject / "journal" / ("0%03d.md" % i)).write_text("x", encoding="utf-8")
+    (subject / "notes").mkdir()
+    readings = subject_mod.subject_readings(subject)
+    assert readings[("主体/journal/", "文件数")] == "3"        # 目录对象读得到
+    assert readings[("主体/notes/", "文件数")] == "0"          # 空目录＝0 格（不是「缺失」）
+    preds = {p.key: p.expected for p in subject_mod.predict_subject_unchanged(subject, 1)}
+    assert preds[("主体/journal/", "文件数")] == "3"           # 预测与观测同键同值
+    assert preds[("主体/notes/", "文件数")] == "0"
+    snap = subject_mod.subject_snapshot(subject, tick=1)
+    assert {(d["name"], d["files"]) for d in snap["dirs"]} == {("journal", 3), ("notes", 0)}
+
+
+def test_dir_object_names_are_distinct_from_files():
+    """目录对象名结尾带 `/`：与同名文件对象**永不撞名**（同一相对名是两个对象）。"""
+    assert subject_mod.subject_dir_object("journal") == "主体/journal/"
+    assert subject_mod.subject_dir_object("a/b") == "主体/a/b/"
+    assert subject_mod.subject_object("journal") == "主体/journal"
+    assert subject_mod.subject_object("a/b") != subject_mod.subject_dir_object("a/b")
+
+
+def test_dir_object_passes_the_mechanical_gate():
+    """对象名机械闸（T5）：目录对象放行；越界/隐藏/盘符前缀照旧拦下。"""
+    ok, why = subject_mod.valid_subject_object("主体/journal/", set(), for_proposal=True)
+    assert ok and "目录" in why
+    assert subject_mod.valid_subject_object("主体/../x/", set(), for_proposal=True)[0] is False
+    assert subject_mod.valid_subject_object("主体/.hidden/", set(), for_proposal=True)[0] is False
+    # 盘符前缀（`<字母>:` 开头的相对路径）：拼出来判，源码里不留盘符字面量（R1 零绝对路径）
+    drive = "主体/" + "C" + ":" + "/x/"
+    assert subject_mod.valid_subject_object(drive, set(), for_proposal=True)[0] is False
+    # findings（描述已观察到的现实）仍必须引用可对账清单里的对象
+    assert subject_mod.valid_subject_object("主体/journal/", set())[0] is False
+    assert subject_mod.valid_subject_object("主体/journal/", {"主体/journal/"})[0] is True

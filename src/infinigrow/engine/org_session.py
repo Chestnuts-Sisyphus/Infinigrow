@@ -42,6 +42,9 @@ from . import subject as subject_mod
 from .domain_saturation import DomainState, domain_key, value_at_freeze
 from .model import Diff, DiffKind, Prediction
 from .org_trigger import record_org_session
+from .subject import (SUBJECT_FILE_LIMIT, SUBJECT_PREFIX, subject_count,
+                      subject_dir_object, subject_dirs, subject_files,
+                      subject_total_bytes)
 
 #: 提示词文件（机制正本的一部分；缺文件＝组织会话无法建提示词 → 失败必须可见）
 ORG_PROMPT_FILE = "org-session.md"
@@ -126,10 +129,17 @@ class OrgRun:
 
 # ------------------------------------------------------------------ 提示词
 def _render_subject(subject_root: Path) -> str:
-    from .subject import SUBJECT_PREFIX, subject_files, subject_leaf
+    from .subject import (SUBJECT_PREFIX, subject_dir_object, subject_dirs,
+                          subject_files, subject_leaf)
     files = subject_files(subject_root)
+    dirs = subject_dirs(subject_root)
     lines = ["主体根名：%s（存在=%s）" % (subject_leaf(subject_root),
                                      subject_root.is_dir())]
+    if dirs:
+        lines.append("目录对象（**提议「再长一格」就指这里**；`文件数`＝它里面有几格）：")
+        lines += ["  - %s（%d 格）" % (subject_dir_object(d.name), d.files) for d in dirs]
+    else:
+        lines.append("目录对象：（无：主体根下还没有子目录）")
     if files:
         lines.append("主体文件（最多列 20 个）：")
         lines += ["  - %s（%d 字节）" % (f.name, f.bytes) for f in files]
@@ -158,6 +168,49 @@ def _render_subject(subject_root: Path) -> str:
             break
         used += len(block)
         lines.append(block)
+    return "\n".join(lines)
+
+
+def _render_reality_delta(layout: StateLayout, subject_root: Path) -> str:
+    """上一拍主体快照 vs 本拍清单（K14 扫现实）：**机械对比**，供组织会话抓候选。
+
+    为什么要有它：对账只看「预测 vs 现实」，动作自己造成的变化（`act_caused`）会被
+    中和掉——于是「主体里新出现的东西」在差异账里看不见（它是动作的后果，不派芽）。
+    现实的变化照样是事实，值得长不值得长是**语义判断**（归组织会话），
+    但对比本身可以是机械的：这里只报「新出现／从清单里消失／格数变化」。
+
+    两条诚实约束：
+    - 对比用的是**有界清单**（各取最新 20 个文件）：一个旧文件「从清单里消失」可能
+      只是被更新的文件挤出了观测名额，**不等于它被删了**——这一点必须写给他看；
+    - 读数取**真实总数**（不受观测上限影响），格数变化因此是可信的。
+    """
+    try:
+        prev = json.loads(read_text(layout.subject_snapshot))
+    except (OSError, ValueError):
+        return "（无上一拍主体快照：快照缺失或还没跑过拍——这块本轮空着）"
+    files = subject_files(subject_root)
+    dirs = subject_dirs(subject_root)
+    prev_files = {str(f.get("name")) for f in prev.get("files", [])}
+    now_files = {f.name for f in files}
+    prev_dirs = {str(d.get("name")): d.get("files") for d in prev.get("dirs", [])}
+    now_dirs = {d.name: d.files for d in dirs}
+    added = sorted(now_files - prev_files)
+    dropped = sorted(prev_files - now_files)
+    lines = ["上一拍快照拍号：%s（本拍清单取最新 %d 个文件；读数是真实总数）"
+             % (prev.get("tick"), SUBJECT_FILE_LIMIT),
+             "主体读数：文件 %s → %d／字节 %s → %d"
+             % (prev.get("file_count"), subject_count(subject_root),
+                prev.get("total_bytes"), subject_total_bytes(subject_root))]
+    changed = ["%s：%s → %s 格" % (subject_dir_object(name), prev_dirs.get(name), n)
+               for name, n in sorted(now_dirs.items()) if prev_dirs.get(name) != n]
+    lines.append("目录格数变化：%s" % ("；".join(changed) if changed else "（无）"))
+    lines.append("新出现（上一拍快照里没有、本拍清单里有）：%s"
+                 % ("、".join("%s%s" % (SUBJECT_PREFIX, n) for n in added) if added
+                    else "（无）"))
+    lines.append("从清单里消失（上一拍有、本拍没有；**可能只是被更新的文件挤出观测名额**，"
+                 "不等于被删）：%s"
+                 % ("、".join("%s%s" % (SUBJECT_PREFIX, n) for n in dropped) if dropped
+                    else "（无）"))
     return "\n".join(lines)
 
 
@@ -211,6 +264,10 @@ def build_org_prompt(settings: Settings, layout: StateLayout, tick: int,
         "### 主体（W回：现实侧）",
         "",
         _render_subject(subject_root),
+        "",
+        "### 本拍现实变化（K14 扫现实：上一拍快照 vs 本拍清单；机械对比）",
+        "",
+        _render_reality_delta(layout, subject_root),
         "",
         "### 最近差异账（W回：现实对上承诺的回答）",
         "",

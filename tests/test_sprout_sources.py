@@ -64,3 +64,41 @@ def test_library_unused_respects_known():
     records = [{"name": "旧条目", "last_used_tick": 0}]
     assert from_unused_library(records, "", tick=LIBRARY_IDLE_TICKS + 1,
                                known_objects=["旧条目"]) == []
+
+
+# ---------------------------------------------------------------- N43 前向目标
+def test_forward_target_carries_delta_not_snapshot():
+    """N43：计数型**前向目标**（预期 > 实际）随芽带走的是**差额**（`+1`），不是绝对值。
+
+    绝对值＝提议那一拍的快照，等芽被领到时现实早已走过它（实测：提议拍写「文件数＝97」，
+    领做时已 103 → 永远判打脸）；差额在领做那一拍按当时现实重新锚定。
+    边预测＝行动（这是一手要落成现实变化的活，不是「推新认知」）。
+    """
+    diff = Diff(DiffKind.WRONG, "主体/journal/", "文件数", "97", "96", "指针:提议", 7)
+    sprout = from_diffs([diff], tick=7)[0]
+    assert sprout.expected_value == "+1"
+    assert sprout.predicted_edge.value == "行动"
+
+
+def test_forward_target_never_reverts_reality():
+    """N43 的反面（不许回归）：现实**已经超过**预期（预期 < 实际）→ 不带预期。
+
+    这是当时踩到的坑：文件数 1→2 是生长，却派了一根「改回 1」的芽。
+    """
+    diff = Diff(DiffKind.WRONG, "主体/n.md", "文件数", "1", "2", "指针:旧", 7)
+    sprout = from_diffs([diff], tick=7)[0]
+    assert sprout.expected_value is None
+    assert sprout.predicted_edge.value == "原理"
+
+
+def test_delta_form_is_carried_as_is_on_any_dimension():
+    """差额写法（`+N`）原样带走——组织会话提议「再长一格」走的就是这条。"""
+    diff = Diff(DiffKind.WRONG, "主体/journal/", "文件数", "+1", "96", "指针:提议", 7)
+    assert from_diffs([diff], tick=7)[0].expected_value == "+1"
+
+
+def test_not_executed_still_carries_its_nominal_expectation():
+    """回归：`预测未执行` 仍按原样带名义预期（「存在」这类没有快照问题）。"""
+    diff = Diff(DiffKind.NOT_EXECUTED, "主体/x.md", "存在性", "存在", "（无现实侧记录）",
+                "提议:新建", 7)
+    assert from_diffs([diff], tick=7)[0].expected_value == "存在"

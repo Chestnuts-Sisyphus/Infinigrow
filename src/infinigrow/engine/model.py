@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
@@ -58,6 +59,35 @@ class DiffKind(str, Enum):
 
 #: 产芽的差异类型（N 差异 N 芽；「预测内对」不产芽——这就是「零差异零芽」）
 SPROUTING_KINDS = (DiffKind.WRONG, DiffKind.UNPREDICTED, DiffKind.NOT_EXECUTED)
+
+#: **可计数的量**（值是可比较的整数）：只有这类维度上「预期 > 实际」才叫**前向目标**
+#: （现实还没长到预期，该把它推进上去），而不是「要现实改回错的样子」（N43）。
+COUNT_DIMENSIONS = frozenset({"文件数"})
+
+#: **差额预期**的写法（N43）：`+N`＝「在动手前的读数上再推进 N」。
+#: 为什么要有它：提议「再长一格」时写绝对数字＝写下了提议那一拍的快照，等芽被领到时
+#: 现实早就走过它（实测：提议拍的目标「文件数＝97」，领做时已 103）→ 永远判打脸。
+#: 写差额则在**每次锚定**时按当时现实重算，目标不会过期。
+DELTA_RX = re.compile(r"^\+(\d+)$")
+
+
+def parse_delta(value: Optional[str]) -> Optional[int]:
+    """`+N` → N；不是差额写法（或不是整数）→ None（不猜）。"""
+    m = DELTA_RX.match(str(value or "").strip())
+    return int(m.group(1)) if m else None
+
+
+def forward_delta(expected: str, actual: str) -> Optional[int]:
+    """计数型**前向目标**：预期 > 实际 时返回差额，否则 None（N43）。
+
+    反例（当时踩到的）：文件数从 1 变 2 是生长，却派了一根「改回 1」的芽——
+    那是 `预期 < 实际`，本条判据天然排除它（现实已超过预期＝现实推翻了预期）。
+    """
+    try:
+        want, have = int(str(expected).strip()), int(str(actual).strip())
+    except (TypeError, ValueError):
+        return None
+    return want - have if want > have else None
 
 
 class SproutOrigin(str, Enum):
@@ -153,7 +183,12 @@ class Sprout:
     expected_value: Optional[str] = None   # 产出它的差异的预期值（可空）
     leads: int = 0                   # 已被领取次数（防霸占）
     last_lead_tick: Optional[int] = None
-    long_task: bool = False          # 长任务芽豁免连领限制
+    #: `long_task`＝**预留字段（K16：登记为预留，不接线、不删）**：长任务芽豁免连领上限。
+    #: 当前**没有任何写入方**（永远是 False），也不该有：连领上限（3 拍）已能防霸占，
+    #: 且芽会随「对象不同即新量」不断新立，不存在「一根芽必须连领超过 3 拍」的现实需求。
+    #: 要接线得先有「什么算长任务」的机械判据——目前没有；没有需求就接线＝给机制加
+    #: 没人用的分支。保留字段是为了兼容旧行（`from_record` 读得进来）。
+    long_task: bool = False
 
     @property
     def key(self) -> tuple[str, str]:
