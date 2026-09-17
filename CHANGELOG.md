@@ -6,6 +6,32 @@ The long-form reasoning behind each entry (incident, measurement, decision) live
 documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals in
 [`docs/zh/`](docs/zh/).
 
+## v2.2.16 — the two languages can no longer drift apart (2026-09-17)
+
+- **A mechanical check now keeps `docs/` and `docs/zh/` structurally aligned.**
+  `tests/test_docs_bilingual.py` asserts that each document pair has the **same heading skeleton
+  position by position**, that every document has a mirror (with a declared exception list for the
+  English-only release notes), and that `README.md` / `README.zh-CN.md` agree in sections, code
+  blocks **and the commands those blocks run** (comments and placeholder arguments are allowed to
+  differ; the commands are not). A section added to one language alone now fails the suite.
+- **The documents were aligned to make that check true** rather than the check being weakened:
+  `running.md` grew the sections the Chinese side already had (one-click files, scheduled task,
+  hidden launcher, gardener checks, logs, troubleshooting order, cost, status/pause, local
+  deployment), `architecture.md` and `growth-subject.md` gained their missing counterparts,
+  `mechanism.md` gained "Same source as the prompts" in English and a glossary in Chinese, and
+  `upgrading.md` gained its three missing sections.
+- **The docs also state what used to be folklore**: `long_task` is documented as a **reserved,
+  deliberately unwired** field (with the reason), and the runtime-language boundary is written in
+  both READMEs and both `running.md`s (runtime text is Chinese — the mechanism's language; an
+  English CLI layer is not implemented and would not touch mechanism words or ledger fields).
+- **New release tooling (Q11)**: `tools/extract_changelog_section.py` pulls a tag's section out of
+  `CHANGELOG.md`, and `.github/workflows/release.yml` creates the GitHub Release for a pushed
+  `v*` tag **from that section only**, idempotently (an existing release is never overwritten) and
+  failing loudly when the section is missing or too short — no empty releases.
+  `.github/CODEOWNERS` records the single owner explicitly.
+- Tests: `+9` (the bilingual checker plus its own drift-detection self-test, and the release
+  tooling: extraction, missing tag, too-short section, workflow wiring).
+
 ## v2.2.15 — the solidify edge becomes accountable (2026-09-17)
 
 - **The "application surface" of a capped sprout is no longer unmeasurable.** Caps used to occupy

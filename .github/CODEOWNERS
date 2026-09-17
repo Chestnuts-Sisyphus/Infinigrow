@@ -1,0 +1,9 @@
+# CODEOWNERS — who reviews what.
+#
+# Single-maintainer project today: every path has the same owner. The file exists so that the
+# rule is written down where GitHub enforces it (and so a future second owner is a one-line
+# change), not because review is currently distributed.
+#
+# Owner: Chestnuts-Sisyphus
+
+*       @Chestnuts-Sisyphus

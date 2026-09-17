@@ -1,0 +1,57 @@
+name: release
+
+# Q11：tag → Release 的自动化（此前是手工 `gh release create`）。
+# 纪律（与手工流程一致）：
+#   - **说明的单一来源是 `CHANGELOG.md`**：本工作流把该 tag 对应的那一节抽出来当 Release 正文；
+#     抽不到或太短 → **失败**，绝不发一条空壳 Release（宁可人工补，也不降级公开面）。
+#   - 已存在同名 Release → 什么都不做（幂等，不会覆盖手工写好的正文）。
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Extract the CHANGELOG section for this tag
+        id: notes
+        run: |
+          python tools/extract_changelog_section.py "${GITHUB_REF_NAME}" > /tmp/notes.md
+          python tools/extract_changelog_section.py "${GITHUB_REF_NAME}" --title > /tmp/title.txt
+          wc -c /tmp/notes.md && cat /tmp/title.txt
+
+      - name: Does the release already exist?
+        id: exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1; then
+            echo "found=yes" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create the release (only when missing)
+        if: steps.exists.outputs.found == 'no'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "$(cat /tmp/title.txt)" \
+            --notes-file /tmp/notes.md
+
+      - name: Report
+        run: |
+          echo "tag=${GITHUB_REF_NAME} existed=${{ steps.exists.outputs.found }}"

@@ -47,4 +47,33 @@ infinigrow version            # local version
 infinigrow version --check    # local vs. latest release (exit code 3 when behind)
 ```
 
+## Just tell me whether I am on the latest
+
+```bash
+infinigrow version --check      # local vs. latest release; behind → exit code 3
+```
+
+It reads only GitHub's public releases endpoint: **zero credentials**, zero writes. Offline or
+unreachable, it says `unknown` (rc 0) — it **never turns "I don't know" into "up to date"**.
+
+## Manual upgrade (what the entry point does)
+
+```bash
+cd <your Infinigrow directory>
+git fetch --tags
+git log --oneline HEAD..origin/main      # look at what differs first
+git pull --ff-only                       # a non-fast-forward fails — deal with local changes first
+python -m pip install -e .
+python -m infinigrow selftest && python -m infinigrow scan
+python -m infinigrow version --check     # confirm you are on the latest
+```
+
+## How to read a version number
+
+- The single source of truth is `__version__` in `src/infinigrow/__init__.py` and `version` in
+  `pyproject.toml`; if they disagree, `tests/test_version.py` stops it.
+- For the semantics and the v1/v2 generation split, see [`versioning.md`](versioning.md).
+- For what each version changed and its known limits, see [`CHANGELOG.md`](../CHANGELOG.md);
+  release bodies carry their own lists.
+
 Chinese original: [`zh/upgrading.md`](zh/upgrading.md).

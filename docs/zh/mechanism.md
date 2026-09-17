@@ -305,3 +305,44 @@
 由 `tools/check_prompt_code_sync.py` 双向校验；规则 **R9** 再守住**表的覆盖下限**
 （有人静默删词＝漂移面回来了）。这是 v1「同一件事两套规则并存」那个病根的
 **结构性防复发手段**。
+
+---
+
+## 术语表
+
+机制词的中英对照。这些词在**代码、提示词与账本**里都是标识符；**中文形是正本**
+（英文文档是它的说明书，见 `docs/mechanism.md` 的同一张表）。
+
+| 中文 | English | 含义 |
+|---|---|---|
+| 判读 | read | W→B 边：看懂现实 |
+| 行动 | act | B→W 边：让现实发生可查变化 |
+| 原理 | principle | B→B 边：推出新认知 |
+| 固化 | solidify | W→W 边：同一类输入不再烧认知 |
+| 成熟链 | maturity chain | 判读 → 行动 → 原理 → 固化，四步 |
+| 差异 | difference | 预测与现实对账出来的缺口 |
+| 预测内错 | predicted-wrong | 预期态变 ≠ 实际态变 |
+| 预测内对 | predicted-right | 预期 = 实际（被证实） |
+| 预测外发现 | unpredicted finding | 现实有、预测没提 |
+| 预测未执行 | not executed | 预测写了没做 |
+| 兑现账 | outcomes ledger | 每根被领做的芽一行 |
+| 兑现率 | redemption rate | 可对账样本里兑现的比例 |
+| 芽 | sprout | 一个可被独立消解的差异（工作单位） |
+| 芽源 | sprout source | 差异对账／成熟链封顶／能力库未用 |
+| 差异对账 | difference reconciliation | 芽源① |
+| 成熟链封顶 | maturity cap | 芽源②（到第 4 步） |
+| 能力库未用 | unused capability | 芽源③（库条目闲置） |
+| 零差异零芽 | no difference, no sprout | 芽经济的硬规则 |
+| 冻结区 | frozen zone | 被挤出的芽挂起的地方（不是删除） |
+| 重问 | re-ask | 冻结满年限后再问一次 |
+| 结案 | closure | 让提醒永久结束的出口 |
+| 生长主体 | growth subject | 引擎在长的那个目录 |
+| 目录对象 | directory object | `主体/<路径>/`，量＝文件数 |
+| 执行者 | executor | 动手的那一方（提示词经 stdin 进、stdout 出） |
+| 组织会话 | org session | 语义段：对账、提议、立 finding |
+| 域饱和 | domain saturation | 一个域 × 量只能有一根未完成芽 |
+| 轮转 | rotation | 旧账本行移进 `state/archive/` |
+| 定键补观测 | keyed supplemental reading | 补读被挤出观测面的预测键 |
+| 观察面 | observation surface | 机械可读事实的**有界**集合 |
+
+英文公开文档：`docs/mechanism.md`。

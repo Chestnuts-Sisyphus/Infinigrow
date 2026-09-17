@@ -37,6 +37,14 @@ Four steps for a premise change:
 3. the prompts (`prompts/`);
 4. the commands above, all green.
 
+**Five places move together**: the English public document, the Chinese design of record
+(`docs/zh/`), `prompts/`, the code, and `tests/`. `tests/test_mechanism_docs.py` and
+`tools/check_prompt_code_sync.py` catch a missing half; `tests/test_docs_bilingual.py` catches a
+structural drift between the languages — the **heading skeletons of `docs/*.md` and `docs/zh/*.md`
+must match position by position**, and `README.md` / `README.zh-CN.md` must match in sections *and*
+in the commands their code blocks run. Adding a section to one language alone fails the suite until
+the other side has its counterpart.
+
 **A single-sided change is drift**, and CI fails on it. That is deliberate: the previous generation
 of this project span in place because one rule was written in two places and the two evolved apart.
 

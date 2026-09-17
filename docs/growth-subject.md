@@ -73,15 +73,18 @@ mechanical date. The same sentence appears in the acting prompt, the org-session
 document, and `subject.valid_journal_name` is the mechanical test — a proposer cannot know a
 future file's creation tick, so proposals name the *directory*, never the file.
 
-## 6. Changing the subject
+## 6. What the subject has to do with the three sprout sources
 
-```bash
-export IG_SUBJECT_ROOT=/path/to/another/subject   # per instance, or in the config file
-infinigrow dry-run                                # print the resolved subject root (writes nothing)
-```
+| Source | Relation to the subject |
+|---|---|
+| ① difference reconciliation | the most common source (the subject changed unpredicted, or was predicted wrong) |
+| ② maturity cap | a subject object reached step 4 (solidified) → "what else can this be used for?" |
+| ③ unused capability | unrelated to the subject (it reads the capability-library ledger) |
 
-State and subject are independent: pointing at a new subject does not move the ledgers, and
-moving the state root does not touch the subject.
+"One unfinished sprout per domain × quantity" (domain saturation) bites most often on the
+subject: when two files under `主体/` are both wrong at once, only one sprout is filed and the
+rest are recorded as **absorbed** (the differences still enter the ledger, they just do not each
+get a sprout).
 
 ## 7. Reproducible checks
 
@@ -90,5 +93,18 @@ infinigrow dry-run                     # resolved config, subject root, executor
 infinigrow tick --probe                # one tick; observations carry the subject prefix
 python -m pytest tests/test_subject.py # paths, symmetry, directory objects, supplemental reads
 ```
+
+## 8. Changing the subject
+
+```bash
+export IG_SUBJECT_ROOT=/path/to/another/subject   # per instance, or in the config file
+infinigrow dry-run                                # print the resolved subject root (writes nothing)
+```
+
+State and subject are independent: pointing at a new subject does not move the ledgers, and
+moving the state root does not touch the subject. The honest way to switch subjects is to switch
+the **state root with it** (`IG_STATE_ROOT`) — the old ledgers (differences, outcomes, maturity
+chain) all describe the old subject's history, and letting them carry over would make the new
+subject inherit a past that is not its own.
 
 Chinese original: [`zh/growth-subject.md`](zh/growth-subject.md).

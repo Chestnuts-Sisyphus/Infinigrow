@@ -177,7 +177,10 @@ capability used?" cannot be, because no mechanical reading exists for it):
 - Active queue cap 50; beyond that the oldest move to the **frozen zone** (the queue is mutable,
   the ledgers are not).
 - One sprout may be led at most 3 times. A frozen sprout can be **re-lit** when its difference
-  reappears.
+  reappears. (A `long_task` exemption branch exists in the field set, **kept as reserved** and
+  deliberately not wired: there is no writer and no mechanical test for "what counts as a long
+  task", and the lead limit already prevents one sprout from hogging the slot. The field stays so
+  that old ledger rows still parse.)
 - **Re-asking frozen sprouts**: after `frozen_requestion_ticks` (default 300) without being
   re-lit, an object is no longer blocked by its frozen sprout — it may be asked again. The test
   uses the *newest* freeze of that object, so a backlog of old frozen sprouts cannot release a
@@ -262,6 +265,19 @@ sync, no self-sprout clause in prompts, state root gitignored, no credential lit
 single source for exit codes, a single write path, the sync table cannot be shrunk, and the
 scheduled task must use the hidden launcher. `infinigrow selftest` runs a positive and a
 negative case for every rule.
+
+---
+
+## 8. Same source as the prompts
+
+The mechanism vocabulary (read / act / principle / solidify / maturity chain / difference /
+outcomes ledger / maturity cap / unused capability / no difference no sprout / **growth subject /
+executor / org session / domain saturation / rotation**) must exist on **both** sides: the code
+and the prompts. The table lives in `src/infinigrow/rules/static_scan.py` (`SYNC_TERMS`, the
+single source of truth) and `tools/check_prompt_code_sync.py` checks it in both directions; rule
+**R9** guards the table's **lower bound** (silently deleting a term brings the drift back). This
+is the structural prevention for v1's root disease: the same rule written twice, each side
+evolving until they contradicted each other.
 
 ---
 

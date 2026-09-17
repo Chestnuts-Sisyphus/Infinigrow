@@ -11,8 +11,13 @@ Nothing here needs credentials unless *your* executor does.
 
 ## 1. The executor channel
 
-**Contract**: the prompt goes in on **stdin**, the answer comes out on **stdout**. One call is
-one chance to act.
+### 1. The contract
+
+The prompt goes in on **stdin**, the answer comes out on **stdout**. One call is one chance to
+act. Credentials are **not** the engine's business: put them in your own environment or in the
+executor script — the engine never stores, moves or echoes them.
+
+### 2. Wiring it up
 
 ```bash
 infinigrow tick --executor "your-command --flags"     # or set IG_EXECUTOR
@@ -20,6 +25,8 @@ infinigrow tick --executor "your-command --flags"     # or set IG_EXECUTOR
 
 No executor means a **mechanical tick**: zero tokens, zero credentials, no network, no
 subprocess. That is what CI runs and what you use to see the mechanism turn without paying for it.
+
+### 3. Environment variables the engine gives the executor
 
 | The engine sets | Value |
 |---|---|
@@ -30,8 +37,7 @@ subprocess. That is what CI runs and what you use to see the mechanism turn with
 | `IG_MODEL` | the model label from config (`IG_LLM_MODEL`), if set |
 | `PYTHONIOENCODING` | `utf-8` (so the prompt survives non-UTF-8 consoles) |
 
-Credentials are **not** the engine's business: put them in your own environment or in the
-executor script. The engine never stores, moves or echoes them.
+### 4. Failures must be visible (all four cases are recorded)
 
 Four failure modes are all recorded in `state/executor.jsonl` and counted separately from tick
 failures (non-zero exit / timeout / empty output / cannot start), because "the tick ran but
@@ -39,11 +45,13 @@ nothing acted" and "the tick did not run" are different illnesses. An executor m
 by printing a line `IG_USAGE {"input_tokens": 1234, "cost_usd": 0.01}`; without it the ledger
 stores `null` — the engine does not guess token counts from output length.
 
+### 5. Traces
+
 Every call leaves a trace in `state/traces/<kind>-<tick>.md` containing the prompt and the
 output verbatim. Traces are how the org session reads what actually happened (and how you debug
 a channel), so they are written even when the executor fails.
 
-### Try it without burning anything
+### 6. Dry run first (burn nothing)
 
 ```bash
 infinigrow dry-run                 # resolved config, subject root, executor — writes nothing
@@ -56,21 +64,58 @@ infinigrow org-status              # how the org session's findings turned out
 
 ## 2. Scheduling and watching
 
+### 1. One-click files
+
+| File | What it does |
+|---|---|
+| `tools/run_tick.bat` | one full run: **version gate → one tick → gardener** (locks, liveness, failure escalation, rotation) |
+| `tools/manage_scheduled_task.bat` | `install` / `status` / `uninstall` the scheduled task |
+| `tools/scheduled_task.ps1` | the actual registration logic (current user, no elevation) |
+| `tools/run_tick_hidden.vbs` | **the hidden launcher**: the task runs this, not the `.bat` |
+
+Double-clicking `tools/run_tick.bat` runs one tick; the scheduled task runs the same file.
+
+### 2. Hooking up a scheduled task (one tick every 10 minutes)
+
 ```bat
-tools\run_tick.bat                        :: version gate -> one tick -> gardener
-tools\manage_scheduled_task.bat install   :: register the task (every 10 minutes)
+tools\manage_scheduled_task.bat install
 tools\manage_scheduled_task.bat status
-tools\manage_scheduled_task.bat remove
 ```
 
-`IG_TICK_MINUTES` sets the interval. The task action is
-`wscript //nologo tools\run_tick_hidden.vbs`, which runs `run_tick.bat` with window style 0.
+- the interval comes from `IG_TICK_MINUTES` (default **10 minutes**, same as the `tick_minutes`
+  config key);
+- the task name is `Infinigrow_tick` by default (`IG_TASK_NAME` changes it);
+- **every run passes the version gate**: upgrade to the latest by default; if it cannot
+  (dirty tree / tick in flight / diverged / offline / self-test failed and rolled back) it
+  **runs the current version anyway** and prints why this run is not the latest — it never stops
+  the engine for being behind;
+- uninstall: `tools\manage_scheduled_task.bat uninstall` (**removes the task only** — state and
+  ledgers are untouched).
 
-**Why the hidden launcher is not optional**: Windows flashes a console window for a scheduled
-`.bat`, a bare `python`, or any child process that allocates a console. A window that steals
-focus every ten minutes is unusable on a machine someone is working on. (`-Hidden` in the task
-settings only hides the *task entry*, not the window.) Rule **R10** and
-`tests/test_scheduler_artifacts.py` keep this in place.
+### 2.5 Why not schedule the `.bat` directly (**do not remove this layer**)
+
+Letting the task run the `.bat` (or `cmd`, or a bare `python`) **flashes a console window on every
+run** — it steals focus and covers whatever the person at the machine is looking at.
+`run_tick_hidden.vbs` hides it with WSH window style 0, so the task action is
+`wscript.exe //nologo …run_tick_hidden.vbs`. Note that `New-ScheduledTaskSettingsSet -Hidden`
+hides the *task entry* in the list, **not the window** — do not mix the two up.
+
+(Same family of lessons: keep `.bat`/`.vbs` **pure ASCII** — cmd and wscript read scripts in the
+system code page and non-ASCII comments break parsing; use `pythonw.exe` for windowless Python.)
+
+### 3. Watching (the gardener does it in passing)
+
+| Check | Criterion | Consequence |
+|---|---|---|
+| dead lock | lock file mtime older than 15 minutes | the stale lock is cleared |
+| stalled | last tick's **mechanical timestamp** older than 12 hours | fatal flag (`state/ALERT.md`) |
+| tick failures | 3 consecutive | fatal flag |
+| executor failures | 3 consecutive | fatal flag (with the last rc) |
+| bad ledger lines | unparseable lines > 0 | fatal flag |
+| ledger rotation | ledger bytes ≥ `rotate_max_bytes` | rotation (move-only) |
+
+A human only needs one file: **`state/ALERT.md`** — with a fatal flag it says "someone should
+look" plus the reasons; without one it says the engine is fine plus the last tick's time.
 
 The gardener runs at the end of every scheduled tick (and standalone):
 
@@ -78,28 +123,72 @@ The gardener runs at the end of every scheduled tick (and standalone):
 infinigrow gardener     # stale locks, liveness, failure escalation, ledger/frozen-zone rotation
 ```
 
-It writes `state/ALERT.md` — the single human-facing alert surface. No fatal flag means one line
-saying the engine is fine.
+### 4. Logs
 
-## 3. Watching a long run
+`run_tick.bat` appends every step to `state/logs/tick.log` (inside the state root, so it moves
+with the state).
 
-```bash
-infinigrow status                     # tick, subject, queue composition, redemption, ALERT, today's usage
-infinigrow tick --json | jq .         # machine-readable result of one tick
-ls state/reconcile/ | tail            # one report file per tick (named by tick number)
-```
-
-Healthy is not "rc=0 and ALERT is normal". Look at the *composition*: what the queue is made of,
-which sprout sources are producing, and whether the source you care about is being picked. The
-`status` command prints the queue's origin distribution for exactly this reason.
-
-## 4. Pausing
+### 5. Troubleshooting order (outside in)
 
 ```bash
-infinigrow pause      # disables the scheduled task (state is untouched)
-infinigrow resume     # re-enables it
+python -m infinigrow dry-run        # are config/subject/executor what you think they are?
+python -m infinigrow tick --json    # run one tick: rc, differences, report name
+python -m infinigrow gardener       # one health pass (writes ALERT.md) and prints its JSON
+cat state/ALERT.md                  # the human-facing surface
+cat state/tick_status.json          # heartbeat: tick / timestamp / failures / engine identity
+tail state/executor.jsonl           # executor call ledger (rc / duration / output size / usage)
+python -m infinigrow org-status     # how the org session's findings turned out
 ```
 
-Or disable the task in the Windows Task Scheduler. Pausing never touches ledgers or the subject.
+---
+
+## 3. Cost and usage (only meaningful once an executor is attached)
+
+| Fact | Where to see it |
+|---|---|
+| the engine itself | **zero tokens**: mechanical ticks, the gardener, rule scans, reconciliation and bookkeeping burn no cognition |
+| the executor | usage is self-reported (one `IG_USAGE` line); the engine records, it does not guess |
+| redemption rate | the "redemption" section of `state/reconcile/reconcile-*.md`: with no executor acting it says **"no samples"** — not 0, not "bad" |
+
+The denominator counts only ticks where an **executor acted** (`sample=true`): a mechanical
+tick's "failure to redeem" does not mean the capability is bad — it means no hand was moving.
+
+## 4. One-screen status and pause/resume
+
+```bash
+python -m infinigrow status      # tick / subject file count / queue / redemption / ALERT line / today's tokens
+python -m infinigrow pause       # disable the scheduled task (**does not delete** it; resume works)
+python -m infinigrow resume      # re-enable it
+```
+
+`pause`/`resume` only toggle the task's Enabled state
+(`Disable-ScheduledTask`/`Enable-ScheduledTask`) — they **never delete the task or touch the
+ledgers**. On non-Windows they report "environment not satisfied" (rc=4) instead of pretending to
+succeed. The token count in `status` only sums what executors **self-reported** (`IG_USAGE`) —
+without it, it says "not estimable"; the engine never passes output length off as tokens.
+
+## 5. Local deployment reference (private part; **never put credentials in the repo**)
+
+The engine runs with zero configuration; making it actually act, on schedule, takes four things:
+
+1. **an executor adapter** (a private script, outside the repo): reads *your* credential source
+   (read-only, through environment variables, never written to disk or echoed), feeds the engine's
+   prompt (stdin) to your model, returns stdout verbatim, and prints one `IG_USAGE {…}` line on
+   success. The contract is section 1 of this document. The engine **hard-codes no vendor**:
+   which model you use is decided by `IG_EXECUTOR`.
+2. **user-level environment variables**: `IG_EXECUTOR` (the adapter command),
+   `IG_EXECUTOR_TIMEOUT_S` (timeout), plus whatever model-tier variables your adapter needs
+   (for example `IG_MUSE_EFFORT=low`).
+3. **a scheduled task**: `tools\manage_scheduled_task.bat install` or
+   `tools\scheduled_task.ps1 -Action install` (one tick every 10 minutes; the action is the
+   **hidden launcher**, see §2.5 — do not schedule the `.bat` directly). To change the frequency:
+   `IG_TICK_MINUTES`.
+4. **a growth subject**: by default a sibling of the repo (`<repo name>-subject`); switching it
+   means changing `IG_SUBJECT_ROOT` **together with `IG_STATE_ROOT`** (old ledgers describe the
+   old subject — see [`growth-subject.md`](growth-subject.md)).
+
+Self-check: `python <your adapter> --selftest` (if it has one) should print an "online" kind of
+answer; `python -m infinigrow status` should show the tick number advancing over time and
+`ALERT.md`'s first line saying the engine is fine. For the troubleshooting order, see §2.5.
 
 Chinese original: [`zh/running.md`](zh/running.md).
