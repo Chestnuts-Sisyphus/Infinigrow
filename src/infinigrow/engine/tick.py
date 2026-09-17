@@ -720,7 +720,9 @@ def _make_runner(settings: Settings, layout: StateLayout, subject_root: Path, ti
 # --------------------------------------------------------------------- 报告
 def _redemption_lines(layout: StateLayout,
                       known_objects: Optional[Sequence[str]] = None,
-                      subject_root: Optional[Path] = None) -> list[str]:
+                      subject_root: Optional[Path] = None,
+                      frozen_cap: Optional[int] = None,
+                      requestion_ticks: int = 300) -> list[str]:
     """兑现率段（**诚实呈现**：无样本就说无样本，不说 0，不说「差」）。"""
     report = redemption_report(read_jsonl(layout.outcome_ledger))
     lines = ["## 兑现率（现算，不存缓存）", "",
@@ -743,7 +745,8 @@ def _redemption_lines(layout: StateLayout,
         tick_now = int(read_tick_status(layout).get("tick") or 0)
     except (OSError, ValueError, json.JSONDecodeError):
         tick_now = 0
-    pool = library_pool_summary(library_entries(read_jsonl(layout.library)), tick_now,
+    lib_entries = library_entries(read_jsonl(layout.library))
+    pool = library_pool_summary(lib_entries, tick_now,
                                 known_objects=known_objects or ())
     lines.append("- 能力库候选池：未结案且未消费 %d 条／已结案 %d 条／已消费 %d 条"
                  "（总 %d 条；本可出芽 %d，重问冷却挡 %d／未到闲置阈值 %d）"
@@ -770,6 +773,26 @@ def _redemption_lines(layout: StateLayout,
         lines.append("- 执行者侧损耗（近 %d 拍）：回退 %d/%d 份留痕%s"
                      % (loss["窗口"], loss["回退"], loss["留痕"],
                         "＝%.2f" % r if r is not None else ""))
+    # S1/A5（v2.2.23）：两个时间闸读数——报告是归档件，长窗口分析要带全读数。
+    # 与 `status` **同源函数**：容量行数＝冻结账本行数（`frozen_cap − 行数`）；
+    # 重问闸走 `frozen_requestion_eta`（引擎口径：候选池 ∩ 不活跃 ∩ 冻满年限；
+    # 活跃集＝sprouts.jsonl 的芽对象，与 status 同一口径，不是 known_objects）。
+    if frozen_cap is not None:
+        frozen_n = len(read_jsonl(layout.frozen_sprouts))
+        lines.append("- 冻结区容量闸：%d 行／上限 %d（剩 %d 行）"
+                     % (frozen_n, frozen_cap, max(0, frozen_cap - frozen_n)))
+    from .sprout_sources import frozen_requestion_eta
+    eta = frozen_requestion_eta(lib_entries, read_jsonl(layout.frozen_sprouts),
+                                (str(r.get("obj") or "") for r in
+                                 read_jsonl(layout.sprouts)),
+                                tick_now, requestion_ticks)
+    if eta["最早可重问拍"] is None:
+        lines.append("- 重问闸：暂无候选池条目到重问年限（冻结待重问 %d）"
+                     % eta["冻结待重问"])
+    else:
+        lines.append("- 重问闸：最早可重问拍 %d（%s，冻结于 %d；还差 %d 拍）"
+                     % (eta["最早可重问拍"], eta["最早可重问对象"],
+                        eta["该对象冻结于"], eta["还差拍数"]))
     return lines
 
 
@@ -784,7 +807,9 @@ def _short_names(names: Optional[Sequence[str]], limit: int = 6) -> str:
 
 def write_reconcile_report(layout: StateLayout, result: TickResult,
                            known_objects: Optional[Iterable[str]] = None,
-                           subject_root: Optional[Path] = None) -> Path:
+                           subject_root: Optional[Path] = None,
+                           frozen_cap: Optional[int] = None,
+                           requestion_ticks: int = 300) -> Path:
     """写对账报告：**文件名带拍号**（同拍重跑＝同一个文件，不会互相覆盖）。"""
     from ..core.build_info import engine_label
     path = layout.reconcile_dir / ("reconcile-%05d.md" % result.tick)
@@ -819,7 +844,8 @@ def write_reconcile_report(layout: StateLayout, result: TickResult,
         lines += ["- %s" % f for f in result.org["findings"]] + [""]
     if result.new_sprouts:
         lines += ["## 本拍新生芽", ""] + ["- `%s`" % s for s in result.new_sprouts] + [""]
-    lines += _redemption_lines(layout, known_objects, subject_root=subject_root)
+    lines += _redemption_lines(layout, known_objects, subject_root=subject_root,
+                               frozen_cap=frozen_cap, requestion_ticks=requestion_ticks)
     if result.outcomes:
         lines += ["", "## 兑现判定（本拍领过的芽）", ""] + [
             "- `%s` 预测边=%s 实际边=%s → %s%s%s"
@@ -1226,7 +1252,8 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
     report = write_reconcile_report(
         layout, result,
         known_objects=queue.known_objects(tick, cfg.frozen_requestion_ticks),
-        subject_root=subject_root)
+        subject_root=subject_root,
+        frozen_cap=cfg.frozen_cap, requestion_ticks=cfg.frozen_requestion_ticks)
     result.notes.append("对账报告：%s" % report.name)
 
     # 组织段到期提示：**拍循环自己查判据**，不把「该看语义层了」留给外部调度器。

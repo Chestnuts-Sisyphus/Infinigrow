@@ -190,7 +190,7 @@ python -m infinigrow org-status     # 组织会话发现的结局（待验/被�
 ## 四、一键总览与暂停/恢复（T8/A15）
 
 ```bash
-python -m infinigrow status      # 拍号/主体文件数/队列/兑现率判定/ALERT 首行/今日 token
+python -m infinigrow status      # 拍号/主体文件数/队列/容量闸+重问闸/合规率/执行者损耗/用量分账/ALERT 首行/今日 token
 python -m infinigrow pause       # 停计划任务（**不删**；任务仍在，可 resume）
 python -m infinigrow resume      # 恢复计划任务
 ```

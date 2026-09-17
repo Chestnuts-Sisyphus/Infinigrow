@@ -156,7 +156,7 @@ tick's "failure to redeem" does not mean the capability is bad — it means no h
 ## 4. One-screen status and pause/resume
 
 ```bash
-python -m infinigrow status      # tick / subject file count / queue / redemption / ALERT line / today's tokens
+python -m infinigrow status      # tick / subject files / queue / capacity+re-ask gates / compliance / executor-side loss / usage split / ALERT line / today's tokens
 python -m infinigrow pause       # disable the scheduled task (**does not delete** it; resume works)
 python -m infinigrow resume      # re-enable it
 ```

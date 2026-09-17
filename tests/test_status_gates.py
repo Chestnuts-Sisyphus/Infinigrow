@@ -210,7 +210,11 @@ def test_status_shows_executor_side_loss_line(tmp_path, capsys):
 
 # --------------------------------------------------------------- R9/E5：用量按芽源分账
 def test_usage_split_buckets_tokens_by_sprout_source(tmp_path, capsys):
-    """R9：join 键＝拍号——同一拍的调用归到那拍领做的芽源；无题与未报单列不摊派。"""
+    """R9：join 键＝拍号——同一拍的调用归到那拍领做的芽源；无题与未报单列不摊派。
+
+    S1/A4（v2.2.23）：组织会话（kind=org-session，不领芽）独立一桶入分账——
+    各桶次之和＝「今日执行者调用」总数，分账不许丢调用。
+    """
     import datetime as dt
     state = tmp_path / "state"
     state.mkdir()
@@ -223,7 +227,7 @@ def test_usage_split_buckets_tokens_by_sprout_source(tmp_path, capsys):
         {"tick": 12, "kind": "tick", "rc": 1, "usage": "unknown",
          "time": today + " 10:20:00"},                       # 无题拍：没领到芽
         {"tick": 11, "kind": "org-session", "rc": 0, "usage": {"total_tokens": 777},
-         "time": today + " 10:11:00"},                        # 组织会话不并入 tick 分账
+         "time": today + " 10:11:00"},                        # 组织会话＝独立桶
     ])
     _write(state, "outcomes.jsonl", [
         {"sprout_id": "cap0010-001-x", "tick": 10, "redeemed": True, "sample": True,
@@ -242,3 +246,10 @@ def test_usage_split_buckets_tokens_by_sprout_source(tmp_path, capsys):
     assert "cap 1 次／1000 token" in out
     assert "sp 1 次／500 token" in out
     assert "（无题） 1 次／0 token（未报 1）" in out
+    assert "组织会话 1 次／777 token" in out
+    # S1/A4 验收：各桶次之和＝今日执行者调用总数（4 次＝3 tick＋1 org-session）
+    assert "今日执行者调用：4 次" in out
+    import re
+    bucket_times = sum(int(m.group(1)) for m in
+                       re.finditer(r"(?:cap|sp|lib|组织会话|（无题）) (\d+) 次", out))
+    assert bucket_times == 4

@@ -547,3 +547,42 @@ def test_executor_output_marks_library_entry_as_used(tmp_path, settings):
             and r.get("usage_pointer")]
     assert used and used[0]["last_used_tick"] == 3 and used[0]["source"] == "trace"
     assert sprout.id in result.library.get("retired_by_consumption", [])
+
+
+def test_reconcile_report_carries_gate_readings(tmp_path, settings):
+    """S1/A5（v2.2.23）：对账报告必须带两个时间闸读数，与 `status` **同源函数**。
+
+    - 容量闸：冻结账本行数／上限（frozen_cap）／剩行数；
+    - 重问闸：候选池 ∩ 不活跃 ∩ 冻满年限的**最早可重问拍**（引擎口径；无条目写「暂无」）。
+    """
+    layout = resolve_state(settings.state_root, settings.repo_root, create=True)
+
+    def _write(name, rows):
+        (layout.root / name).write_text(
+            "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n",
+            encoding="utf-8")
+
+    # 活跃芽（对象 x 在队列）＋ 冻结芽（对象 y 冻结于 1）＋ 库条目 y（未结案未消费）
+    _write("sprouts.jsonl", [{
+        "id": "sp0001-001-主体_x", "obj": "主体/x.md", "dimension": "存在性",
+        "predicted_edge": "判读", "origin": "差异对账", "created_tick": 1,
+        "last_lead_tick": 1, "leads": 1, "long_task": False,
+        "maturity_step": None, "frozen_tick": None, "pointer": "p",
+        "expected_value": None}])
+    _write("sprouts-frozen.jsonl", [{
+        "id": "sp0001-002-主体_y", "obj": "主体/y.md", "dimension": "存在性",
+        "predicted_edge": "判读", "origin": "差异对账", "created_tick": 1,
+        "last_lead_tick": 1, "leads": 1, "long_task": False,
+        "maturity_step": None, "frozen_tick": 1, "pointer": "p",
+        "expected_value": None}])
+    _write("library.jsonl", [{"name": "主体/y.md", "created_tick": 1,
+                              "last_used_tick": 1, "source": "maturity-cap"}])
+    res = run_tick(settings=settings)
+    assert res.rc == 0
+    report = (layout.reconcile_dir / ("reconcile-%05d.md" % res.tick)).read_text(encoding="utf-8")
+    assert "冻结区容量闸：1 行／上限 5000（剩 4999 行）" in report
+    # 「还差」依赖写报告那一刻的心跳拍号（拍中 vs 拍后差一拍），只钉 ETA 与对象
+    import re
+    assert re.search(r"重问闸：最早可重问拍 301（主体/y\.md，冻结于 1；还差 \d+ 拍）",
+                     report)
+    assert "重问闸：暂无候选池条目到重问年限" not in report

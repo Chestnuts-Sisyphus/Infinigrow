@@ -6,6 +6,20 @@ The long-form reasoning behind each entry (incident, measurement, decision) live
 documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals in
 [`docs/zh/`](docs/zh/).
 
+## v2.2.23 — the ledger split no longer drops ticks, and the report carries the gate readings (2026-09-18)
+
+- **The usage split now covers every call made today** (S1/A4): org-session calls
+  (`kind=org-session`) used to be filtered out, so the bucket sums fell short of the
+  "calls today" total — a report that silently drops a call. They now form their own
+  `组织会话` bucket; the bucket sum always equals the day's call total (test-pinned).
+- **The reconcile report carries the two time-gate readings** (S1/A5): the frozen-capacity
+  line count / remaining rows, and the earliest re-ask tick — rendered by the *same*
+  functions `status` uses (`frozen_requestion_eta`, the frozen ledger row count), so the
+  archived report and the live status can never disagree about how far away the gates are.
+- **The bilingual running guide's `status` line names all five new readings** (S2/D1):
+  `docs/running.md` and `docs/zh/running.md` now list capacity gate, re-ask gate,
+  compliance, executor-side loss and the usage split in the one-line summary.
+
 ## v2.2.22 — executor-side loss and token spend are both visible (2026-09-17)
 
 - **`status` and the reconcile report report executor-side loss** (R2/N69): of the last 10

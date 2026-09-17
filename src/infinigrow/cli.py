@@ -339,14 +339,15 @@ def _print_usage_split(layout) -> None:
     `executor.jsonl` 的调用行与 `outcomes.jsonl` 的领做行按 tick 对齐（同一拍最多领
     一根芽，是对齐不是近似）；对不上的调用单列「（无题）」，不摊派到任何芽源头上。
     未自报用量的调用单列，不拿输出长度冒充 token（与 `_print_usage_line` 同一纪律）。
+    **S1/A4（v2.2.23）**：组织会话（`kind=org-session`，不领芽）独立一桶——各桶次之和
+    ＝「今日执行者调用」总数，分账不许丢调用（报数不许丢的纪律）。
     """
     from .ledger.store import read_jsonl as _read
     from .engine.reconcile import sprout_prefix
     import datetime as _dt
     today = _dt.date.today().isoformat()
     calls = [r for r in _read(layout.executor_ledger)
-             if str(r.get("time", "")).startswith(today)
-             and str(r.get("kind") or "tick") == "tick"]
+             if str(r.get("time", "")).startswith(today)]
     if not calls:
         return
     topic: dict[int, str] = {}
@@ -357,10 +358,14 @@ def _print_usage_split(layout) -> None:
             continue
     buckets: dict[str, dict] = {}
     for r in calls:
-        try:
-            src = topic.get(int(r.get("tick")), "（无题）")
-        except (TypeError, ValueError):
-            src = "（无题）"
+        kind = str(r.get("kind") or "tick")
+        if kind != "tick":
+            src = "组织会话" if kind == "org-session" else kind
+        else:
+            try:
+                src = topic.get(int(r.get("tick")), "（无题）")
+            except (TypeError, ValueError):
+                src = "（无题）"
         b = buckets.setdefault(src, {"次": 0, "token": 0, "未报": 0})
         b["次"] += 1
         usage = r.get("usage")
