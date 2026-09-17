@@ -262,6 +262,31 @@ that tick's prompt, and reconciles the file's **existence**:
 - a tick that leaves no evidence file is judged "readable but absent" — **not done**, not
   "unreadable".
 
+**The read edge and the availability edge are now accountable too, through a "trace mention"**
+(R1/A1, A2):
+
+- the same shape of problem: a difference-source **read (READ) edge** (reality produced
+  something unpredicted → understand it first) points at a journal file that appeared
+  unexpectedly — by the tick it is led, it has already rolled out of the "most recent N by
+  mtime" observation window (`SUBJECT_FILE_LIMIT`), so its `(object, dimension)` key is absent
+  from `observable_keys` → honestly marked `verifiable=false` and **never resolvable**
+  (measured: 8 of 9 in the last 30 ticks, while still holding topic slots); the capability
+  library "availability" edge (`lib*`) suffers the same way (all 179 historical rows
+  unverifiable);
+- the fix (no new files): the redemption verdict now reads the **literal mention of the
+  source object** in that tick's executor output (full name `主体/<relative path>` or the
+  subject-relative form `<relative path>`; directory objects require the full name) — the
+  **same output text and the same matching predicate** as M3 "a trace hit means it was used"
+  (`entry_mentioned`);
+- **a miss is mechanically decidable**: `verifiable` is always `true` for these edges, and a
+  missing mention is recorded as a failure (readable yet no written trace = "not done", not
+  "unreadable" — isomorphic to the solidify-edge evidence file). It judges the **mechanical
+  fact** "was read and written down", not the **semantic fact** "was understood" (semantics
+  belong to the org session); the verdict input contains **only the output section** (never
+  the prompt — the prompt names the object, counting it would be self-certification);
+- every tick's prompt states this verdict (symmetric with the cap-sprout clause, so the
+  executor never has to guess).
+
 **Rotation** moves history into `state/archive/` (move-only). History-shaped ledgers keep the
 tail N lines; state-shaped ledgers (maturity, library) keep the **latest line per key**, so an
 object that has not been touched in a while cannot silently regress. Archives are searchable

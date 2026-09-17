@@ -380,6 +380,12 @@ def _cmd_status(settings) -> int:
           % (eligible, s["active"] + s["frozen"], s["active"], s["frozen"],
              json.dumps(s["by_origin"], ensure_ascii=False)))
 
+    # R5/A3：冻结区容量闸的「到点感」——剩余行数（`frozen_cap − 现有行数`）。
+    # 此前闸从未触发过但也没有读数，看不到「还有多远」。冻结行数＝账本行数（追加型）。
+    left = max(0, settings.frozen_cap - int(s["frozen"] or 0))
+    print("  冻结区容量闸：%d 行／上限 %d（剩 %d 行）"
+          % (int(s["frozen"] or 0), settings.frozen_cap, left))
+
     report = redemption_report(read_jsonl(layout.outcome_ledger))
     rate = report.get("兑现率")
     print("  兑现率：%s（样本 %d 条；%s）"
@@ -402,16 +408,41 @@ def _cmd_status(settings) -> int:
 
     # N62/A8：能力库候选池组成——渠道静默是**预期**（池已空）还是**故障**（池有货却不出芽），
     # 这两种状态在状态面上必须能分开；此前没有任何读数说明这件事。
-    from .engine.sprout_sources import library_entries, library_pool_summary
+    from .engine.sprout_sources import (app_evidence_compliance, frozen_requestion_eta,
+                                        library_entries, library_pool_summary)
     tick_now = int(status.get("tick") or 0)
-    pool = library_pool_summary(library_entries(read_jsonl(layout.library)), tick_now,
-                                known_objects=queue.known_objects(
-                                    tick_now, settings.frozen_requestion_ticks))
+    lib_entries = library_entries(read_jsonl(layout.library))
+    known_objects = queue.known_objects(tick_now, settings.frozen_requestion_ticks)
+    pool = library_pool_summary(lib_entries, tick_now, known_objects=known_objects)
     print("  能力库候选池：未结案且未消费 %d 条／已结案 %d 条／已消费 %d 条"
           "（本可出芽 %d；重问冷却挡 %d／未到闲置阈值 %d）"
           % (pool["未结案未消费"], pool["已结案"], pool["已消费"],
              pool["本可出芽"], pool["重问冷却中"], pool["未到闲置阈值"]))
     print("  能力库渠道判定：%s" % pool["判定"])
+
+    # R5/A4：重问闸的最早可重问拍（引擎口径：只数候选池里的条目、只数已冻结满年限的）。
+    # 注意「活跃」＝sprouts.jsonl 的芽对象集（不是 `known_objects`——后者把未满年限的
+    # 冻结芽也计入，会把闸判成永不响；与观测层 drill ④ 同源口径）。
+    eta = frozen_requestion_eta(lib_entries, read_jsonl(layout.frozen_sprouts),
+                                (str(s.obj) for s in queue.sprouts), tick_now,
+                                settings.frozen_requestion_ticks)
+    if eta["最早可重问拍"] is None:
+        print("  重问闸：暂无候选池条目到重问年限（冻结待重问 %d）" % eta["冻结待重问"])
+    else:
+        print("  重问闸：最早可重问拍 %d（%s，冻结于 %d；还差 %d 拍）"
+              % (eta["最早可重问拍"], eta["最早可重问对象"], eta["该对象冻结于"],
+                 eta["还差拍数"]))
+
+    # R8/A9：证据件合规率——窗口内 cap 领做行里，证据件真实存在的比例。
+    # 此前只能人肉数 `app/` 目录；现在与账本行在同一路径函数上对账。
+    subject_path = settings.subject_path()
+    if subject_path.is_dir():
+        comp = app_evidence_compliance(read_jsonl(layout.outcome_ledger),
+                                       subject_path, tick_now - 30)
+        if comp["cap 领做"]:
+            suffix = ("（缺失：%s）" % "、".join(comp["缺失样例"])) if comp["缺失样例"] else ""
+            print("  证据件合规率（近 30 拍 cap 领做）：%d/%d = %.2f%s"
+                  % (comp["证据件存在"], comp["cap 领做"], comp["合规率"], suffix))
 
     alert_line = "（无 ALERT.md）"
     alert_path = layout.root / "ALERT.md"

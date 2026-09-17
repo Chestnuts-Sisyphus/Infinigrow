@@ -27,6 +27,7 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
 from .model import (COUNT_DIMENSIONS, Diff, DiffKind, Edge, MATURITY_CAP, Sprout,
@@ -120,6 +121,24 @@ APP_EVIDENCE_DIR = "app"
 APP_EDGE_DIMENSION = "应用面"
 
 
+def app_evidence_path(obj: str, tick: int) -> str:
+    """证据件相对路径的**纯函数**：`app/<拍号4位>-<对象名>.md`（对象名按 Q2 约定清洗）。
+
+    与 `app_evidence_relpath` 同源（后者就是包一层芽对象转字符串）；单独提出来是给
+    R8/A9 的**合规率**读数用的——它只有账本行（`outcomes.jsonl` 的 `obj`＋`tick`），
+    没有芽对象，但路径必须和引擎当初给执行者的**同一个**，读数才可对账。
+    """
+    obj = str(obj or "")
+    if obj.startswith(SUBJECT_PREFIX):
+        obj = obj[len(SUBJECT_PREFIX):]
+    safe = obj.replace("\\", "/").strip("/").replace("/", "_")
+    if not safe:
+        safe = "主体"
+    if not safe.endswith(".md"):
+        safe += ".md"
+    return "%s/%04d-%s" % (APP_EVIDENCE_DIR, tick, safe)
+
+
 def app_evidence_relpath(sprout: Sprout, tick: int) -> str:
     """固化边（cap 芽）本拍的**应用证据件相对路径**：`app/<拍号4位>-<对象名>.md`。
 
@@ -137,15 +156,70 @@ def app_evidence_relpath(sprout: Sprout, tick: int) -> str:
     例：芽 `cap0380-001-主体_journal_0376-20260916`、领做拍 438 →
     `app/0438-journal_0376-20260916.md`。
     """
-    obj = str(sprout.obj or "")
-    if obj.startswith(SUBJECT_PREFIX):
-        obj = obj[len(SUBJECT_PREFIX):]
-    safe = obj.replace("\\", "/").strip("/").replace("/", "_")
-    if not safe:
-        safe = "主体"
-    if not safe.endswith(".md"):
-        safe += ".md"
-    return "%s/%04d-%s" % (APP_EVIDENCE_DIR, tick, safe)
+    return app_evidence_path(str(sprout.obj or ""), tick)
+
+
+def app_evidence_compliance(rows: Sequence[dict], subject_root, tick_from: int = 0) -> dict:
+    """**证据件合规率**（R8/A9）：窗口内 cap 领做行里，真有证据件的比例。
+
+    此前只能人肉数 `app/` 目录（且对不上账本行）；这条读数把「应有证据件的行」与
+    「证据件真实存在」在**同一个路径函数**（`app_evidence_path`）上对账：
+    存在＝这一手应用真的落地了（与 Q2 的证据边同一口径；只按存在性判，不看内容——
+    内容质量归语义层）。缺失样例最多列 5 份，报告可复核。
+    """
+    base = Path(subject_root)
+    total = present = 0
+    missing: list[str] = []
+    for rec in rows:
+        if not str(rec.get("sprout_id") or "").startswith("cap"):
+            continue
+        try:
+            t = int(rec.get("tick"))
+        except (TypeError, ValueError):
+            continue
+        if t < tick_from:
+            continue
+        rel = app_evidence_path(str(rec.get("obj") or ""), t)
+        total += 1
+        if (base / rel).is_file():
+            present += 1
+        else:
+            missing.append(rel)
+    return {"窗口起拍": tick_from, "cap 领做": total, "证据件存在": present,
+            "合规率": (present / total) if total else None, "缺失样例": missing[:5]}
+
+
+def frozen_requestion_eta(entries, frozen_rows: Sequence[dict], active_objs: Iterable[str],
+                          tick: int, requestion_ticks: int = 300) -> dict:
+    """重问闸的**最早可重问拍**（R5/A4，引擎口径；与观测层 drill ④ 同源）。
+
+    闸只对**候选池里的条目**会响：候选池＝库账本里**未结案且未消费**的条目；
+    池内某对象**不在活跃队列**、且它最新一根冻结芽已冻满 `requestion_ticks` 拍 →
+    那一刻它才从去重闸（M1「挂起≠死亡」）里放出来、可以重新立芽。
+    返回最早那一拍（含对象与冻结拍，可复核）。池里没有「冻结且不活跃」的条目 →
+    返回 `最早可重问拍=None`（这一刻闸不会响——不是 0，不是「还差 0」的假警报）。
+    """
+    active = set(active_objs or ())
+    newest: dict[str, int] = {}
+    for rec in frozen_rows:
+        at = rec.get("frozen_tick")
+        if at is None:
+            at = rec.get("created_tick") or 0
+        obj = str(rec.get("obj") or "")
+        if obj:
+            newest[obj] = max(newest.get(obj, at), at)
+    open_rows = [e for e in entries.values()
+                 if e.get("closed_tick") is None
+                 and int(e.get("last_used_tick") or 0) <= int(e.get("created_tick") or 0)]
+    blocked = sorted((newest[e["name"]] + requestion_ticks, e["name"], newest[e["name"]])
+                     for e in open_rows
+                     if e["name"] not in active and e["name"] in newest)
+    if not blocked:
+        return {"冻结待重问": 0, "最早可重问对象": None, "该对象冻结于": None,
+                "最早可重问拍": None, "还差拍数": None}
+    first, who, at = blocked[0]
+    return {"冻结待重问": len(blocked), "最早可重问对象": who, "该对象冻结于": at,
+            "最早可重问拍": first, "还差拍数": max(0, first - int(tick or 0))}
 
 
 def app_evidence_object(sprout: Sprout, tick: int) -> str:

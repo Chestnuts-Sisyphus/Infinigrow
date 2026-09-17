@@ -45,7 +45,7 @@ from ..ledger.store import (LedgerError, append_jsonl, create_exclusive, read_js
 from . import sprout_sources
 from . import subject as subject_mod
 from .domain_saturation import DomainState, value_at_freeze
-from .model import (Diff, DiffKind, MATURITY_CAP, Observation, OutcomeRecord,
+from .model import (Diff, DiffKind, Edge, MATURITY_CAP, Observation, OutcomeRecord,
                     Prediction, Sprout, SproutOrigin, parse_delta)
 from .org_trigger import should_run_org_session
 from .reconcile import diff_summary, pending_pointer, reconcile, redemption_report
@@ -335,10 +335,25 @@ def record_maturity(layout: StateLayout, obj: str, tick: int,
     return new_step, capped_now
 
 
+def _reader_edge(sprout: Sprout) -> bool:
+    """这根芽的兑现靠**留痕字面命中**判（R1/A1、A2）：判读边（READ）与能力库「可用性」边。
+
+    - 判读边＝差异源 `判读` 芽（`predicted_edge == READ`）：现实给了新东西而没预测到，
+      先看懂它——「看懂」的机械判据只能是执行者**读并留下了文字**；
+    - 能力库「可用性」边＝`lib*` 芽（`origin == LIBRARY_UNUSED`）：问「为何未用／在别域
+      是否成立」，答复＝输出里对条目名的点名（M3「留痕命中＝已用」同源同判据）。
+
+    两条边都不在这两类里 → 用老判据（`observable_keys`），行为与从前完全一致。
+    """
+    return (sprout.predicted_edge == Edge.READ
+            or sprout.origin == SproutOrigin.LIBRARY_UNUSED)
+
+
 def evaluate_outcome(sprout: Sprout, diffs: Sequence[Diff], tick: int,
                      sampled: bool = True,
                      observable_keys: Optional[Sequence[tuple[str, str]]] = None,
                      evidence_key: Optional[tuple[str, str]] = None,
+                     reader_text: Optional[str] = None,
                      ) -> OutcomeRecord:
     """领做后的兑现判定（机械）：该对象该维度的差异真消＝兑现；仍错＝打脸。
 
@@ -350,7 +365,17 @@ def evaluate_outcome(sprout: Sprout, diffs: Sequence[Diff], tick: int,
     本身读不到，过去只能记 `verifiable=False`（累计 160 次领做、0 条可对账）。
     给了证据键，这条边就有了机械形态——**证据件存在＝这一手应用真的发生了**：
     兑现＝证据键对账为「预测内对」，且该行**进兑现率分母**（它是可对账的）。
-    没给（非固化边／调用方不给）→ 行为与从前完全一致。
+
+    `reader_text`＝**判读边/可用性边的留痕文本**（R1/A1、A2）：本拍执行者输出原文。
+    这两条边过去结构性不可对账——判读芽的对象是「预测外新出现」的旧 journal 文件，
+    领做时已滚出「mtime 最新 N」的观测名额（`SUBJECT_FILE_LIMIT`），`observable_keys`
+    里没有它的键 → `verifiable=False` 且永不可翻（实测近 30 拍 8/9 不可对账）。
+    给了留痕文本，判据改成**输出里对源对象的字面点名**（全名或主体内相对写法，
+    与 M3「留痕命中＝已用」同一套命中判据 `entry_mentioned`）——「读了并留下文字」
+    于是有了机械形态：命不中是**可机械判的**，`verifiable` 恒 True、未命中＝如实记打脸
+    （读得到却留不下，是「没做」，不是「读不到」）。它对账的是「读过」的机械事实，
+    不是「读懂了」的语义事实（语义归组织会话判断段，机制正本写明）。
+    没给（非判读边／调用方不给）→ 行为与从前完全一致。
     """
     mine = [d for d in diffs if d.key == sprout.key]
     redeemed = any(d.kind == DiffKind.OK for d in mine)
@@ -366,6 +391,12 @@ def evaluate_outcome(sprout: Sprout, diffs: Sequence[Diff], tick: int,
         evidence = tuple(evidence_key)
         redeemed = any(d.key == evidence and d.kind == DiffKind.OK for d in diffs)
         actual = sprout.predicted_edge if redeemed else None
+        verifiable = True
+    elif reader_text is not None and _reader_edge(sprout):
+        # 判读边/可用性边：留痕输出里对源对象（全名或主体内相对写法）的字面点名＝兑现。
+        hit = sprout_sources.entry_mentioned(reader_text, sprout.obj)
+        redeemed = hit
+        actual = sprout.predicted_edge if hit else None
         verifiable = True
     return OutcomeRecord(sprout_id=sprout.id, predicted_edge=sprout.predicted_edge,
                          actual_edge=actual, redeemed=redeemed,
@@ -459,6 +490,23 @@ def build_tick_prompt(settings: Settings, layout: StateLayout, tick: int,
                 "（用在哪、怎么用、结果如何——可被后来者照做）。",
                 "- 引擎按**该文件是否存在**对账这一拍的兑现：不写＝本拍判打脸"
                 "（读得到，所以是「没做」，不是「读不到」）。",
+                "",
+            ]
+        elif _reader_edge(sprout):
+            # R1/A1、A2：判读边（现实给了新东西，先看懂它）与能力库「可用性」边的
+            # 兑现判据＝**留痕输出里对源对象的点名**——把判据写进题面，让执行者
+            # 知道怎么留下可对账的痕迹（与 cap 芽条款对称，判据不靠猜）。
+            obj_name = str(sprout.obj or "")
+            rel_name = obj_name[len(subject_mod.SUBJECT_PREFIX):] \
+                if obj_name.startswith(subject_mod.SUBJECT_PREFIX) else obj_name
+            lines += [
+                "#### 本拍判据＝**留痕点名**（判读边／可用性边）",
+                "",
+                "- 这一手的兑现，引擎按**本拍留痕输出里有没有出现源对象的名字**对账。",
+                "- 结论段必须点名你读过的那个对象——**全名**（`%s`）或**主体内相对写法**"
+                "（`%s`）都可以；只点名父目录不算（判据宁窄而准，不宽而吵）。"
+                % (obj_name, rel_name),
+                "- 没点名＝本拍判打脸（读了却留不下可查证据，等于没读）。",
                 "",
             ]
     else:
@@ -671,7 +719,8 @@ def _make_runner(settings: Settings, layout: StateLayout, subject_root: Path, ti
 
 # --------------------------------------------------------------------- 报告
 def _redemption_lines(layout: StateLayout,
-                      known_objects: Optional[Sequence[str]] = None) -> list[str]:
+                      known_objects: Optional[Sequence[str]] = None,
+                      subject_root: Optional[Path] = None) -> list[str]:
     """兑现率段（**诚实呈现**：无样本就说无样本，不说 0，不说「差」）。"""
     report = redemption_report(read_jsonl(layout.outcome_ledger))
     lines = ["## 兑现率（现算，不存缓存）", "",
@@ -702,6 +751,17 @@ def _redemption_lines(layout: StateLayout,
                     pool["总条目"], pool["本可出芽"], pool["重问冷却中"],
                     pool["未到闲置阈值"]))
     lines.append("- 能力库渠道判定：%s" % pool["判定"])
+    # R8/A9：证据件合规率——窗口内 cap 领做行里，证据件真实存在的比例
+    # （只能在主体根存在时算；读不到＝不写，不猜）。
+    if subject_root is not None and Path(subject_root).is_dir():
+        from .sprout_sources import app_evidence_compliance
+        comp = app_evidence_compliance(read_jsonl(layout.outcome_ledger),
+                                       Path(subject_root), tick_now - 30)
+        if comp["cap 领做"]:
+            rate = comp["合规率"]
+            suffix = ("（缺失：%s）" % "、".join(comp["缺失样例"])) if comp["缺失样例"] else ""
+            lines.append("- 证据件合规率（近 30 拍 cap 领做）：%d/%d = %.2f%s"
+                         % (comp["证据件存在"], comp["cap 领做"], rate, suffix))
     return lines
 
 
@@ -715,7 +775,8 @@ def _short_names(names: Optional[Sequence[str]], limit: int = 6) -> str:
 
 
 def write_reconcile_report(layout: StateLayout, result: TickResult,
-                           known_objects: Optional[Iterable[str]] = None) -> Path:
+                           known_objects: Optional[Iterable[str]] = None,
+                           subject_root: Optional[Path] = None) -> Path:
     """写对账报告：**文件名带拍号**（同拍重跑＝同一个文件，不会互相覆盖）。"""
     from ..core.build_info import engine_label
     path = layout.reconcile_dir / ("reconcile-%05d.md" % result.tick)
@@ -750,7 +811,7 @@ def write_reconcile_report(layout: StateLayout, result: TickResult,
         lines += ["- %s" % f for f in result.org["findings"]] + [""]
     if result.new_sprouts:
         lines += ["## 本拍新生芽", ""] + ["- `%s`" % s for s in result.new_sprouts] + [""]
-    lines += _redemption_lines(layout, known_objects)
+    lines += _redemption_lines(layout, known_objects, subject_root=subject_root)
     if result.outcomes:
         lines += ["", "## 兑现判定（本拍领过的芽）", ""] + [
             "- `%s` 预测边=%s 实际边=%s → %s%s%s"
@@ -1129,9 +1190,12 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
     if topic is not None:
         # 可对账键集＝本拍 W回 **实际读到的**那些 (对象, 维度)
         # （默认路径下就是主体读数；调用方显式给观测时就是显式那几个）。
+        # R1/A1：判读边与 lib 芽的兑现判据＝本拍执行者输出里对源对象的字面点名
+        # （与 M3「留痕命中＝已用」同一段输出文本），不需要 observable_keys 里有它。
         outcome = evaluate_outcome(topic, diffs, tick, sampled=call is not None,
                                    observable_keys=[o.key for o in obs],
-                                   evidence_key=evidence_key)
+                                   evidence_key=evidence_key,
+                                   reader_text=call.output if call is not None else None)
         append_jsonl(layout.outcome_ledger, outcome.as_record(), layout.root)
         result.outcomes.append(outcome)
 
@@ -1153,7 +1217,8 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
 
     report = write_reconcile_report(
         layout, result,
-        known_objects=queue.known_objects(tick, cfg.frozen_requestion_ticks))
+        known_objects=queue.known_objects(tick, cfg.frozen_requestion_ticks),
+        subject_root=subject_root)
     result.notes.append("对账报告：%s" % report.name)
 
     # 组织段到期提示：**拍循环自己查判据**，不把「该看语义层了」留给外部调度器。

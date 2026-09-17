@@ -6,6 +6,34 @@ The long-form reasoning behind each entry (incident, measurement, decision) live
 documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals in
 [`docs/zh/`](docs/zh/).
 
+## v2.2.20 — the read and availability edges are now accountable (2026-09-17)
+
+- **Read (`判读`) and capability-library availability edges are now mechanically accountable**
+  (R1/A1, A2). A difference-source read sprout points at a journal file that appeared
+  unpredicted; by the tick the sprout is led, that object has already rolled out of the
+  "most recent N by mtime" observation window (`SUBJECT_FILE_LIMIT`), so its
+  `(object, dimension)` key was never in `observable_keys` and the row stayed
+  `verifiable=false` forever — measured 8 of the last 9 read sprouts, while still holding
+  topic slots. The verdict now reads the **literal mention of the source object in that
+  tick's executor output** (full name, or the subject-relative form; directory objects need
+  the full name) — the same output text and the same matching predicate as "a trace hit
+  means the library entry was used" (`entry_mentioned`). A miss is mechanically decidable:
+  these edges report `verifiable=true`, and a missing mention is recorded as a failure
+  (readable yet not written down = "not done", isomorphic to the solidify-edge evidence
+  file, which was built the same way in v2.2.17). The tick prompt states this verdict, so
+  the executor never has to guess.
+- **`status` shows both time gates** (R5/A3, A4): the frozen-area capacity gate as rows
+  left (`frozen_cap − current rows`; live: `4103 行／上限 5000（剩 897 行）`) and the
+  requestion gate's earliest requestion tick computed in the engine's own caliber
+  (candidate-pool entries only, latest freeze per object; live: `主体/journal/0247-20260916.md`
+  frozen at tick 325 → requestion tick 625). Previously neither gate had a reading, so
+  "how far away is it" was not visible anywhere.
+- **`status` and the reconcile report show the evidence-file compliance rate** (R8/A9):
+  of the cap leads in the last 30 ticks, the share whose evidence file really exists
+  (live: `20/21 = 0.95`, the missing one listed by path). The rate is computed through the
+  same path function the engine hands to the executor (`app_evidence_path`), so the ledger
+  row and the file on disk are reconciled on one predicate instead of being counted by hand.
+
 ## v2.2.19 — a failed redemption is attributed to whoever actually failed (2026-09-17)
 
 - **The "failed to redeem" attribution has a third bucket, and it takes precedence**: when the
