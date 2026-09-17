@@ -228,6 +228,23 @@ capability used?" cannot be, because no mechanical reading exists for it):
   object, unless the evidence edge below is attached) are marked `verifiable=false`, excluded
   from the denominator, and listed separately — unreadable ≠ failure.
 
+**A "failed to redeem" row is attributed in three ways, never in one** (M10/B2/B3/Q6): the
+buckets keep the executor's own failures off the proposal's account.
+
+| Bucket | Test | Proof level |
+|---|---|---|
+| **dropped on the executor side** | the tick's executor trace carries the literal "output was not parsed" marker (the adapter's own honest line: the whole reply was kept as a trace and no action ran) | proven (literal marker) |
+| **proposal went stale** | age at lead time ≥ 30 ticks (birth tick read from the sprout id) | a mechanical *proxy*, pending proof |
+| **genuinely not done** | age < 30 ticks and no "not parsed" marker in the trace | proven (same tests) |
+
+Live case (proven, tick 449 on 2026-09-17): the model replied with a JSON object containing
+`actions`, but the **opening `{"` was missing** → the adapter's parse failed → the whole reply
+(including the write action) was dropped → the engine honestly recorded a failure to redeem. That
+row's age was 59 (≥ 30), so the age rule would have filed it as "proposal went stale" — **the
+wrong account**. When a `traces_dir` is given, the executor-side bucket takes precedence over the
+age split. The engine's bookkeeping along this chain is honest (the file really was absent, so the
+failure stands); what was lost is the executor-side action.
+
 **The solidify edge is now accountable, through an evidence file** (Q2/A3). The "application
 surface" of a capped sprout used to be unreadable forever (measured: 160 leads, 0 verifiable
 rows, and 24 of the last 31 topic slots). Now the engine fixes the path, writes it verbatim into

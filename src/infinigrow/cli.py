@@ -299,7 +299,8 @@ def main(argv=None) -> int:
         report = redemption_attribution(
             read_jsonl(layout.outcome_ledger), tick_from=args.from_tick,
             stale_after=(args.stale_after if args.stale_after is not None
-                         else STALE_LEAD_TICKS))
+                         else STALE_LEAD_TICKS),
+            traces_dir=layout.traces_dir)
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2))
             return rc.OK
@@ -314,8 +315,9 @@ def main(argv=None) -> int:
                   % (source, stat["领做"], stat["可对账"], stat["兑现"],
                      stat["打脸"], stat["不可对账"]))
         attribution = report["打脸归因"]
-        print("  打脸归因：提议过期 %d／真没做 %d（芽龄阈值 %d 拍）"
-              % (attribution["提议过期"]["n"], attribution["真没做"]["n"],
+        print("  打脸归因：执行者侧未落地 %d／提议过期 %d／真没做 %d（芽龄阈值 %d 拍）"
+              % (attribution["执行者侧未落地"]["n"],
+                 attribution["提议过期"]["n"], attribution["真没做"]["n"],
                  attribution["提议过期"]["阈值拍"]))
         total = report["领做"]["总"]
         if total:

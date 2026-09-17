@@ -16,6 +16,7 @@
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
 from .model import Diff, DiffKind, Observation, Prediction
@@ -211,6 +212,13 @@ def redemption_report(records: Iterable) -> dict:
 #: 「提议过期」的机械阈值（拍）：领做时芽龄 ≥ 这个数，就说这条提议的**前提**太老了。
 STALE_LEAD_TICKS = 30
 
+#: 执行者留痕里「本轮输出没被解析」的**自述标记**（适配器打的诚实行；引擎只按字面标记分类，
+#: 不替它解释语义）。为什么要有这一类：实测（2026-09-17，拍 449）模型回了带 `actions` 的
+#: JSON，但**开头少了 `{"`** → 适配器 `extract_json` 失败 → 整条回复（含写入动作）被丢弃，
+#: 引擎这一拍如实记打脸——那一条打脸的**真实原因**既不是「提议过期」也不是「没做」，
+#: 而是**动作没落地**。按「提议过期」算它，就是把执行者侧的解析故障记成提议的账。
+EXECUTOR_UNPARSED_MARKS = ("留痕说明：", "不是 JSON")
+
 
 def sprout_prefix(sprout_id) -> str:
     """芽 ID 的**芽源前缀**（`sp0326-001-…` → `sp`；`cap0380-001-…` → `cap`）。
@@ -246,8 +254,26 @@ def sprout_created_tick(sprout_id) -> Optional[int]:
     return int(digits[:4])
 
 
+def executor_output_unparsed(traces_dir, tick: int,
+                             marks: Iterable[str] = EXECUTOR_UNPARSED_MARKS) -> bool:
+    """这一拍的执行者留痕里有没有「本轮输出没被解析」的自述标记（缺留痕 → False，不猜）。
+
+    引擎只按**字面标记**分类，不替适配器解释语义：标记在 → 这一拍的动作**可能压根没落地**
+    （适配器把整条回复当最终留痕处理了），那条打脸就不该记到「提议过期」的账上。
+    """
+    if traces_dir is None:
+        return False
+    path = Path(str(traces_dir)) / ("tick-%05d.md" % int(tick))
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return any(mark in text for mark in marks)
+
+
 def redemption_attribution(records: Iterable, tick_from: Optional[int] = None,
-                           stale_after: int = STALE_LEAD_TICKS) -> dict:
+                           stale_after: int = STALE_LEAD_TICKS,
+                           traces_dir=None) -> dict:
     """领做与兑现的**分桶归因**（M10/B2/B3；可复跑的命令形态）。
 
     三件事一次说清，全部机械可判：
@@ -255,16 +281,18 @@ def redemption_attribution(records: Iterable, tick_from: Optional[int] = None,
     1. **谁在领做**：按芽源前缀（`sp`／`cap`／`lib`）数领做次数，并各报
        「可对账／不可对账」——固化边（`cap*`）占了多少取题位，是 B4/A3 的核心读数；
     2. **兑现与打脸**：可对账样本行里，兑现多少、打脸多少；
-    3. **打脸归因**：把打脸行按**领做时的芽龄**分开——
-       `等待拍数 = 领做拍 − 出生拍`（出生拍取自芽 ID 的拍号段，机械可判）。
-       芽龄 ≥ `stale_after`（默认 30 拍）→ **提议过期**：这条提议做出来时看的是
-       30 拍前的现实，而引擎在领做时**不会重新校验前提**（判据只锚 `(对象, 维度)`），
-       所以「前提已经过期」是这条打脸的**机械代理**，不是替它开脱；
-       芽龄 < 阈值 → **真没做**（提议是新的，执行者拿到了题面却没让现实满足它）。
+    3. **打脸归因**：把打脸行分开——
+       - **执行者侧未落地**（给了 `traces_dir` 且该拍留痕带「输出未解析」标记）：动作可能
+         压根没执行，**先别记提议的账**（实测拍 449：模型回了带 `actions` 的 JSON 但开头少了
+         `{"` → 适配器解析失败 → 整条回复含写入动作被丢弃）；
+       - **提议过期**：领做时芽龄 ≥ `stale_after`（默认 30 拍）——这条提议做出来时看的是
+         30 拍前的现实，而引擎在领做时**不会重新校验前提**（判据只锚 `(对象, 维度)`），
+         所以「前提已经过期」是这条打脸的**机械代理**，不是替它开脱；
+       - **真没做**：芽龄 < 阈值，且留痕里没有「未解析」标记——提议是新的，现实没被满足。
 
     **证明等级**：分桶与芽龄是 [已证明]（全部读账本现算）；「提议过期」是
-    [归纳待证] 的**归因代理**——它说的是「前提老」，不是「提议内容本身已失效」
-    （后者是语义判断，机械层不代替它下结论）。报数只说这两桶各几条 + 原始芽龄。
+    [归纳待证] 的**归因代理**——它说的是「前提老」，不是「提议内容本身已失效」。
+    「执行者侧未落地」则是 [已证明] 的**字面标记**（标记由适配器自己打）。
 
     `tick_from` 给了就只看该拍及之后的领做行（长窗口复验收口用同一个函数复跑）。
     """
@@ -277,6 +305,7 @@ def redemption_attribution(records: Iterable, tick_from: Optional[int] = None,
     by_source: dict[str, dict] = {}
     stale_rows: list[dict] = []
     undone_rows: list[dict] = []
+    unparsed_rows: list[dict] = []
     undone_ages: list[int] = []
     for r in rows:
         prefix = sprout_prefix(r.get("sprout_id"))
@@ -297,7 +326,9 @@ def redemption_attribution(records: Iterable, tick_from: Optional[int] = None,
         age = None if created is None else max(0, tick - created)
         item = {"sprout_id": r.get("sprout_id"), "tick": tick,
                 "出生拍": created, "等待拍数": age}
-        if age is not None and age >= stale_after:
+        if executor_output_unparsed(traces_dir, tick):
+            unparsed_rows.append(item)
+        elif age is not None and age >= stale_after:
             stale_rows.append(item)
         else:
             undone_rows.append(item)
@@ -317,16 +348,21 @@ def redemption_attribution(records: Iterable, tick_from: Optional[int] = None,
         "可对账样本": checkable, "兑现": redeemed, "打脸": failed,
         "不可对账": unverifiable,
         "打脸归因": {
+            "执行者侧未落地": {"n": len(unparsed_rows), "行": unparsed_rows,
+                              "说明": ("该拍留痕带「输出未解析」标记：动作可能没执行"
+                                       "（[已证明] 的字面标记，见 "
+                                       "`executor_output_unparsed`）")},
             "提议过期": {"n": len(stale_rows), "阈值拍": stale_after,
                          "行": stale_rows,
                          "说明": "领做时芽龄 ≥ 阈值：提议的前提已老（机械代理，[归纳待证]）"},
             "真没做": {"n": len(undone_rows), "行": undone_rows,
                        "芽龄中位数": (sorted(undone_ages)[len(undone_ages) // 2]
                                       if undone_ages else None),
-                       "说明": "领做时芽龄 < 阈值：提议是新的，现实没被满足"},
+                       "说明": "领做时芽龄 < 阈值，且该拍留痕没有「未解析」标记"},
         },
         "说明": ("按芽源前缀分桶现算；「不可对账」＝该维度机械层读不到（读不到≠打脸），"
                  "固化边（cap*）的取题位占比＝ 按芽源.cap.领做 ÷ 领做.总。"
-                 "打脸归因按「领做时芽龄」机械分桶（出生拍取自芽 ID 拍号段）。"),
+                 "打脸归因按「领做时芽龄」机械分桶（出生拍取自芽 ID 拍号段）；"
+                 "给了 `traces_dir` 时，「执行者侧未落地（输出未解析）」优先于芽龄分桶。"),
     }
 

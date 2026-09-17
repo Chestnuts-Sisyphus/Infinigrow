@@ -6,6 +6,26 @@ The long-form reasoning behind each entry (incident, measurement, decision) live
 documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals in
 [`docs/zh/`](docs/zh/).
 
+## v2.2.19 — a failed redemption is attributed to whoever actually failed (2026-09-17)
+
+- **The "failed to redeem" attribution has a third bucket, and it takes precedence**: when the
+  tick's executor trace carries the literal "output was not parsed" marker, the row is filed as
+  **dropped on the executor side** instead of being blamed on the proposal's age. Live case that
+  forced it (tick 449): the model replied with a JSON object containing `actions`, but the
+  **opening `{"` was missing**, so the adapter's parser failed and the whole reply — including a
+  valid write action — was dropped; the engine honestly recorded a failure to redeem, and the
+  age rule (59 ticks ≥ 30) would have filed it as "proposal went stale", which is the wrong
+  account. `infinigrow redemption` now prints all three buckets
+  (`执行者侧未落地 / 提议过期 / 真没做`); pass `traces_dir` (the CLI does) to enable the split —
+  without it the behaviour is exactly as before.
+- Also recorded, not fixed (the adapter is out of this repository's scope): **62 of 397 executor
+  traces (15.6%) hit that parse fallback**, 23 of them on capped-sprout topics — so roughly one in
+  seven ticks an intended action never lands. The engine's bookkeeping is honest throughout; the
+  loss is on the executor side, and it is the main real cause behind "failed to redeem" rows on
+  the application edge.
+- Docs: both mechanism documents describe the three-way split and its proof levels.
+- Tests: `+1` (the unparsed-marker bucket, including the "no `traces_dir` → old behaviour" path).
+
 ## v2.2.18 — the re-proposal rule is written down where the mechanism is (2026-09-17)
 
 - **The queue rule from v2.2.14 is now stated in all five places.** "A re-proposal does not change

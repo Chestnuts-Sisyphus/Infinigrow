@@ -198,6 +198,44 @@ def test_attribution_reports_no_sample_instead_of_zero():
     assert report["打脸归因"]["提议过期"]["n"] == 0
 
 
+def test_attribution_puts_unparsed_executor_output_in_its_own_bucket(tmp_path):
+    """执行者侧「输出未解析」→ 单独一桶，**不记到提议的账上**（真机拍 449 的形态）。
+
+    现场：模型回了带 `actions` 的 JSON，但开头少了 `{"` → 适配器解析失败 → 整条回复
+    （含写入动作）被丢弃 → 引擎如实记打脸。芽龄是 59（≥30），按老口径会被记成「提议过期」，
+    那是把执行者侧的解析故障记成提议的账。
+    """
+    from infinigrow.engine.reconcile import executor_output_unparsed
+    traces = tmp_path / "traces"
+    traces.mkdir()
+    (traces / "tick-00449.md").write_text(
+        "## 输出（原样）\n\n```text\n\"say\": \"…\"\n```\n"
+        "留痕说明：第 1 轮输出不是 JSON，按最终留痕处理。\n", encoding="utf-8")
+    (traces / "tick-00450.md").write_text("## 输出（原样）\n\n```text\n{}\n```\n",
+                                          encoding="utf-8")
+    assert executor_output_unparsed(traces, 449) is True
+    assert executor_output_unparsed(traces, 450) is False
+    assert executor_output_unparsed(None, 449) is False          # 不给目录 → 不猜
+    rows = [
+        # 拍 449：芽龄 59（按芽龄会被记成「提议过期」），但留痕说输出没解析
+        {"sprout_id": "cap0390-001-a", "tick": 449, "redeemed": False, "sample": True,
+         "verifiable": True, "obj": "主体/x.md", "predicted_edge": "固化"},
+        # 拍 450：没有未解析标记、芽龄 31 → 提议过期
+        {"sprout_id": "sp0419-002-b", "tick": 450, "redeemed": False, "sample": True,
+         "verifiable": True, "obj": "主体/y.md", "predicted_edge": "判读"},
+    ]
+    with_traces = redemption_attribution(rows, traces_dir=traces)
+    buckets = with_traces["打脸归因"]
+    assert buckets["执行者侧未落地"]["n"] == 1
+    assert buckets["执行者侧未落地"]["行"][0]["sprout_id"] == "cap0390-001-a"
+    assert buckets["提议过期"]["n"] == 1
+    assert buckets["提议过期"]["行"][0]["sprout_id"] == "sp0419-002-b"
+    # 不给 traces_dir（旧调用形态）→ 行为与从前一致：全部按芽龄分
+    legacy = redemption_attribution(rows)
+    assert legacy["打脸归因"]["执行者侧未落地"]["n"] == 0
+    assert legacy["打脸归因"]["提议过期"]["n"] == 2
+
+
 def test_redemption_cli_prints_attribution(tmp_path, capsys):
     """`infinigrow redemption` 打出可复跑的读数（谁在领做／打脸归因／固化边占比）。"""
     from infinigrow.cli import main
@@ -212,5 +250,5 @@ def test_redemption_cli_prints_attribution(tmp_path, capsys):
     out = capsys.readouterr().out
     assert rc_ == 0
     assert "兑现分桶归因" in out and "固化边占取题位：1/2" in out
-    assert "打脸归因：提议过期 0／真没做 0" in out
+    assert "打脸归因：执行者侧未落地 0／提议过期 0／真没做 0" in out
 
