@@ -209,6 +209,10 @@ Honest limitations:
 | [`docs/superseded.md`](docs/superseded.md) | retired mechanisms and what replaced them |
 | [`CHANGELOG.md`](CHANGELOG.md) | release by release |
 
+**Language.** The documentation is English. The engine's runtime text (CLI output, reports,
+`ALERT.md`, ledger fields) is **Chinese** — that is the mechanism's language, and
+[`docs/mechanism.md`](docs/mechanism.md) carries a bilingual glossary for it.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

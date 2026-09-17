@@ -3,6 +3,12 @@
 Three things: the executor channel, the schedule, and the gardener.
 Nothing here needs credentials unless *your* executor does.
 
+> **Language note.** The engine's runtime text — `--help`, the `status` output, reconciliation
+> reports, `ALERT.md`, ledger field values — is **Chinese**, because that is the mechanism's
+> language (see the glossary in [`mechanism.md`](mechanism.md)). The English documentation you are
+> reading is its manual. An English CLI/report mode is not implemented yet; if you need one it can
+> be added for the CLI layer only, without touching the mechanism vocabulary or the ledger fields.
+
 ## 1. The executor channel
 
 **Contract**: the prompt goes in on **stdin**, the answer comes out on **stdout**. One call is
