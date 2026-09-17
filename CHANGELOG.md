@@ -6,6 +6,26 @@ The long-form reasoning behind each entry (incident, measurement, decision) live
 documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals in
 [`docs/zh/`](docs/zh/).
 
+## v2.2.21 — name-to-path joins are guarded, and the release-note tool is public (2026-09-17)
+
+- **Object names now resolve through a single guarded path function** (R6/E1). A scanner had
+  flagged a path-traversal primitive: joins like `subject_root / item.name` (names come from
+  observation and ledgers) carried no containment check. `engine.subject.subject_path` is now
+  the only resolver for name→path joins and rejects anything that resolves outside the subject
+  root — empty names, absolute paths, drive letters, `..` segments — sharing the single
+  `core.paths.within_root` predicate with the existing write guard; the org-session renderer
+  reads through it. `SECURITY.md` gains a **declared exceptions** table for the two
+  reviewed-and-accepted scanner findings: the deterministic cold-start shuffle (reproducible
+  by design from the tick number; nothing security-bearing) and the generic `write_text`
+  primitive (its real call sites are guarded).
+- **The release-note tool is now in `tools/` and test-pinned** (R7/D2):
+  `tools/sync_release_notes.py` batch-realigns historical Release titles and bodies with the
+  repository sources (documented English notes first, the `CHANGELOG.md` section otherwise;
+  an empty body is skipped with a warning — never an empty shell on the public page). It is a
+  dry run by default and only touches GitHub with `--apply`. `CONTRIBUTING.md` lists it with
+  the other maintenance tools, and a test asserts the title table covers the current version,
+  so a release cannot silently fall off the list.
+
 ## v2.2.20 — the read and availability edges are now accountable (2026-09-17)
 
 - **Read (`判读`) and capability-library availability edges are now mechanically accountable**

@@ -57,6 +57,17 @@ of this project span in place because one rule was written in two places and the
 4. Make it PASS on the real repository. If a new rule fails on first run, clean the repository up —
    do not switch the rule off.
 
+## Maintenance tools
+
+Besides the checks above, `tools/` carries the release and repository plumbing:
+
+- `extract_changelog_section.py` — pulls one version's section out of `CHANGELOG.md`; the
+  tag→release workflow feeds it straight into `gh release create`, and it refuses to emit an
+  empty shell (short or missing section = non-zero exit);
+- `sync_release_notes.py` — batch-realigns **historical** Release titles and bodies with the
+  repository sources (`docs/release-notes-vX.md` first, else the `CHANGELOG.md` section); it is a
+  dry run by default and only touches GitHub with `--apply`.
+
 ## Style
 
 - Line width 100 (`ruff` enforces it).

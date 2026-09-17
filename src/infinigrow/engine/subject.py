@@ -100,6 +100,37 @@ def subject_leaf(root: Path) -> str:
     return Path(root).name or str(root)
 
 
+def subject_path(root: Path, name: str) -> Path:
+    """**对象名 → 主体内路径**的唯一解析入口：contain 校验，越界一律拒绝。
+
+    E1（Mimosa high＝路径穿越，CWE-22）的加固点。此前的拼接是裸的 `subject_root / item.name`
+    （例如 `engine/org_session.py` 渲染主体摘录时）——名字来自观测/账本，正常形态是主体内
+    相对路径（`journal/x.md`），但拼接前不校验就等于「谁往账本里写了奇怪的名字，谁就能把
+    读写指到主体根外」。校验与 `core/paths.guard` 同源（`_within`，两边 resolve、
+    不跟随越界符号链接），但方向相反：guard 在写盘时按已知 root 兜底，这里是**拼接时**
+    就把非法名字挡在门口（读也守——读越界同样是泄漏）。
+
+    为什么加固在**调用侧**（而不是 `encoding.write_text`）：写文本是「编码层」的通用原语，
+    它不持有（也不该持有）任何 root 概念；把越界守卫塞进它，等于让编码层替所有调用方
+    猜边界，而各调用方的边界（状态根/主体根/仓库根）根本不是同一个。风险的真实形态是
+    「**名字 → 路径**」这一个动作，所以校验跟着这个动作走、收在一个函数里。
+
+    拒绝形态：空名、绝对路径（含盘符）、含 `..` 段的相对路径、解析后落在根外的一切路径。
+    """
+    base = Path(root)
+    rel = str(name or "").replace("\\", "/").strip()
+    if not rel:
+        raise ValueError("空对象名：拒绝解析")
+    head = rel.split("/", 1)[0]
+    if rel.startswith("/") or ":" in head:
+        raise ValueError("对象名必须是主体内相对路径（不得绝对路径）：%r" % name)
+    p = base / rel
+    from ..core.paths import within_root
+    if not within_root(p, base):
+        raise PermissionError("拒绝越界访问：%s 不在 %s 之内" % (p, base))
+    return p
+
+
 def subject_files(root: Path, limit: int = SUBJECT_FILE_LIMIT) -> list[SubjectFile]:
     """列出主体文件（有界、稳定排序、只读）。
 

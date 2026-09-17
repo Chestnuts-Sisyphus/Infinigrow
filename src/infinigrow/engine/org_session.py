@@ -152,7 +152,8 @@ def _render_subject(subject_root: Path) -> str:
         return "\n".join(lines)
     used = 0
     for item in files[:3]:                       # 最多读 3 个文件的内容
-        path = subject_root / item.name
+        from .subject import subject_path
+        path = subject_path(subject_root, item.name)   # R6/E1：名字→路径走 contain 校验
         try:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:

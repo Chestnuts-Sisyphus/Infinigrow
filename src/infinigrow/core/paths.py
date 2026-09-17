@@ -56,6 +56,15 @@ def _within(path: Path, root: Path) -> bool:
     return p == r or r in p.parents
 
 
+def within_root(path: Path, root: Path) -> bool:
+    """`_within` 的**公开入口**（R6/E1）：contain 校验的单一判据。
+
+    `guard`（写盘时兜底）与调用侧的对象名解析（`subject.subject_path`）用**同一个**
+    判据——两处若各写一套「怎样算越界」，迟早出现「一边拦一边放」的裂缝。
+    """
+    return _within(path, root)
+
+
 def guard(path: Path, root: Path) -> Path:
     """写盘前的统一守卫：越出 root 一律拒绝（宁停不静默写错地方）。"""
     if not _within(path, root):

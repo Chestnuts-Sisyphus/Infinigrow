@@ -55,3 +55,40 @@ def test_release_workflow_uses_the_changelog_as_its_only_source():
     assert "extract_changelog_section.py" in text
     assert "gh release view" in text and "found=no" in text      # 幂等：先查再发
     assert "permissions:" in text and "contents: write" in text
+
+
+# --------------------------------------------------------------- R7/D2：运营脚本入库
+def test_sync_release_notes_is_in_tools_and_covers_every_release():
+    """R7：批量改写工具在 `tools/` 下可复跑，且标题表覆盖到**当前版本**（防静静过期）。"""
+    from infinigrow import __version__
+    from tools.sync_release_notes import TITLES
+    assert "2.0.0" in TITLES and "2.2.13" in TITLES
+    assert __version__ in TITLES, "发新版后忘了补 TITLES（工具会静默漏掉最新一条）"
+
+
+def test_sync_release_notes_bodies_come_from_repo_sources():
+    """正文来源：docs 英文版优先，否则 CHANGELOG 小节——都非空、都可复查。"""
+    from tools.sync_release_notes import body_for
+    body = body_for("2.2.0")
+    assert body and "calibration" in body.lower()        # docs/release-notes-v2.2.0.md 路径
+    cl = body_for("2.2.19")
+    assert cl and "attribution" in cl.lower()            # CHANGELOG.md 路径
+    assert body_for("9.9.9") == ""                       # 不存在 → 空（调用方跳过，不静默发）
+
+
+def test_sync_release_notes_dry_run_never_calls_gh(tmp_path, monkeypatch, capsys):
+    """默认（不 --apply）只打印——mistyped 的一跑不能改到线上页面。"""
+    import tools.sync_release_notes as sync
+
+    class _FakeSub:
+        called = []
+
+        @staticmethod
+        def run(*a, **k):
+            _FakeSub.called.append(a)
+
+    monkeypatch.setattr(sync, "subprocess", _FakeSub)     # 只换本模块内的名字
+    rc = sync.main([])
+    out = capsys.readouterr().out
+    assert rc == 0 and _FakeSub.called == []             # 一次 gh 都没调
+    assert "v2.2.20" in out and "title:" in out
