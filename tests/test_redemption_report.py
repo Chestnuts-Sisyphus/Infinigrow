@@ -115,23 +115,20 @@ def test_unverifiable_rows_stay_out_of_the_denominator():
     assert "读不到≠打脸" in report["说明"].replace(" ", "")
 
 
-def test_cap_sprout_outcome_is_marked_unverifiable(tmp_path):
-    """真机形态：封顶芽（应用面）那行的 outcome 必须标 verifiable=False。"""
-    import json as _json
-    subject = tmp_path / "subject"
-    subject.mkdir()
-    (subject / "a.md").write_text("x", encoding="utf-8")
-    settings = _settings(tmp_path, subject)
-    settings.cold_start_ticks = 0
-    for tick in range(1, 7):
-        run_tick(settings=settings, tick=tick, llm=lambda prompt: "不动手（夹具）",
-                 org_session=False)
-    layout = resolve_state(settings.state_root, settings.repo_root)
-    rows = [_json.loads(line) for line in
-            layout.outcome_ledger.read_text(encoding="utf-8").splitlines() if line.strip()]
-    cap_rows = [r for r in rows if r["sprout_id"].startswith("cap")]
-    assert cap_rows, "封顶芽应当被领过（成熟链四步到顶）"
-    assert all(r["verifiable"] is False for r in cap_rows)
+def test_cap_sprout_outcome_is_unverifiable_without_the_evidence_edge(tmp_path):
+    """**未接证据边**的 cap 行仍须如实标 `verifiable=False`（读不到≠打脸）。
+
+    这是「不带题面」的调用形态（`evaluate_outcome` 不给 `evidence_key`）——它守的是老口径的
+    底线：机械层读不到的维度**不许**算进兑现率。接上证据边的形态在 `tests/test_app_edge.py`
+    （Q2：cap 芽当题面时多下一条「证据件存在」的预测，那行才是可对账的）。
+    """
+    from infinigrow.engine.model import Sprout, SproutOrigin
+    from infinigrow.engine.tick import evaluate_outcome
+    cap = Sprout(id="cap0001-001-x", obj="主体/x.md", dimension="应用面", pointer="p",
+                 origin=SproutOrigin.MATURITY_CAP, created_tick=1)
+    row = evaluate_outcome(cap, [], tick=2, sampled=True, observable_keys=[],
+                           evidence_key=None)
+    assert row.verifiable is False and row.redeemed is False
 
 
 # --------------------------------------------------- Q6：兑现分桶归因（可复跑的函数形态）

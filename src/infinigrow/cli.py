@@ -385,7 +385,7 @@ def _cmd_status(settings) -> int:
              "%.2f" % rate if rate is not None else "不可计算"))
     cap = report.get("固化边") or {}
     if cap.get("n"):
-        print("  固化边（不可机械验证，单独列出）：%d 条" % cap["n"])
+        print("  固化边（应用面，未接证据边的行）：%d 条" % cap["n"])
 
     # N62/A8：能力库候选池组成——渠道静默是**预期**（池已空）还是**故障**（池有货却不出芽），
     # 这两种状态在状态面上必须能分开；此前没有任何读数说明这件事。

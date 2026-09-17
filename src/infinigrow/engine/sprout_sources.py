@@ -113,6 +113,56 @@ def _is_forward_target(diff: Diff) -> bool:
                  or forward_delta(diff.expected, diff.actual) is not None))
 
 
+#: 固化边（cap 芽）的**应用证据件**目录（Q2/A3）：证据件落在主体里的这个相对目录下。
+APP_EVIDENCE_DIR = "app"
+
+#: 固化边的**维度名**（cap 芽的 dimension）——判别的另一个锚（芽源之外）。
+APP_EDGE_DIMENSION = "应用面"
+
+
+def app_evidence_relpath(sprout: Sprout, tick: int) -> str:
+    """固化边（cap 芽）本拍的**应用证据件相对路径**：`app/<拍号4位>-<对象名>.md`。
+
+    「应用面」原先是一条**永远不可机械对账**的边（A3/N60）：cap 芽累计 160 次领做、
+    `verifiable=true` **0 条**，而它占着取题位的一大块（最近 30 拍 24/31）——
+    兑现率的分子因此系统性缺一角。修法是把「应用发生了」变成一件**在主体里留下痕迹**的事：
+    执行者做完这一手，就在约定路径留一份证据件；引擎按**它的存在性**机械对账。
+
+    命名由**引擎**规定（不是让执行者发挥），因为要机械可判：
+
+    - 拍号段＝**领做拍**（这一手动作发生在哪一拍），4 位补零，与芽 ID 的拍号段同源；
+    - 对象名＝芽对象的相对路径，`/` 换成 `_`（避免子目录层级把证据件散进别的目录里）；
+    - 固定 `.md` 后缀（目录对象如 `主体/journal/` → `主体_journal.md`）。
+
+    例：芽 `cap0380-001-主体_journal_0376-20260916`、领做拍 438 →
+    `app/0438-journal_0376-20260916.md`。
+    """
+    obj = str(sprout.obj or "")
+    if obj.startswith(SUBJECT_PREFIX):
+        obj = obj[len(SUBJECT_PREFIX):]
+    safe = obj.replace("\\", "/").strip("/").replace("/", "_")
+    if not safe:
+        safe = "主体"
+    if not safe.endswith(".md"):
+        safe += ".md"
+    return "%s/%04d-%s" % (APP_EVIDENCE_DIR, tick, safe)
+
+
+def app_evidence_object(sprout: Sprout, tick: int) -> str:
+    """证据件的**对账空间对象名**（`主体/app/0438-journal_0376-20260916.md`）。
+
+    与 `app_evidence_relpath` 同源：前者给执行者看（相对路径），后者进预测/观测
+    （对象命名空间）。两者只差 `主体/` 前缀这一层，不各说各话。
+    """
+    return SUBJECT_PREFIX + app_evidence_relpath(sprout, tick)
+
+
+def is_app_edge(sprout: Sprout) -> bool:
+    """这根芽是不是**固化边**（成熟链封顶 → 应用面）——Q2 的证据件只对这类芽要求。"""
+    return (getattr(sprout, "origin", None) == SproutOrigin.MATURITY_CAP
+            or str(getattr(sprout, "dimension", "")) == APP_EDGE_DIMENSION)
+
+
 def from_maturity_cap(maturity_records: Iterable[dict], tick: int,
                       known_objects: Iterable[str] = (),
                       start_seq: int = 1) -> list[Sprout]:

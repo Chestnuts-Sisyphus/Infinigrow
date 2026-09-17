@@ -6,6 +6,28 @@ The long-form reasoning behind each entry (incident, measurement, decision) live
 documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals in
 [`docs/zh/`](docs/zh/).
 
+## v2.2.15 — the solidify edge becomes accountable (2026-09-17)
+
+- **The "application surface" of a capped sprout is no longer unmeasurable.** Caps used to occupy
+  the topic slot while producing outcomes the engine could never check (measured: 160 leads, 0
+  verifiable rows, 24 of the last 31 topic slots). Now the topic prompt names, verbatim, a path
+  the executor must leave evidence at — `app/<lead tick, 4 digits>-<object name>.md` (slashes in
+  the object name become underscores) — and the engine **reconciles that file's existence**: a
+  prediction for the path is added, read through the keyed supplemental observation, so the
+  outcome row is `verifiable=true`, redeemed is judged from the file, and the row enters the
+  denominator.
+- **The evidence key is a record, not a domain object**: it spawns no sprout, never advances the
+  maturity chain and never enters the capability library (the diff ledger keeps its row, marked
+  `app_evidence`, the same way `act_caused` diffs are marked).
+- **A tick with no evidence file is judged "readable but absent" — not done, not "unreadable".**
+  Rows from before this change (and any call that does not attach the edge) keep the old
+  treatment: `verifiable=false`, listed separately, out of the denominator.
+- Docs: `docs/mechanism.md` and `docs/zh/mechanism.md` describe the convention and the naming
+  rule; `prompts/tick.md` states the requirement to the executor.
+- Tests: `+5` (`tests/test_app_edge.py`: path naming, redeemed-only-with-evidence, no spawn and
+  no maturity advance for the evidence key, the bucket moving into the denominator, and the
+  prompt handing the executor the exact path).
+
 ## v2.2.14 — a re-proposal no longer makes an old question look new (2026-09-17)
 
 - **A sprout that is re-proposed keeps its age.** When a new sprout replaces an existing one for

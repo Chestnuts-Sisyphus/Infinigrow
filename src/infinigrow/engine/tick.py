@@ -338,12 +338,19 @@ def record_maturity(layout: StateLayout, obj: str, tick: int,
 def evaluate_outcome(sprout: Sprout, diffs: Sequence[Diff], tick: int,
                      sampled: bool = True,
                      observable_keys: Optional[Sequence[tuple[str, str]]] = None,
+                     evidence_key: Optional[tuple[str, str]] = None,
                      ) -> OutcomeRecord:
     """领做后的兑现判定（机械）：该对象该维度的差异真消＝兑现；仍错＝打脸。
 
     `sampled`＝这一拍**真有东西动过手**（执行者跑过）。没有执行者的一拍里
     兑现账会写 `sample=false`：机械拍不做语义判断也不产出真实生长，
     把它的「打脸」当业绩读，就是把仪表盘当引擎（G6 的病灶）。
+
+    `evidence_key`＝**固化边（应用面）的证据件键**（Q2/A3）：cap 芽的维度「应用面」
+    本身读不到，过去只能记 `verifiable=False`（累计 160 次领做、0 条可对账）。
+    给了证据键，这条边就有了机械形态——**证据件存在＝这一手应用真的发生了**：
+    兑现＝证据键对账为「预测内对」，且该行**进兑现率分母**（它是可对账的）。
+    没给（非固化边／调用方不给）→ 行为与从前完全一致。
     """
     mine = [d for d in diffs if d.key == sprout.key]
     redeemed = any(d.kind == DiffKind.OK for d in mine)
@@ -354,6 +361,12 @@ def evaluate_outcome(sprout: Sprout, diffs: Sequence[Diff], tick: int,
     verifiable = True
     if observable_keys is not None:
         verifiable = tuple(sprout.key) in set(map(tuple, observable_keys))
+    if evidence_key is not None:
+        # 固化边：以证据件为准（存在性是可读的），不再按「应用面」这个读不到的维度判。
+        evidence = tuple(evidence_key)
+        redeemed = any(d.key == evidence and d.kind == DiffKind.OK for d in diffs)
+        actual = sprout.predicted_edge if redeemed else None
+        verifiable = True
     return OutcomeRecord(sprout_id=sprout.id, predicted_edge=sprout.predicted_edge,
                          actual_edge=actual, redeemed=redeemed,
                          pointer=sprout.pointer, tick=tick, sampled=sampled,
@@ -434,6 +447,20 @@ def build_tick_prompt(settings: Settings, layout: StateLayout, tick: int,
             % (sprout.predicted_edge.value if sprout.predicted_edge else "（无）"),
             "",
         ]
+        if sprout_sources.is_app_edge(sprout):
+            # Q2/A3：固化边要留**证据件**——路径由引擎给（不让执行者猜），
+            # 引擎按它的存在性机械对账（存在＝这一手应用真的发生了）。
+            lines += [
+                "#### 本拍是**固化边**（应用面）：必须留下应用证据件",
+                "",
+                "- 约定路径（**逐字照用**）：`%s`"
+                % sprout_sources.app_evidence_relpath(sprout, tick),
+                "- 内容：把这次「把这个已固化的能力用到别域」的具体做法写清楚"
+                "（用在哪、怎么用、结果如何——可被后来者照做）。",
+                "- 引擎按**该文件是否存在**对账这一拍的兑现：不写＝本拍判打脸"
+                "（读得到，所以是「没做」，不是「读不到」）。",
+                "",
+            ]
     else:
         lines += ["### 本拍没有芽可领", "",
                   "队列里没有可领的芽。**不要**为了有活干而自己造题：",
@@ -659,7 +686,7 @@ def _redemption_lines(layout: StateLayout,
                          % (bucket, stat["n"], stat["兑现率"]))
     cap = report.get("固化边") or {}
     if cap.get("n"):
-        lines.append("- 固化边（应用面，不可机械验证）：%d 条，单独列出：%s"
+        lines.append("- 固化边（应用面，**未接证据边**的行）：%d 条，单独列出：%s"
                      % (cap["n"], "、".join(cap.get("单独列出") or [])[:160]))
     # N62/A8：能力库候选池组成——「提醒渠道安静」是预期还是故障，报告里也要能判。
     from .sprout_sources import library_entries, library_pool_summary
@@ -894,6 +921,20 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
     preds = resolve_relative_predictions(preds, before_act)
     result.predictions["total"] = len(preds)
 
+    # 2c) **固化边可对账化**（Q2/A3）：领到的若是 cap 芽（应用面），本拍多下一条预测——
+    #     「应用证据件存在」。它让三件事一次到位：①证据件按 M7 定键补观测被真读到；
+    #     ②差异账里出现它的一行（应用发生／没发生，机械可查）；③兑现账因此可判
+    #     （`evidence_key` 传进 `evaluate_outcome`）。约定路径由引擎给（见提示词题面）。
+    evidence_key: Optional[tuple[str, str]] = None
+    if topic is not None and sprout_sources.is_app_edge(topic):
+        evidence_obj = sprout_sources.app_evidence_object(topic, tick)
+        evidence_key = (evidence_obj, "存在性")
+        preds = [p for p in preds if p.key != evidence_key] + [
+            Prediction(obj=evidence_obj, dimension="存在性", expected=subject_mod.EXISTS,
+                       tick=tick, evidence="应用证据件（固化边的机械落点）")]
+        result.predictions["app_evidence"] = evidence_obj
+        result.predictions["total"] = len(preds)
+
     # 4) 动手（执行者通道；不给执行者＝机械拍，不烧认知）
     runner = _make_runner(cfg, layout, subject_root, tick, KIND_TICK, command, llm)
     call = None
@@ -978,7 +1019,8 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
         after_act = subject_mod.subject_readings(subject_root)
         act_caused = {k for k, v in after_act.items() if before_act.get(k) != v}
         act_caused |= {k for k in before_act if k not in after_act}
-    spawnable = [d for d in diffs if d.key not in act_caused]
+    spawnable = [d for d in diffs if d.key not in act_caused
+                 and (evidence_key is None or d.key != evidence_key)]
 
     # 已耗尽的芽（连领满上限且非长任务，永不再被领）＝域占用的「无人认领」信号：
     # 域饱和闸据此释放僵尸占用（N41 死锁修复 K1——存在性维度不再靠「产出新量」解冻）。
@@ -991,6 +1033,9 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
         record["source"] = SOURCE_MECHANICAL
         if d.key in act_caused:
             record["act_caused"] = True
+        if evidence_key is not None and d.key == evidence_key:
+            # 与 `act_caused` 同一套写法：差异照记（事实不隐藏），另标一条**不派芽**的理由。
+            record["app_evidence"] = True
         if (d.obj, d.dimension, d.actual) in absorbed_keys:
             record["absorbed_by_domain"] = True
         if d.key in pointer_timeout_keys:
@@ -1008,6 +1053,8 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
     for d in diffs:
         if d.kind != DiffKind.OK or d.obj in advanced:
             continue
+        if evidence_key is not None and d.key == evidence_key:
+            continue                    # 证据件是**记录**，不是域对象：不推成熟链、不进能力库
         advanced.append(d.obj)
         _, hit_cap = record_maturity(layout, d.obj, tick, steps)
         if hit_cap:
@@ -1083,7 +1130,8 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
         # 可对账键集＝本拍 W回 **实际读到的**那些 (对象, 维度)
         # （默认路径下就是主体读数；调用方显式给观测时就是显式那几个）。
         outcome = evaluate_outcome(topic, diffs, tick, sampled=call is not None,
-                                   observable_keys=[o.key for o in obs])
+                                   observable_keys=[o.key for o in obs],
+                                   evidence_key=evidence_key)
         append_jsonl(layout.outcome_ledger, outcome.as_record(), layout.root)
         result.outcomes.append(outcome)
 

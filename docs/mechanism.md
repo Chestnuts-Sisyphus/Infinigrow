@@ -216,8 +216,25 @@ capability used?" cannot be, because no mechanical reading exists for it):
 - with no samples at all, the report says **"no samples"** — the rate is *not computable*, it is
   not 0 and not "bad";
 - rows whose dimension is mechanically unreadable (the "application surface" of a capped
-  object) are marked `verifiable=false`, excluded from the denominator, and listed separately —
-  unreadable ≠ failure.
+  object, unless the evidence edge below is attached) are marked `verifiable=false`, excluded
+  from the denominator, and listed separately — unreadable ≠ failure.
+
+**The solidify edge is now accountable, through an evidence file** (Q2/A3). The "application
+surface" of a capped sprout used to be unreadable forever (measured: 160 leads, 0 verifiable
+rows, and 24 of the last 31 topic slots). Now the engine fixes the path, writes it verbatim into
+that tick's prompt, and reconciles the file's **existence**:
+
+- path convention: `app/<lead tick, 4 digits>-<object name>.md`, with `/` in the object name
+  turned into `_` — e.g. the sprout `cap0380-001-主体_journal_0376-20260916` led at tick 438 →
+  `app/0438-journal_0376-20260916.md`;
+- the engine adds a prediction for that path (`existence = present`) and reads it through the
+  keyed supplemental reading, so **the file existing means the application really happened**:
+  the outcome row is `verifiable=true`, redeemed/failed is judged from it, and it enters the
+  denominator;
+- the evidence key is a **record, not a domain object**: it spawns no sprout, never advances the
+  maturity chain and never enters the capability library;
+- a tick that leaves no evidence file is judged "readable but absent" — **not done**, not
+  "unreadable".
 
 **Rotation** moves history into `state/archive/` (move-only). History-shaped ledgers keep the
 tail N lines; state-shaped ledgers (maturity, library) keep the **latest line per key**, so an

@@ -163,9 +163,14 @@ def redemption_report(records: Iterable) -> dict:
     分母只数样本行；`总行数` 一并报出，便于看出「有没有被静默丢样本」。
 
     **固化边单独列出**（T6/A7）：`cap*`（成熟链封顶→开应用面）的维度「应用面」是
-    语义维度，机械层永远读不到 → 兑现永远判不出。它们**单独列出**（`固化边` 字段），
-    不进兑现率分母，也不算「打脸」——那是「读不到」，不是「错了」。占取题位是刻意的：
-    封顶芽驱动执行者把已固化能力**应用到别域**（一个真动作），只是动作的结果没法机械对账。
+    语义维度，机械层读不到 → 兑现判不出。它们**单独列出**（`固化边` 字段），
+    不进兑现率分母，也不算「打脸」——那是「读不到」，不是「错了」。
+    占取题位是刻意的：封顶芽驱动执行者把已固化能力**应用到别域**（一个真动作）。
+
+    **Q2/A3 之后**：接了**证据边**的 cap 行（`verifiable=true`）走正常口径——
+    证据件存在＝应用发生（`evaluate_outcome` 的 `evidence_key`），进分母、可兑现可打脸；
+    只有**没接证据边**的行（旧账、不带题面的调用）才落进下面这个桶。
+    所以「固化边」条数**下降**正是这条边被接上的读数。
     """
     rows = list(records)
     checkable = [r for r in rows if verifiable(r)]
@@ -175,7 +180,9 @@ def redemption_report(records: Iterable) -> dict:
                 if str(r.get("sprout_id", "")).startswith("cap") and not verifiable(r)]
     cap_bucket = {"单独列出": [str(r.get("sprout_id")) for r in cap_rows],
                   "n": len(cap_rows),
-                  "说明": "固化边（应用面）不可机械验证：cap 芽单独列出，不计入兑现率分母，也不算打脸"}
+                  "说明": "固化边（应用面）**未接证据边**的行：不可机械验证，单独列出，"
+                          "不计入兑现率分母，也不算打脸；接了证据边的 cap 行已按存在性对账，"
+                          "在正常样本里（Q2/A3）"}
     if not samples:
         return {"判定": "无样本", "样本数": 0, "总行数": len(rows), "兑现率": None,
                 "分桶": {}, "不可对账": unverifiable, "固化边": cap_bucket,
