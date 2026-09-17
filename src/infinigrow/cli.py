@@ -384,8 +384,19 @@ def _cmd_status(settings) -> int:
           % (report["判定"], report["样本数"],
              "%.2f" % rate if rate is not None else "不可计算"))
     cap = report.get("固化边") or {}
-    if cap.get("n"):
-        print("  固化边（应用面，未接证据边的行）：%d 条" % cap["n"])
+    tick_now = int(status.get("tick") or 0)
+    # Q2 的判据要看得见「这条边接上了没有」：累计桶（固化边）**只增不减**（兑现账是追加型账本，
+    # 旧行不会消失），所以它的绝对数说明不了改造效果；真正的读数是**窗口内新领做的 cap 行里
+    # 有多少是可对账的**——接上证据边之后，这个比例从 0 变成 1。
+    from .engine.reconcile import redemption_attribution
+    cap_recent = (redemption_attribution(read_jsonl(layout.outcome_ledger),
+                                        tick_from=max(0, tick_now - 30))["按芽源"].get("cap")
+                  or {"领做": 0, "可对账": 0, "不可对账": 0})
+    if cap.get("n") or cap_recent["领做"]:
+        print("  固化边（应用面，未接证据边的行）：%d 条累计｜最近 30 拍 cap 领做 %d 次，"
+              "可对账 %d（不可对账 %d）"
+              % (cap["n"], cap_recent["领做"], cap_recent["可对账"],
+                 cap_recent["不可对账"]))
 
     # N62/A8：能力库候选池组成——渠道静默是**预期**（池已空）还是**故障**（池有货却不出芽），
     # 这两种状态在状态面上必须能分开；此前没有任何读数说明这件事。

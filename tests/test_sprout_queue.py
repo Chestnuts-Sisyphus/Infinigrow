@@ -53,20 +53,29 @@ def test_replace_does_not_move_the_order_key_earlier():
     merged = q.sprouts[0]
     after = q.order_key(merged)
     assert merged.created_tick == 10
-    assert merged.last_lead_tick == 60 and merged.leads == 1   # 连领记录一并继承
+    assert merged.last_lead_tick == 60               # 被碰时刻一并继承 → 排序不前移
     assert after[:2] == before[:2] and after >= before          # 不前移
 
 
-def test_replace_keeps_the_lead_limit_history():
-    """连领上限是**问题**的属性：重提不能把「问过 3 次」刷成「没问过」。"""
+def test_replace_keeps_the_touch_record_but_not_the_lead_budget():
+    """连领**预算**是记录行的（不继承），但「最后一次被碰的时刻」跟着问题走。
+
+    为什么不继承 `leads`：继承了就等于「同一差异问满 3 次后被永久判死」——重现的差异
+    再也做不了，这是没人要的语义变更。`last_lead_tick` 必须带走，否则合并芽会比它替换掉的
+    那根更靠前（＝动了排序）。
+    """
     q = SproutQueue(cap=50, lead_limit=3)
     old = _sprout("s1", "A", tick=10)
     q.add(old)
     for t in (20, 30, 40):
-        q.mark_lead(old, t)
-    assert q.eligible(50) == []                     # 问满 3 次：不可领
-    q.add(_sprout("s2", "A", tick=90))
-    assert q.eligible(50) == []                     # 重提之后仍不可领（历史跟着问题走）
+        q.mark_lead(old, t)                          # 旧行问满 3 次
+    assert q.eligible(50) == []
+    q.add(_sprout("s2", "A", tick=90))               # 同键重提（新顶旧）
+    merged = q.sprouts[0]
+    assert merged.created_tick == 10                 # 年龄继承
+    assert merged.last_lead_tick == 40               # 被碰时刻继承（排序不前移）
+    assert merged.leads == 0                         # 预算不继承：新行照旧拿自己的
+    assert len(q.eligible(50)) == 1                  # 重现的差异仍可被做（改造前的行为）
 
 
 def test_cap_freezes_oldest():

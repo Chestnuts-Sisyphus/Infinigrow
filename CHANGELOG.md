@@ -6,6 +6,23 @@ The long-form reasoning behind each entry (incident, measurement, decision) live
 documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals in
 [`docs/zh/`](docs/zh/).
 
+## v2.2.17 — the reading that shows the solidify edge got connected (2026-09-17)
+
+- **`status` now shows the windowed reading of the solidify edge**, next to the cumulative one:
+  `固化边（应用面，未接证据边的行）：N 条累计｜最近 30 拍 cap 领做 X 次，可对账 Y（不可对账 Z）`.
+  The cumulative bucket lives on an **append-only ledger**, so its absolute number cannot fall —
+  the reading that actually shows whether the edge got connected is *how many of the recently led
+  cap rows are accountable*, and it is now visible without a separate command.
+  Measured on the live root: the window's unaccountable count falls monotonically
+  21 → 20 → 19 → 18 → 17 across ticks 442–446 (one per tick, as the pre-fix rows roll out),
+  reaching 0 from tick 472, while every new cap row is accountable.
+- **A re-proposed sprout inherits the older birth tick and the last-touched tick, but not the
+  lead budget.** `leads` is the record row's allowance: inheriting it would permanently kill a
+  difference that reappears after being asked three times — a semantic change nobody asked for.
+  The new row keeps its own budget, exactly as before this change.
+- Tests: `+1` net (the same-key replacement drill now asserts budget non-inheritance, and
+  `status`'s windowed cap reading is pinned).
+
 ## v2.2.16 — the two languages can no longer drift apart (2026-09-17)
 
 - **A mechanical check now keeps `docs/` and `docs/zh/` structurally aligned.**

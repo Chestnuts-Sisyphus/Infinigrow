@@ -37,8 +37,10 @@ class SproutQueue:
         `tick`＝本次加入发生在哪一拍——被挤出的芽据此记 `frozen_tick`（M4 的重问判据锚在它上面）。
 
         `replaced` 的语义（N61/A1）：新芽**继承旧芽的出生拍**（取更早的那个）与
-        「最后一次被碰」的记录（`last_lead_tick`／`leads`）——被替换的是记录行，
-        不是问题本身。`id` 仍用新芽的（账本按 id 留痕），年龄看 `created_tick` 字段。
+        「最后一次被碰的时刻」（`last_lead_tick`）——被替换的是记录行，不是问题本身。
+        **连领计数（`leads`）不继承**：它是记录行的额度，继承了会让重现的差异在问满 3 次后
+        被永久判死（没人要的语义变更）；新行照旧拿自己的预算。`id` 仍用新芽的
+        （账本按 id 留痕），年龄看 `created_tick` 字段。
         """
         for i, exist in enumerate(self.sprouts):
             if exist.id == sprout.id:
@@ -48,13 +50,15 @@ class SproutQueue:
                 # （N61/A1）：重提不能把等了很久的问题刷成刚出生——真机现场 `sp0326-001`
                 # 出生 326、到 338 才拿到取题位，期间组织会话每 3 拍重提一次，每次都被
                 # 刷回新芽位置。新芽继承旧芽的出生拍（取更早的那个）。
-                # 「最后一次被碰」的记录一并带过来：`order_key` 排的是 `last_lead_tick`
+                # 「最后一次被碰的时刻」一并带过来：`order_key` 排的是 `last_lead_tick`
                 # （最久未碰优先），不带走它，合并后的芽会比它替换掉的那根**更靠前**
                 # ——那是排序变动，不是本修法的目的（K15 未定，排序键不动）。
+                # **连领计数不继承**：`leads` 是**记录行**的额度，带走它会让「重现的差异」
+                # 在问满 3 次后被永久判死（同一差异再也做不了）——那是没人要的语义变更；
+                # 新行照旧拿自己的预算（与改造前的行为一致）。
                 sprout.created_tick = min(exist.created_tick, sprout.created_tick)
                 if exist.last_lead_tick is not None:
                     sprout.last_lead_tick = exist.last_lead_tick
-                    sprout.leads = exist.leads
                 self.sprouts[i] = sprout
                 return "replaced", None
         self.sprouts.append(sprout)

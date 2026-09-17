@@ -138,3 +138,31 @@ def test_tick_prompt_hands_the_executor_the_exact_evidence_path(tmp_path):
     prompt = build_tick_prompt(settings, layout, 42, _cap_sprout(), [], subject)
     assert "固化边" in prompt
     assert app_evidence_relpath(_cap_sprout(), 42) in prompt
+
+
+def test_status_shows_the_windowed_cap_edge_reading(tmp_path, capsys):
+    """验收口径（Q2）：`status` 必须能看出「这条边接上了没有」。
+
+    累计桶（固化边）建在**追加型账本**上，只增不减（旧行不会消失），所以它的绝对值说明不了
+    改造效果——机械读数＝**最近 30 拍新领做的 cap 行里有多少是可对账的**：接上证据边之后
+    这个比例从 0 变成 1（滚动窗口里改造前的旧行随时间退出）。
+    """
+    from infinigrow.cli import main
+    state = tmp_path / "state"
+    state.mkdir()
+    rows = [
+        {"sprout_id": "cap0418-001-a", "tick": 418, "redeemed": False, "sample": True,
+         "verifiable": False, "obj": "主体/x.md", "predicted_edge": "固化"},
+        {"sprout_id": "cap0443-002-b", "tick": 443, "redeemed": True, "sample": True,
+         "verifiable": True, "obj": "主体/y.md", "predicted_edge": "固化"},
+        {"sprout_id": "cap0100-003-c", "tick": 100, "redeemed": False, "sample": True,
+         "verifiable": False, "obj": "主体/z.md", "predicted_edge": "固化"},
+    ]
+    (state / "outcomes.jsonl").write_text(
+        "\n".join(json.dumps(r, ensure_ascii=False) for r in rows) + "\n", encoding="utf-8")
+    (state / "tick_status.json").write_text(json.dumps({"tick": 445}), encoding="utf-8")
+    rc_ = main(["--state-root", str(state), "status"])
+    out = capsys.readouterr().out
+    assert rc_ == 0
+    assert "固化边（应用面，未接证据边的行）：2 条累计" in out     # 两条不可对账的旧行
+    assert "最近 30 拍 cap 领做 2 次，可对账 1（不可对账 1）" in out
