@@ -332,6 +332,53 @@ def main(argv=None) -> int:
     return rc.USAGE
 
 
+def _print_usage_split(layout) -> None:
+    """R9/E5：用量**按芽源分账**——今日 token 花在哪类芽上（cap／sp／lib／无题）。
+
+    只读数，不设预算闸、不自动降级（那两件是另一层决策）。join 键＝**拍号**：
+    `executor.jsonl` 的调用行与 `outcomes.jsonl` 的领做行按 tick 对齐（同一拍最多领
+    一根芽，是对齐不是近似）；对不上的调用单列「（无题）」，不摊派到任何芽源头上。
+    未自报用量的调用单列，不拿输出长度冒充 token（与 `_print_usage_line` 同一纪律）。
+    """
+    from .ledger.store import read_jsonl as _read
+    from .engine.reconcile import sprout_prefix
+    import datetime as _dt
+    today = _dt.date.today().isoformat()
+    calls = [r for r in _read(layout.executor_ledger)
+             if str(r.get("time", "")).startswith(today)
+             and str(r.get("kind") or "tick") == "tick"]
+    if not calls:
+        return
+    topic: dict[int, str] = {}
+    for o in _read(layout.outcome_ledger):
+        try:
+            topic[int(o.get("tick"))] = sprout_prefix(o.get("sprout_id"))
+        except (TypeError, ValueError):
+            continue
+    buckets: dict[str, dict] = {}
+    for r in calls:
+        try:
+            src = topic.get(int(r.get("tick")), "（无题）")
+        except (TypeError, ValueError):
+            src = "（无题）"
+        b = buckets.setdefault(src, {"次": 0, "token": 0, "未报": 0})
+        b["次"] += 1
+        usage = r.get("usage")
+        if isinstance(usage, dict):
+            t = usage.get("tokens") or usage.get("total_tokens")
+            if t is not None:
+                b["token"] += int(t)
+            else:
+                b["token"] += (int(usage.get("prompt_tokens") or 0)
+                               + int(usage.get("completion_tokens") or 0))
+        elif usage == "unknown":
+            b["未报"] += 1
+    parts = ["%s %d 次／%d token%s" % (k, v["次"], v["token"],
+                                    "（未报 %d）" % v["未报"] if v["未报"] else "")
+             for k, v in sorted(buckets.items())]
+    print("  用量分账（今日，按芽源）：%s" % "；".join(parts))
+
+
 def _cmd_status(settings) -> int:
     """T8/A15 一键总览：拍号／主体文件数／队列／兑现率判定／ALERT 首行／今日执行者用量。"""
     from .core.paths import resolve_state as _resolve
@@ -444,6 +491,15 @@ def _cmd_status(settings) -> int:
             print("  证据件合规率（近 30 拍 cap 领做）：%d/%d = %.2f%s"
                   % (comp["证据件存在"], comp["cap 领做"], comp["合规率"], suffix))
 
+    # R2/N69：执行者侧损耗（适配器解析回退）——判据与打脸归因同源（同一字面标记）。
+    # 适配器在另一条线、修复另行拍板；在拍板之前，损耗必须长期可见（否则只能靠回忆）。
+    from .engine.reconcile import executor_side_loss
+    loss = executor_side_loss(layout.traces_dir, tick_now, window=10)
+    loss_rate = loss["比例"]
+    print("  执行者侧损耗（近 %d 拍）：回退 %d/%d 份留痕%s（适配器解析回退；修复需另行拍板）"
+          % (loss["窗口"], loss["回退"], loss["留痕"],
+             "＝%.2f" % loss_rate if loss_rate is not None else "（无留痕，不可计算）"))
+
     alert_line = "（无 ALERT.md）"
     alert_path = layout.root / "ALERT.md"
     if alert_path.is_file():
@@ -454,6 +510,7 @@ def _cmd_status(settings) -> int:
     print("  ALERT 首行：%s" % alert_line)
 
     _print_usage_line(layout)
+    _print_usage_split(layout)
     return rc.OK
 
 

@@ -62,6 +62,7 @@ TITLES = {
     "2.2.19": "v2.2.19 — a failed redemption is attributed to whoever actually failed",
     "2.2.20": "v2.2.20 — the read and availability edges are now accountable",
     "2.2.21": "v2.2.21 — name-to-path joins are guarded, and the release-note tool is public",
+    "2.2.22": "v2.2.22 — executor-side loss and token spend are both visible",
 }
 
 

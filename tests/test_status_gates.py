@@ -168,3 +168,77 @@ def test_reconcile_report_includes_the_compliance_line(tmp_path):
     text = report.read_text(encoding="utf-8")
     assert "证据件合规率（近 30 拍 cap 领做）" in text
     assert "0/1 = 0.00" in text
+
+
+# --------------------------------------------------------------- R2/N69：执行者侧损耗
+def test_executor_side_loss_counts_unparsed_traces(tmp_path):
+    """R2 读数：与打脸归因**同源**（同一字面标记）；缺留痕不计入分母（零样本≠通过）。"""
+    from infinigrow.engine.reconcile import executor_side_loss
+    traces = tmp_path / "traces"
+    traces.mkdir()
+    (traces / "tick-00010.md").write_text("## 输出（原样）\n\n正常输出\n", encoding="utf-8")
+    (traces / "tick-00011.md").write_text(
+        "留痕说明：第 1 轮输出不是 JSON，按最终留痕处理\n", encoding="utf-8")
+    (traces / "tick-00012.md").write_text("正常\n", encoding="utf-8")
+    loss = executor_side_loss(traces, tick_now=12, window=10)
+    assert loss["留痕"] == 3 and loss["回退"] == 1
+    assert abs(loss["比例"] - 1 / 3) < 1e-9
+    empty = executor_side_loss(tmp_path / "none", tick_now=12, window=10)
+    assert empty["留痕"] == 0 and empty["比例"] is None      # 零样本 → 不可计算，不写 0 假数
+    windowed = executor_side_loss(traces, tick_now=12, window=2)   # 窗口只覆盖 11/12 两拍
+    assert windowed["留痕"] == 2 and windowed["回退"] == 1
+
+
+def test_status_shows_executor_side_loss_line(tmp_path, capsys):
+    """R2 验收：`status` 出现「执行者侧损耗」一行（修复未授权时损耗也长期可见）。"""
+    state = tmp_path / "state"
+    state.mkdir()
+    traces = state / "traces"
+    traces.mkdir()
+    (traces / "tick-00479.md").write_text(
+        "留痕说明：第 1 轮输出不是 JSON，按最终留痕处理\n", encoding="utf-8")
+    _write(state, "outcomes.jsonl", [])
+    _write(state, "sprouts-frozen.jsonl", [])
+    _write(state, "sprouts.jsonl", [])
+    _write(state, "library.jsonl", [])
+    _write(state, "tick_status.json", {"tick": 479})
+    rc_ = main(["--state-root", str(state), "status"])
+    out = capsys.readouterr().out
+    assert rc_ == 0
+    assert "执行者侧损耗（近 10 拍）：回退 1/1 份留痕＝1.00" in out
+
+
+# --------------------------------------------------------------- R9/E5：用量按芽源分账
+def test_usage_split_buckets_tokens_by_sprout_source(tmp_path, capsys):
+    """R9：join 键＝拍号——同一拍的调用归到那拍领做的芽源；无题与未报单列不摊派。"""
+    import datetime as dt
+    state = tmp_path / "state"
+    state.mkdir()
+    today = dt.date.today().isoformat()
+    _write(state, "executor.jsonl", [
+        {"tick": 10, "kind": "tick", "rc": 0, "usage": {"total_tokens": 1000},
+         "time": today + " 10:00:00"},
+        {"tick": 11, "kind": "tick", "rc": 0, "usage": {"total_tokens": 500},
+         "time": today + " 10:10:00"},
+        {"tick": 12, "kind": "tick", "rc": 1, "usage": "unknown",
+         "time": today + " 10:20:00"},                       # 无题拍：没领到芽
+        {"tick": 11, "kind": "org-session", "rc": 0, "usage": {"total_tokens": 777},
+         "time": today + " 10:11:00"},                        # 组织会话不并入 tick 分账
+    ])
+    _write(state, "outcomes.jsonl", [
+        {"sprout_id": "cap0010-001-x", "tick": 10, "redeemed": True, "sample": True,
+         "verifiable": True, "obj": "主体/x.md", "predicted_edge": "固化"},
+        {"sprout_id": "sp0011-001-y", "tick": 11, "redeemed": True, "sample": True,
+         "verifiable": True, "obj": "主体/y.md", "predicted_edge": "判读"},
+    ])
+    _write(state, "sprouts-frozen.jsonl", [])
+    _write(state, "sprouts.jsonl", [])
+    _write(state, "library.jsonl", [])
+    _write(state, "tick_status.json", {"tick": 12})
+    rc_ = main(["--state-root", str(state), "status"])
+    out = capsys.readouterr().out
+    assert rc_ == 0
+    assert "用量分账（今日，按芽源）" in out
+    assert "cap 1 次／1000 token" in out
+    assert "sp 1 次／500 token" in out
+    assert "（无题） 1 次／0 token（未报 1）" in out

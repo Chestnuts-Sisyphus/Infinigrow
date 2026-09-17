@@ -762,6 +762,14 @@ def _redemption_lines(layout: StateLayout,
             suffix = ("（缺失：%s）" % "、".join(comp["缺失样例"])) if comp["缺失样例"] else ""
             lines.append("- 证据件合规率（近 30 拍 cap 领做）：%d/%d = %.2f%s"
                          % (comp["证据件存在"], comp["cap 领做"], rate, suffix))
+    # R2/N69：执行者侧损耗（与打脸归因同一字面标记；修复未授权，先让损耗长期可见）。
+    from .reconcile import executor_side_loss
+    loss = executor_side_loss(layout.traces_dir, tick_now, window=10)
+    if loss["留痕"]:
+        r = loss["比例"]
+        lines.append("- 执行者侧损耗（近 %d 拍）：回退 %d/%d 份留痕%s"
+                     % (loss["窗口"], loss["回退"], loss["留痕"],
+                        "＝%.2f" % r if r is not None else ""))
     return lines
 
 

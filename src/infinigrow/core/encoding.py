@@ -37,7 +37,22 @@ def read_text(path) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
-def write_text(path, text) -> None:
-    """写文本：UTF-8 无 BOM、LF 换行（内容里的 BOM 会被剥掉，防幽灵首行）。"""
-    with open(path, "w", encoding="utf-8", newline="\n") as fh:
-        fh.write(strip_bom(text))
+def write_text(path, text, root=None) -> None:
+    """写文本：UTF-8 无 BOM、LF 换行（内容里的 BOM 会被剥掉，防幽灵首行）。
+
+    **路径规范与校验（R6/E1）**：写盘路径先规范化再校验，两道闸——
+
+    1. 规范化（`resolve`）：消掉相对段与符号链接后再落盘；
+    2. 拒绝含 `..` 上跳段的输入，并在给了 `root` 时做 contain 校验
+       （与 `core/paths.guard` 同一判据：解析后的路径必须落在允许目录内）。
+       合法调用方传的都是自己拼出的路径，没有一个是需要 `../` 的。
+    """
+    from pathlib import Path
+    candidate = Path(path)
+    if ".." in candidate.parts:
+        raise PermissionError("拒绝写含上跳段的路径：%s" % candidate)
+    target = candidate.resolve()          # 规范化：消掉相对段与符号链接
+    if root is not None:
+        from .paths import guard
+        guard(target, Path(root))         # 限制在允许目录内（越界即拒绝）
+    target.write_text(strip_bom(text), encoding="utf-8", newline="\n")

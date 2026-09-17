@@ -55,7 +55,13 @@ unless you ask to stay anonymous.
 | Finding | Where | Why it is accepted |
 |---|---|---|
 | Insecure pseudo-random number generator (`random.Random(seed=...)`) | `src/infinigrow/engine/sprout_queue.py` (cold-start shuffle) | Deterministic on purpose: the cold-start order must be reproducible from the tick number alone (so a rerun of the same tick produces the same order). No security use — nothing here is a token, key, nonce or secret. |
-| Generic path-writing primitive | `src/infinigrow/core/encoding.py` (`write_text`) | It is a UTF-8 encoding helper, not a path resolver. The engine's own writes go through `ledger/store.py::write_work_file`, which enforces `guard(path, root)` on every call; name→path joins go through `engine.subject.subject_path`, which rejects anything resolving outside the subject root (both share the single `core.paths.within_root` predicate). |
+
+The scanner also reports ~48 findings under `archive/legacy-20260914/_venvtest/` — that is a
+vendored copy of third-party packages from a retired virtualenv, not this project's code.
+Nothing in `src/` is flagged beyond the exception above (after v2.2.22: path traversal
+findings are cleared — `engine.subject.subject_path` guards name→path joins and
+`core.encoding.write_text` normalises its target, refuses `..` segments and takes an optional
+containment root).
 
 Anything not listed here that a scanner reports as an escape/deserialisation/shell risk should be
 treated as a real finding — file it or fix it.

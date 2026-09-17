@@ -6,6 +6,24 @@ The long-form reasoning behind each entry (incident, measurement, decision) live
 documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals in
 [`docs/zh/`](docs/zh/).
 
+## v2.2.22 — executor-side loss and token spend are both visible (2026-09-17)
+
+- **`status` and the reconcile report report executor-side loss** (R2/N69): of the last 10
+  ticks' executor traces, how many carry the "output was not parsed" marker — the same literal
+  marker and the same trace reader as the failure-attribution bucket, just windowed and
+  independent of which sprout the action was lost on. The adapter lives outside this
+  repository; until its fix gets a decision, the loss has to stay visible instead of being
+  remembered.
+- **Token spend is split by sprout source** (R9/E5): `status` now answers "where did today's
+  tokens go" per source prefix (`cap`/`sp`/`lib`), joining `executor.jsonl` calls to the
+  tick's led sprout by tick number; calls with no topic and calls with unreported usage are
+  listed separately instead of being apportioned. Readings only — no budget gate, no
+  automatic downgrade.
+- **The generic text-write primitive is hardened** (R6/E1 follow-through): `encoding.write_text`
+  now normalises the target path (`resolve`), refuses any input carrying a `..` segment, and
+  takes an optional `root` for a containment check — the last escape hatch the scanner kept
+  flagging after the join-level guard (`subject_path`) landed.
+
 ## v2.2.21 — name-to-path joins are guarded, and the release-note tool is public (2026-09-17)
 
 - **Object names now resolve through a single guarded path function** (R6/E1). A scanner had

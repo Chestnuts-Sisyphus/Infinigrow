@@ -67,3 +67,20 @@ def test_render_subject_reads_through_the_guard(tmp_path):
     (root / "journal" / "0001-20260917.md").write_text("正文", encoding="utf-8")
     text = _render_subject(root)
     assert "journal/0001-20260917.md" in text and "正文" in text
+
+
+# ------------------------------------------------ core.encoding.write_text 的路径加固
+def test_write_text_rejects_dotdot_and_guards_root(tmp_path):
+    """E1 的另一半：通用写文本原语自身也加固——禁止 `..`、可传 root 做 contain 校验。"""
+    from infinigrow.core.encoding import write_text
+    root = tmp_path / "root"
+    root.mkdir()
+    write_text(root / "a.txt", "hello")
+    assert (root / "a.txt").read_text(encoding="utf-8") == "hello"      # 正常写法不回归
+    with pytest.raises(PermissionError):
+        write_text(tmp_path / ".." / "evil.txt", "x")                   # 上跳段一律拒绝
+    with pytest.raises(PermissionError):
+        write_text(root / "a.txt", "x", root=root / "sub")              # 给了 root 就守
+    (root / "sub").mkdir()
+    write_text(root / "sub" / "a.txt", "ok", root=root)                 # 根内写放行
+    assert (root / "sub" / "a.txt").read_text(encoding="utf-8") == "ok"

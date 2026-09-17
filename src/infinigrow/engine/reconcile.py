@@ -271,6 +271,34 @@ def executor_output_unparsed(traces_dir, tick: int,
     return any(mark in text for mark in marks)
 
 
+def executor_side_loss(traces_dir, tick_now: int, window: int = 10) -> dict:
+    """**执行者侧损耗**读数（R2/N69）：最近 `window` 拍里，几份留痕带「输出未解析」标记。
+
+    判据与打脸归因的「执行者侧未落地」**同源**（同一个字面标记 `EXECUTOR_UNPARSED_MARKS`、
+    同一份留痕读法），只是这里不看兑现账——它回答的是「这段时间执行者自己丢了几次动作」，
+    与丢在哪根芽上无关。为什么要有这条读数：适配器在**另一条线**（不在本仓库写权内），
+    修复需要另行拍板；在拍板之前，损耗必须**长期可见**（否则「修不修」只能靠回忆）。
+    缺留痕的拍不计入分母（零样本不冒充通过；`比例=None` 就是「这段时间没有可数的留痕」）。
+    """
+    if traces_dir is None:
+        return {"窗口": window, "留痕": 0, "回退": 0, "比例": None}
+    base = Path(str(traces_dir))
+    total = hit = 0
+    for t in range(max(0, int(tick_now) - window + 1), int(tick_now) + 1):
+        path = base / ("tick-%05d.md" % t)
+        if not path.is_file():
+            continue
+        total += 1
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if any(mark in text for mark in EXECUTOR_UNPARSED_MARKS):
+            hit += 1
+    return {"窗口": window, "留痕": total, "回退": hit,
+            "比例": (hit / total) if total else None}
+
+
 def redemption_attribution(records: Iterable, tick_from: Optional[int] = None,
                            stale_after: int = STALE_LEAD_TICKS,
                            traces_dir=None) -> dict:
