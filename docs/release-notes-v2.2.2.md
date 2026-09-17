@@ -1,30 +1,26 @@
-# Infinigrow v2.2.2 — 运转收口（长周期可靠性与机制断链逐条补齐）
+# Infinigrow v2.2.2 — closing the loop on long-run reliability
 
-这一轮把「真机跑出来的长周期可靠性」与「机制断链」逐条补齐（T1-T10，每条对应上一轮清单一个遗留项）：
+Ten items, each one corresponding to a leftover from the previous round's list: long-run
+reliability problems and broken mechanism chains found on a live run.
 
-- **心跳序列倒退也恢复拍号**：v2.2.1 只处理「心跳不可读」；真机复见「心跳可读但拍号落后于
-  账本最大拍号」（旧事故余波：账本跨拍 1-16、心跳却是 4）→ 新序列 4、5、6… 会**逐一覆写**
-  旧报告。现在只要「心跳拍号 < 账本最大拍号」就同样从账本恢复，本拍说明点名。
-- **能力库有了写入方**：对象本拍成熟链封顶 → 写一条「可复用认知」。此前 `library.jsonl`
-  没有任何写入方 → 芽源③「能力库未用」是死路径，永不产芽。
-- **冻结区重看**：`frozen_review_every` 从「只有配置项」变为每 N 拍真的重看冻结区——
-  (对象, 维度) 仍以未消解差异出现 → **重新点亮**；否则如实记「未点亮＋原因」。
-- **待补指针有了调用方**：`pending_pointer=True` 的条目超过宽限拍数 → 「指针缺失」差异
-  **照样产芽**，报告点名，同一待补条目不重复产。
-- **组织会话对象名机械闸**：findings 的对象必须在**可对账清单**里（不许发明对象名）；
-  predictions 可提议**主体内合法新相对路径**。不合规丢弃并记 `parse_error`。
-- **固化边正式标为不可机械验证**：机制正本写明；cap 芽占取题位是刻意的；对账报告里
-  cap 行**单独列出**，不进兑现率分母、也不算打脸。
-- **兑现率桶口径对齐**：桶＝**对象域 × 预测边 × 实际边**（兑现账行新增 `obj` 字段，
-  对象域与域饱和判据同规则；旧行如实归「（无对象）」）。
-- **留痕/报告/日志轮转**：`traces/`、`reconcile/` 按份数、`logs/tick.log` 按字节轮转，
-  **只移动不删**，归档 `state/archive/files/`，`rotate --search` 可检索；园丁顺手做。
-- **规则 R10 计划任务隐藏启动器**（不弹窗是跨会话硬约束）：规则 9 → **10 条**，正反用例齐备。
-- **一键 `status` / `pause` / `resume`**：拍号／主体文件数／队列／兑现率判定／ALERT 首行／
-  今日 token 一行看完；`pause`/`resume` 只切计划任务 Enabled（**不删**）。
-- **隐私禁列补词并脱敏**：`privacy-deny.txt` 新增私有执行者模型名与私有通道域名形态；
-  真机抓到一个泄露（v2.2.0 release notes 点名本机私有执行者模型）已脱敏。
+- **Heartbeat sequence regression is also recovered.** v2.2.1 only handled "heartbeat unreadable";
+  a live run then showed "heartbeat readable but behind the ledgers' maximum tick" (ledgers spanned
+  1–16 while the heartbeat said 4), so the new sequence 4, 5, 6… overwrote old reports one by one.
+  The recovery now also triggers on a backwards sequence.
+- **Rotation for traces, reconciliation reports and the tick log** — by file count for the first
+  two, by byte size for the log. Move-only, into `state/archive/files/`, searchable with
+  `infinigrow rotate --search`.
+- **The third sprout source is connected**: capping an object writes a capability-library entry
+  (before that, nothing wrote to `library.jsonl`, so "unused capability" was a dead path).
+- **Frozen sprouts get reviewed** every N ticks (a diff that reappears re-lights its sprout), and
+  the pending-pointer timeout produces a sprout instead of only being recorded.
+- **The object-name gate** for the org session became mechanical (names must come from the
+  accountable list, or be a legal new path).
+- **Cooldown and gap triggers for the org session** are visible state (`state/org-due.json`), and
+  the org session's findings are reconciled later rather than trusted.
+- **`status` / `pause` / `resume`** one-liners.
+- **Fixed a family of path-dependent defects**: `run_latest.py --repo` had no effect on the version
+  check; the artifact checker mis-reported; the executor's working directory is the repository root
+  (relative commands resolve), while the subject location comes from `IG_SUBJECT_ROOT`.
 
-测试全绿（含本轮新增用例：序列倒退恢复／能力库写入／冻结重看／待补指针超时／对象名闸／
-固化边单独列出／桶口径／文件轮转／R10／vbs 扫描／CLI status）；扫描 10/10；自检全绿；
-隐私双扫零命中；冷启动产物零绝对路径。
+**Full changes**: [`CHANGELOG.md`](../CHANGELOG.md).

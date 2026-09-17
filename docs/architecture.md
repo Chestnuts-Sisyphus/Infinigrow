@@ -1,126 +1,91 @@
-# 架构
+# Architecture
 
-> 本文件描述 **v2.1.0（运转线）** 的实际形态。改架构＝改本文件 ＋ 改代码 ＋ 跑闸，
-> 三处同改；`docs/mechanism.md` 管判据，本文件管结构。
+## Layers
 
 ```
-                ┌───────────────────────────────────────────────────────────────┐
-   CLI ────────▶│ cli.py                                                        │
- python -m      │ version / tick / dry-run / gardener / rotate / scan / selftest │
- infinigrow     │ org-check / org-session / org-status                          │
-                └───────────────┬───────────────────────────────────────────────┘
-                                │
-     ┌──────────────┬───────────┼───────────────────┬──────────────────┐
-     ▼              ▼           ▼                   ▼                  ▼
-┌───────────┐ ┌────────────┐ ┌───────────────┐ ┌────────────┐ ┌─────────────┐
-│ scheduler │ │   engine   │ │     rules     │ │   garden   │ │    core     │
-│ triggers  │ │ tick       │ │ static_scan   │ │ gardener   │ │ paths       │
-│（对外门面）│ │ reconcile  │ │ R1-R10（零 token）│ │（免疫系统）│ │ config      │
-│           │ │ model      │ │               │ │ + 轮转      │ │ encoding    │
-│           │ │ sprout_*   │ │               │ │             │ │ exit_codes  │
-│           │ │ org_trigger│ │               │ │             │ │ version_*   │
-│           │ │ org_session│ │               │ │             │ │ build_info  │
-│           │ │ subject    │ │               │ │             │ │             │
-│           │ │ executor   │ │               │ │             │ │             │
-│           │ │ domain_*   │ │               │ │             │ │             │
-└─────┬─────┘ └─────┬──────┘ └───────┬───────┘ └──────┬──────┘ └─────────────┘
-      │             │                │                │
-      └─────────────┴────────┬───────┴────────────────┘
-                             ▼
-                  ┌────────────────────┐
-                  │      ledger        │  ← 唯一写盘层（原子替换 + 越界守卫）
-                  │  store.py rotation │
-                  └─────────┬──────────┘
-                            ▼
-                  ┌────────────────────┐
-                  │        core        │  ← 唯一与机器相关的层
-                  │  状态根 / 配置 / 编码 │     （其余层只认 Settings 与 StateLayout）
-                  └────────────────────┘
+CLI ─▶ scheduler ─┐
+                  ├─▶ engine ───────▶ ledger ──────▶ core
+     rules ───────┤   tick             store           paths / config / encoding
+     garden ──────┘   reconcile        rotation        exit_codes / version_check
+                      sprout_* / model  (the only write path)
+                      org_trigger / org_session
+                      subject / executor / domain_saturation
 ```
 
-## 分层规则
+1. **Dependencies point down only**: `core → ledger → engine → rules/garden/scheduler → cli`.
+   An upper layer may import a lower one; a lower one may not import an upper one.
+2. **All disk writes go through `ledger/store.py`**: appending to a ledger, atomic replacement of
+   a work file, exclusive creation (locks) and the containment guard live in that one module;
+   `core/encoding.py` only handles encodings and text. Enforced by rule **R8**.
+3. **`core` is the only machine-specific layer**: state root, config, encoding, exit codes,
+   version lookup. Everything above receives a `Settings` and a `StateLayout` and never builds
+   a path itself.
+4. **`rules` does not import `engine`**: static rules read files and compare strings, so they run
+   in CI against a repository with no state at all.
+5. **Exit codes have a single source**: `core/exit_codes.py`. Bare integers ≥2 in the CLI are
+   reported by rule **R7**.
 
-1. **依赖只向下**：`core → ledger → engine → rules/garden/scheduler → cli`。
-   上层可以 import 下层；下层不许 import 上层（有循环就说明切错了）。
-2. **写盘只经过 `ledger/store.py`**：账本追加、工作文件原子替换、独占创建（锁）、
-   越界守卫都在这一个地方；`core/encoding.py` 只负责编码与文本落盘。
-   这条由静态规则 **R8** 守（引擎里别处出现直接写盘即 FAIL，例外会打印在报告里）。
-3. **`core` 是唯一与机器相关的层**：状态根、配置、编码、退出码、版本查询。
-   上面的层拿到的是 `Settings` 与 `StateLayout` 对象，不自己拼路径。
-4. **`rules` 不依赖 `engine`**：静态规则是「读文件、比字符串」，与运行时无关，
-   所以它能在 CI 里对**没有状态**的仓库跑。
-5. **退出码单一来源**：`core/exit_codes.py`；CLI 里出现裸整数（≥2）由规则 **R7** 判 FAIL。
+## The four runtime pieces
 
-## 四块「运行体」（v2.1.0 新增，各自有明确的责任边界）
-
-| 运行体 | 文件 | 它负责 | 它**不**负责 |
+| Piece | File | It owns | It does not own |
 |---|---|---|---|
-| **生长主体** | `engine/subject.py` | 说清「引擎在长什么」；机械观测（存在性/文件数/字节数＋**目录对象**「`主体/<相对路径>/`×文件数」，有界稳定排序：文件 mtime 最新 20 个、目录名字序前 10 个；预测里出现过的键**定键补观测**，M6/M7/N43） | 内容级判断（那是执行者与组织会话的事） |
-| **执行者通道** | `engine/executor.py` | 提示词 stdin 进、stdout 出；调用记账（rc/耗时/长度/用量）；留痕；四况失败可见 | 它不知道任何厂商——命令由使用者给（`--executor`/`IG_EXECUTOR`） |
-| **组织会话运行体** | `engine/org_session.py` | 语义判断：从 B猜/留痕/W回 里找差异、写规划预测、登记芽 | 不动手（动手是执行者）；它自己也**不能凭空生芽**（芽源只有三个） |
-| **域饱和 / 轮转** | `engine/domain_saturation.py`·`ledger/rotation.py` | 同域同量只养一根未完成芽；账本历史搬进归档（只移动不删）；**冻结芽队列**超上限时同样只移动最旧的进归档（M5） | 不做内容判断；不删任何行 |
+| **Growth subject** | `engine/subject.py` | what the engine grows; mechanical observation (existence, file count, byte size, **directory objects**; bounded, stable order; keyed supplemental reading for predicted keys) | content-level judgement (that is the executor and the org session) |
+| **Executor channel** | `engine/executor.py` | prompt on stdin, answer on stdout; recording of every call (rc, duration, sizes, usage); traces; four visible failure modes | it knows no vendor — the command comes from `--executor` / `IG_EXECUTOR` |
+| **Org session** | `engine/org_session.py` | semantic work: find differences in traces and readings, write planned predictions, file findings, watch reality for changes since it last ran | it does not act (the executor does), and it cannot manufacture sprouts either |
+| **Domain saturation / rotation** | `engine/domain_saturation.py` · `ledger/rotation.py` | one unfinished sprout per domain × quantity; moving ledger history and oversized frozen zones into the archive (move-only) | no content judgement; no line is ever deleted |
 
-**为什么组织段触发判据在 `engine/` 而不是 `scheduler/`**：拍循环**自己必须查它**。
-上一代的病根之一就是「语义判断段没有调度入口」——判据与工具都写好了，没人调用，
-诊断产出后就此过期。`scheduler/triggers.py` 因此降级为**对外门面**，
-实现与单一事实源在 `engine/org_trigger.py`；每拍算出结果后写 `state/org-due.json`
-并进本拍返回值，让「该跑了」这件事**不可能被静默忽略**。
+**Why the org trigger lives in `engine/` and not in `scheduler/`**: the tick loop must consult it
+itself. A previous generation built the judgement layer but wired no caller for it, so its output
+expired where it was produced. `scheduler/triggers.py` is a facade for external callers; the
+implementation and the single source of truth are in `engine/org_trigger.py`, and every tick
+writes the decision to `state/org-due.json` so "it should run now" cannot be silently ignored.
 
-## 数据流（一拍）
+## One tick, as a data flow
 
 ```
-                     ┌──────────────────────────────────────────┐
-   执行者通道 ◀─────── │ 1 组织会话（到期才跑；无执行者＝整段不跑） │
-   (stdin/stdout)     │   输入：B猜 ＋ 留痕 ＋ W回                │
-                     │   输出：四类差异 ＋ 规划预测（可被打脸）    │
-                     └───────────────┬──────────────────────────┘
+                     ┌────────────────────────────────────────────┐
+   executor ◀────────│ 1 org session (when due; skipped without one)│
+   (stdin/stdout)    │   input : B-guess + traces + readings        │
+                     │   output: differences + planned predictions  │
+                     └───────────────┬────────────────────────────┘
                                      ▼
-   2 B猜（默认「保持不变」（主体＋自身状态）；组织会话的规划值**覆盖**它）
+   2 B-guess (default: "unchanged"; planned predictions override it)
                                      ▼
-   3 取题（队列：冷启动随机化 → 最久未碰 → 出生拍 → 字典序）
+   3 pick a sprout (oldest untouched first, then birth tick, then id)
                                      ▼
-   4 动手：执行者（题面＋本拍 B猜 经 stdin 进；stdout 出）
-        ├─▶ state/executor.jsonl（调用账：rc/耗时/长度/用量）
-        └─▶ state/traces/<用途>-<拍号>.md（提示词与输出原文，本机路径已 redact）
+   4 act (executor; no executor = mechanical tick)
                                      ▼
-   5 W回：**动手之后**再读现实（主体 ＋ 引擎自身状态）
+   5 W-read (**after** acting) + keyed supplemental readings
                                      ▼
-   6 对账 → 差异四类 ─▶ 域饱和闸 ─▶ 生芽（①差异 ②成熟链封顶 ③能力库未用）
+   6 reconcile → four kinds → domain gate → sprout
                                      ▼
-   7 记账与产出
-        ├─▶ state/diffs.jsonl（全部差异；被吸收的打标 absorbed_by_domain）
-        ├─▶ state/maturity.jsonl（本拍被证实的对象 +1 步，同拍最多 +1）
-        ├─▶ state/sprouts.jsonl / sprouts-frozen.jsonl（工作文件，可覆写）
-        ├─▶ state/outcomes.jsonl（本拍领过的芽：兑现/打脸 ＋ sample 标记）
-        ├─▶ state/domains.json（域占用：谁占着、吸收了几次、冻结时的量）
-        ├─▶ state/subject.json（主体快照：只记目录名与相对名）
-        ├─▶ state/org-findings.jsonl / org-llm.jsonl（发现账 / 尝试账）
-        ├─▶ state/reconcile/reconcile-<拍号>.md（对账报告，文件名带拍号）
-        ├─▶ state/org-due.json（组织段是否到期＋理由）
-        └─▶ state/tick_status.json（心跳：rc / 连续失败 / 执行者失败 / 时间戳 / 引擎身份）
+   7 account: diffs / outcomes / maturity / executor / domains / report / heartbeat
 ```
 
-**状态目录全景**（都由引擎自己写，`state/` 被 `.gitignore` 忽略）：
+## State layout
 
-| 类别 | 文件 |
-|---|---|
-| 账本（追加型） | `diffs.jsonl` `outcomes.jsonl` `maturity.jsonl` `library.jsonl` `executor.jsonl` `org-findings.jsonl` `org-llm.jsonl` |
-| 工作文件（可覆写） | `sprouts.jsonl` `sprouts-frozen.jsonl` `domains.json` `subject.json` `org-due.json` `tick_status.json` |
-| 人读面 | `ALERT.md`（园丁的唯一警报面）、`reconcile/`（对账报告） |
-| 留痕与日志 | `traces/`（执行者留痕）、`logs/`（调度器/一键件日志） |
-| 历史与互斥 | `archive/`（轮转归档，可检索）、`locks/`（拍级互斥） |
+| Path | What | Git |
+|---|---|---|
+| `<repo>/state/` | ledgers, queue, reports, traces, heartbeat (default; `IG_STATE_ROOT` points anywhere) | ignored |
+| `<repo>/state/archive/` | rotated ledgers, reports, traces, oversized frozen zones | ignored |
+| `<repo>-subject/` (sibling) | the growth subject (`IG_SUBJECT_ROOT` points anywhere) | outside the repo |
 
-## 为什么这样切
+Nothing under `state/` may contain this machine's absolute paths; `tools/check_no_abs_paths.py`
+enforces that (CI runs it against a fresh state root, and it passes on the live one too —
+the launcher prints a directory *name*, not a path).
 
-每一条分层都对应一个**曾经出过的事故**：
+## Boundaries that exist because something broke
 
-| 分层 | 事故 |
-|---|---|
-| 写盘收口 | 一次截断把半个状态文件洗掉 |
-| 状态根参数化 | 状态挂在宿主项目下，搬不走、还泄漏目录结构 |
-| 主体在仓库之外 | 「升级引擎」与「生长痕迹」混在一起，迟早互相踩 |
-| 判据与实现分家（`engine/model.py` 单一词汇表） | 同一条规则两处写，两边各自演化到打架 |
-| 规则层独立 | 规则只写在文档里，没人每次去查 |
-| 提示词同源校验 | 代码删了定义，提示词还在引用它 |
-| 退出码单一来源 | 同一个数字在两处是两种意思，调用方没法判 |
-| 断流判据用机械时间戳 | 用模型自述的时间，停摆了还会「看起来正常」 |
+Each of these was a live incident, and each is now structural rather than commented:
+
+- the acting session cannot create sprouts (`engine/tick.py` has no such entry point);
+- report file names carry the tick number, and sessions take a lock (same-second overwrites
+  silently destroyed reports);
+- the maturity chain advances at most +1 per object per tick, and the step function hard-codes it;
+- a failed heartbeat **raises** instead of silently resetting the tick number, and the tick
+  number is recovered from the ledgers when the heartbeat is unreadable or behind them;
+- the scheduler action is a hidden launcher (window style 0): a scheduled `.bat` or bare
+  `python` opens a console window on every run;
+- there is no self-sprout clause in the prompts (rule **R3** guards the regression).
+
+Full design: [`mechanism.md`](mechanism.md). Chinese original: [`zh/architecture.md`](zh/architecture.md).

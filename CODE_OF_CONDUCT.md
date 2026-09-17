@@ -1,44 +1,48 @@
-# 贡献者行为准则（Contributor Covenant v2.1 摘要）
+# Code of conduct (Contributor Covenant v2.1, summary)
 
-## 我们的承诺
+## Our pledge
 
-为了营造开放、友好的环境，我们承诺：参与本项目的每个人都不受年龄、体型、残障、
-族裔、性别认同与表达、经验水平、国籍、外貌、种族、宗教、性取向或技术选择的骚扰。
+To keep this project an open and welcoming place, we pledge that everyone taking part is free from
+harassment regardless of age, body size, disability, ethnicity, gender identity and expression,
+level of experience, nationality, appearance, race, religion, sexual orientation or technical
+choices.
 
-## 行为标准
+## Standards
 
-**有助于营造积极环境的行为**：
+**Behaviour that helps:**
 
-- 对他人保持同理与善意
-- 尊重不同的观点、经历与语言（本项目以中文为主要工作语言，英文提交同样欢迎）
-- 给出并得体地接受建设性反馈
-- 承认错误、向受影响的人道歉，并从中学习
-- 关注对整个社区最有利的事，而不只是个人得失
+- empathy and kindness toward other people;
+- respect for different opinions, experiences and languages (this project's working language is
+  Chinese; contributions in English are equally welcome);
+- giving and gracefully accepting constructive feedback;
+- admitting mistakes, apologising to those affected, and learning from them;
+- focusing on what is best for the community, not just for oneself.
 
-**不可接受的行为**：
+**Behaviour that is not acceptable:**
 
-- 性化的语言或图像、任何形式的性关注或挑逗
-- 挑衅、侮辱、贬损性评论，人身或政治攻击
-- 公开或私下的骚扰
-- 未经许可发布他人的私人信息（真实姓名、地址、邮箱等）
-- 其它在专业环境中可被合理认定为不当的行为
+- sexualised language or imagery, or any form of sexual attention or advances;
+- trolling, insulting or derogatory comments, and personal or political attacks;
+- public or private harassment;
+- publishing others' private information (real name, address, email) without permission;
+- other conduct that would reasonably be considered inappropriate in a professional setting.
 
-## 执行责任
+## Enforcement responsibilities
 
-维护者有责任澄清并执行上述标准，对不当行为采取适当且公平的纠正措施，
-包括删除评论、提交、代码，或在必要时临时/永久禁止参与。
+Maintainers clarify and enforce these standards and take appropriate, fair corrective action,
+including removing comments, commits or code, and temporarily or permanently banning participation
+where necessary.
 
-## 适用范围
+## Scope
 
-本准则适用于所有项目空间（仓库、issue、PR、讨论区），也适用于个人在公共场合
-代表本项目时的行为。
+This applies in all project spaces (repository, issues, pull requests, discussions) and when an
+individual is representing the project in public.
 
-## 执行
+## Enforcement
 
-如遇滥用、骚扰或其它不可接受的行为，请通过仓库的私密渠道（Security 标签页的
-private reporting）联系维护者。所有投诉都会被及时、公正地审阅与处理。
-维护者有义务尊重投诉者的隐私与安全。
+Report abuse, harassment or other unacceptable behaviour through the repository's private channel
+(Security tab → private reporting). All complaints are reviewed and handled promptly and fairly,
+and maintainers respect the privacy and safety of the reporter.
 
-## 归属
+## Attribution
 
-本准则改编自 [Contributor Covenant](https://www.contributor-covenant.org/) v2.1。
+Adapted from [Contributor Covenant](https://www.contributor-covenant.org/) v2.1.

@@ -1,161 +1,94 @@
-# 生长主体（Growth Subject）
+# The growth subject
 
-> 这份文件回答一个最根本的问题：**这个引擎在长什么？**
+> The question this file answers: **what is the engine growing?**
 >
-> 上一代的病根之一就在这里：引擎只会观测自己的状态文件——仪表盘在看仪表盘。
-> 没有主体，就没有「靶」：机械拍每拍都在动，却不知道在往哪儿长。
+> Without a subject there is no target: a mechanical tick would keep moving while watching only
+> its own state files — a dashboard watching a dashboard.
 
----
+## 1. Two things that must stay separate
 
-## 1. 两个东西必须先分清
-
-| | 引擎（Infinigrow） | 主体（growth subject） |
+| | Engine (Infinigrow) | Subject |
 |---|---|---|
-| 是什么 | 代码：拍循环、账本、规则、提示词 | **被生长的东西**：会被改动、会积累的那一份现实 |
-| 打比方 | 磨刀石与刀法 | 被磨的那把刀 |
-| 变更节奏 | 尽量少改（能开源、能升级、能搬运） | 持续变化（一拍的产出就是它的变化） |
-| 归属 | 项目本身（公开仓库） | **使用者**（可能含私密内容） |
-| 默认位置 | 仓库目录 | 仓库**同级**目录 `<仓库名>-subject` |
+| What | code: tick loop, ledgers, rules, prompts | **the thing being grown**: the reality that accumulates changes |
+| Change rate | changed as little as possible (open-sourceable, upgradable, movable) | changes constantly (a tick's output *is* its change) |
+| Owner | the project (public repo) | **the user** (may contain private material) |
+| Default location | the repository | a **sibling** directory `<repo name>-subject` |
 
-**为什么默认不放在仓库内**：放一起迟早出两类事故——升级引擎时动了生长痕迹；
-开源/分享时把主体一起带出去。分家是**默认值**，不是可选建议。
+Keeping them apart is the default, not a suggestion: co-locating them eventually produces two
+kinds of accident — upgrading the engine touches the growth traces, or sharing the repo ships the
+subject with it.
 
----
+## 2. Where the subject is
 
-## 2. 主体在哪
-
-| 配置项 | 环境变量 | 默认 |
+| Setting | Env var | Default |
 |---|---|---|
-| `subject_root` | `IG_SUBJECT_ROOT` | `<仓库的同级目录>/<仓库名>-subject` |
+| `subject_root` | `IG_SUBJECT_ROOT` | `<parent of repo>/<repo name>-subject` |
 
-- 可以指到任意目录（含还不存在的新目录：不存在也是**正常状态**，会被观测成「缺失」）；
-- 默认规则只有一处实现：`src/infinigrow/core/paths.py::default_subject_root`；
-- 看当前生效值：`python -m infinigrow dry-run`（会打印主体绝对路径与「存在=是/否」）。
+Any directory works, including one that does not exist yet — a missing subject is observed as
+"missing", not treated as an error, and the engine does not invent work for itself because of it.
 
-主体**不存在**时引擎不会报错、也不会硬造题：它把「缺失」当成现实的一种如实观测，
-零差异就零芽（这是「零差异零芽」的直接推论）。
+Objects inside the subject are named `<subject>/<relative path>` (POSIX separators). The prefix
+keeps subject objects from ever colliding with the engine's own state objects in the same
+reconciliation space, and it lets domain saturation treat one directory as one domain.
 
----
+## 3. How it is read (mechanically)
 
-## 3. 怎么读（机械方式）
+One tick does a **read-only, bounded, no-subprocess, no-network** observation:
 
-一拍里，引擎对主体只做**只读、有界、不起子进程、不出网**的机械观测：
+| Observed | Dimension | Pointer |
+|---|---|---|
+| subject root | existence (`present` / `missing`) | `subject root` |
+| subject root | file count | `subject root` |
+| each sub-directory (up to 10, by name) | file count | `subject dir:<path>` |
+| each file (up to 20, newest mtime first) | existence **and** byte size | `subject:<path>` |
 
-| 观测对象 | 维度 | 取值 | 证据指针 |
-|---|---|---|---|
-| 主体根（`<目录名>`） | 存在性 | `存在` / `缺失` | `主体根` |
-| 主体根（`<目录名>`） | 文件数 | 整数 | `主体根` |
-| 每个子目录（最多 10 个） | 文件数 | 整数 | `主体目录:<相对路径>` |
-| 每个文件（最多 20 个） | 存在性 ＋ 字节数 | `存在`/`缺失` ＋ 整数 | `主体:<相对路径>` |
+- File count and total bytes are **real totals**, not truncated counts: the per-file window is
+  bounded, the aggregate is not.
+- **A sub-directory is an object**: `<subject>/<path>/` (the trailing `/` is the marker). Its
+  accountable quantity is the number of files inside, which makes "grow this directory by one
+  entry" a **name-free** prediction.
+- **Keyed supplemental reading**: keys that appear in the predictions but fall outside the window
+  (because a new file pushed the boundary out) are read anyway — only predicted keys, so the
+  surface stays bounded. Without it, boundary files were recorded as "not executed" while
+  actually present.
+- Directory limit 10, file limit 20. Beyond that a directory does not enter the observation
+  surface, so proposals about it are rejected by the object-name gate. With a large subject,
+  keep the number of top-level directories small (or raise the limit deliberately — a judgement
+  change, so change the constant *and* this document *and* its test together).
+- `.git` and cache directories are skipped.
+- Content-level judgement is not here: byte sizes changed *is* a fact, and no one has to
+  interpret it.
 
-- 文件按 **mtime 降序取最新 N＝20 个**（K2/N42：旧的、很久没动的文件不该永久霸占观测
-  名额；新长出来的文件会被看见）；顺序稳定（同输入同顺序，才可复跑）；
-- 「文件数」「总字节数」两个主体层面读数用**真实总数**（不受观测上限影响——
-  K2/N42：主体文件超过 20 个时自报数字也必须如实，否则对账永远看不见新文件）；
-- **子目录也是对象**（N43）：命名 `主体/<相对路径>/`（**结尾的 `/` 是判据**——它让
-  目录对象与同名文件对象永不撞名），可对账量＝它里面的文件数。它的用处：提议
-  「往某个目录里**再长一格**」时不必点名文件名——文件名里的拍号段是**创建拍**的
-  （K7），提议方猜不到未来的创建拍，点名就必然对不上（实测：提议 `journal/0257-….md`，
-  执行者在拍 291 建出 `0291-….md`，芽连领 3 拍耗尽、白烧）；
-- **目录上限 10 个、按名字升序取前 10**（M6/N48-5，判据写死）：超出观测面的目录
-  **不进可对账清单**，对它的提议/发现会被对象名机械闸拒收。当前主体只有 2 个目录
-  （journal／archive），离边界很远；到 10 个目录那天要改的是这条判据本身
-  （改判据＝改文档＋代码＋测试），不是顺手调数字；
-- **定键补观测**（M7/N45）：预测里出现过的键被上述名额挤出观测面时，观测侧对**这些键**
-  补一条读数（只 stat 它们，不扩观测面）——否则边界文件会被记成「预测未执行」；
-- 跳过 `.git`/缓存类目录，只列文件；
-- **内容级判断不在这里**：理解主体内容是谁的事，归执行者（动手）与组织会话（语义判断）。
-  机械层只报「可查事实」——字节数变了就是变了，不需要谁来解读。
+## 4. How "it changed" is judged
 
-**`journal/` 新文件的命名规则（定死，K7/A8）**：`<创建拍号4位>-<创建日期YYYYMMDD>.md`——
-拍号段＝创建那一拍的拍号（不足 4 位补零），日期段＝创建当天的机械日期
-（`date +%Y%m%d`）。执行者提示词（`prompts/tick.md`）／组织会话提议
-（`prompts/org-session.md`）／主体声明（`subject.md`）与本文档写同一句；
-跨午夜不产生两种写法（否则对账把同一逻辑对象当成两个）。代码判据：
-`subject.valid_journal_name()`。
+Reconciliation aligns `(object, dimension)` pairs and compares expected with actual. Nothing is
+compared that was not predicted, and nothing is predicted that is not observed (the symmetry
+rule) — asymmetry manufactures phantom differences in both directions.
 
-**于是「提议新建一格」有两种写法（N43 之后）**：
+## 5. Naming: the one rule that is fixed
 
-| 写法 | 形式 | 何时用 | 验收靠什么 |
-|---|---|---|---|
-| 点名（旧，仍合法） | `主体/journal/<拍号>-<日期>.md`｜`存在性`｜`存在` | 提议方**知道**确切的创建拍（例如自己动手） | 那个文件名真的出现 |
-| 增量（推荐） | `主体/journal/`｜`文件数`｜`+1` | 提议方**不知道**未来的创建拍（组织会话提议执行者去写） | 该目录的格数 +1（**与文件名无关**） |
+New files under `journal/` are named `<created tick, 4 digits>-<created date YYYYMMDD>.md`:
+the tick segment is the tick that **created** the file, the date segment is that day's
+mechanical date. The same sentence appears in the acting prompt, the org-session prompt and this
+document, and `subject.valid_journal_name` is the mechanical test — a proposer cannot know a
+future file's creation tick, so proposals name the *directory*, never the file.
 
-增量写法里的 `+1` 是**差额**，不是快照：引擎在动手前把它锚定成绝对值
-（`97` 这类），承诺的是「再推进一格」。写绝对数字等于把一个会过期的快照当承诺——
-等芽被领到时现实早已走过它。代码：`model.parse_delta` / `tick.resolve_relative_predictions`。
-
-## 4. 怎么判它变了
-
-对账是机械的：把**动手前**写下的 B猜（预期）与**动手后**读到的 W回（实际）按
-`(对象, 维度)` 对齐，相等判「对」，不等判「错」。主体里的对象一律命名为：
-
-```
-主体/<相对路径>          （例：主体/notes.md、主体/sub/a.md）
-```
-
-这个前缀不是装饰：它让主体对象与引擎自身状态对象（`tick_status.json` 之类）
-在同一个对账空间里**永不撞名**，也让「域饱和」判据能把同目录的对象认成同一域
-（`主体/` 是一个域，`主体/sub/` 是另一个）。
-
-于是「主体变了没有」变成一个可查的事实：
-
-- 预测说 `主体/notes.md 字节数 = 100`，实际读到 120 → **差异**（预测内错）→ 产芽；
-- 预测说主体根文件数不变，实际多了一个 → **差异** → 产芽；
-- 全都对得上 → 零差异零芽（引擎这一拍没有被现实纠正的地方）。
-
-**注意**：默认 B猜是「保持不变」（见 `predict_subject_unchanged`），这是零知识时的
-诚实预期，不是保守。要预测「做完这件事之后主体会变成什么样」，就由**组织会话**
-写规划值——规划值会覆盖默认值（`subject.merge_predictions`），兑现账判的是规划值。
-没有这层覆盖，任何真动手的一拍都会被记成「预测内错」：那说明的不是「干错了」，
-而是「没预测」。
-
----
-
-## 5. 主体与三个芽源的关系
-
-| 芽源 | 与主体的关系 |
-|---|---|
-| ① 差异对账 | 主体差异是最常见的来源（主体变了而没预测到、或预测错了） |
-| ② 成熟链封顶 | 主体对象爬到第 4 步（已固化）→ 芽「基于它开应用面」 |
-| ③ 能力库未用 | 与主体无关（读能力库账本） |
-
-「同一域同一量只养一根未完成芽」（域饱和）最常在主体上生效：`主体/` 下两个文件
-同时不对时，只立一根芽，其余登记为**吸收**（差异照旧入账，只是不再各立一根）。
-
----
-
-## 6. 可复跑判据
+## 6. Changing the subject
 
 ```bash
-# 主体路径与存在性
-python -m infinigrow dry-run
-
-# 机械拍对主体产出的观测（证据指针以「主体」开头、对象名带 主体/ 前缀）
-python -m infinigrow tick --json | grep -A3 '"subject"'
-
-# 主体快照（只记目录名与相对名，绝不落绝对路径）
-cat state/subject.json
-
-# 测试：主体路径默认不在仓库内 / ≠ 引擎状态路径 / 机械拍真的读主体
-PYTHONPATH=src python -m pytest -q tests/test_subject.py
+export IG_SUBJECT_ROOT=/path/to/another/subject   # per instance, or in the config file
+infinigrow dry-run                                # print the resolved subject root (writes nothing)
 ```
 
----
+State and subject are independent: pointing at a new subject does not move the ledgers, and
+moving the state root does not touch the subject.
 
-## 7. 换主体（换掉「要长什么」）
-
-主体是路径，不是身份：改 `IG_SUBJECT_ROOT` 或配置项 `subject_root` 即可。
-但**主体换了，历史不能跟着冒充**——旧的账本（差异账/兑现账/成熟链）说的都是旧主体的事。
-所以换主体的正确姿势是**同时换状态根**：
+## 7. Reproducible checks
 
 ```bash
-export IG_SUBJECT_ROOT=<新主体目录>
-export IG_STATE_ROOT=<与新主体配套的状态根>
-python -m infinigrow dry-run     # 先看清楚：主体在哪、状态根在哪
-python -m infinigrow tick        # 从第 1 拍开始积累新主体的历史
+infinigrow dry-run                     # resolved config, subject root, executor; writes nothing
+infinigrow tick --probe                # one tick; observations carry the subject prefix
+python -m pytest tests/test_subject.py # paths, symmetry, directory objects, supplemental reads
 ```
 
-状态根默认在仓库内（`state/`，被 `.gitignore` 忽略）。要多实例/放只读盘，
-用 `IG_STATE_ROOT` 指到别处——这条策略在 v2.1 保持不变，理由是：
-「默认能在任何地方空仓跑起来」比「默认最适合多实例」更重要，而后者一个环境变量就能拿到。
+Chinese original: [`zh/growth-subject.md`](zh/growth-subject.md).

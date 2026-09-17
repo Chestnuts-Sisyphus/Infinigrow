@@ -1,15 +1,17 @@
-# Infinigrow v2.2.1 — 运转可靠性补丁
+# Infinigrow v2.2.1 — runtime reliability patch
 
-三个都在真机现场换来的（细节见 CHANGELOG 的 v2.2.1 节）：
+Three fixes, all bought from live incidents:
 
-- **计划任务不再弹窗**：新增 `tools/run_tick_hidden.vbs`（WSH 窗口样式 0），注册动作改为
-  `wscript //nologo <vbs>`。直接挂 `.bat` 会每跑一次闪一个控制台窗口——抢焦点、遮住人正在看的东西。
-  注意 `New-ScheduledTaskSettingsSet -Hidden` 只隐藏任务列表**条目**，**不隐藏窗口**。
-- **心跳不可读时从账本恢复拍号**：旧实现在心跳读不出时静默按「新仓」起算（拍号回到 1）→
-  对账报告被同名覆写、账本拍号跳变。现在从 diffs/outcomes/maturity/executor 账本反推
-  最大拍号 +1，并写进本拍说明与心跳——异常要显眼，不许静默。
-- **执行者通道抗抖动**：上游会成串返回 400「Invalid request／Upstream request failed」，
-  同一题面稍后重放即成功（本地探针：短/整题面各两次全 OK）→ 退避重试 3 → **5 次共约 52 秒**
-  （首试带推理档，其后不带）。持续故障才记为执行者失败。
+- **The scheduled task no longer opens a console window.** A new launcher
+  (`tools/run_tick_hidden.vbs`) runs the tick script with window style 0, and the task action was
+  changed to `wscript //nologo <vbs>`. Registering a `.bat` directly flashes a console window on
+  every run, which steals focus from whatever the machine's owner is doing.
+- **The tick number is recovered when the heartbeat is unreadable.** Previously a heartbeat that
+  could not be read fell back to `tick = 0`, so the next tick was numbered 1 — overwriting
+  `reconcile-00001.md` and putting a discontinuity into the ledgers. The number is now reconstructed
+  from the maximum tick in the ledgers, with a visible note in the report.
+- **The executor channel retries through transport-layer truncation.** `IncompleteRead`,
+  connection resets, remote disconnects and read timeouts are retried (2 attempts, short backoff);
+  every attempt is recorded with its attempt number, and a failure is never hidden as "tried once".
 
-测试 225 条全绿；规则 9/9；自检全绿；隐私双扫零命中。
+**Full changes**: [`CHANGELOG.md`](../CHANGELOG.md).

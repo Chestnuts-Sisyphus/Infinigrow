@@ -1,273 +1,260 @@
-# 机制正本（单册）
+# Mechanism
 
-> 本文件是**机制的单一事实源**。代码与提示词都必须与它一致；不一致由
-> `python -m infinigrow scan` 的 R2（提示词↔代码同源）与 R3（禁自造芽条款）当场抓住。
+> The design of record. Code and prompts must agree with this document; drift is caught by
+> `infinigrow scan` rule **R2** (bidirectional prompt↔code sync) and by
+> `tests/test_mechanism_docs.py`.
 >
-> 改机制＝改本文件 + 改代码 + 改提示词，三处同改，缺一不可。
+> **Language note.** The engine's mechanism vocabulary is Chinese — that is the language its
+> prompts, ledgers and code comments use, and the terms are treated as identifiers, not prose
+> (see the glossary at the end of this file). The full Chinese design document lives in
+> [`zh/mechanism.md`](zh/mechanism.md); this file is the English rendering of the same rules.
 
 ---
 
-## 1. 公设
+## 1. Premises
 
-只有两个仓库：
+There are exactly two stores:
 
-- **B＝认知**（belief）
-- **W＝现实**（world）
+- **B = belief** (what the engine thinks)
+- **W = world** (what is actually there)
 
-一切结构都是两者之间的**边**：
+Every structure is an **edge** between them:
 
-| 边 | 方向 | 一句话 | 「长了」的机械判据 |
+| Edge | Direction | In one line | Grows when |
 |---|---|---|---|
-| **判读** | W→B | 看懂现实 | 该对象的预测在下一次对账中被现实证实 |
-| **行动** | B→W | 会做 | 动作执行后 W 侧对象发生**可查**变化 |
-| **原理** | B→B | 想通 | 推出的认知在**从未测过的域**被验证 |
-| **固化** | W→W | 自动 | 同类输入**不再烧认知**（不必再想） |
+| `read` | W→B | understand the world | a prediction about that object is confirmed at the next reconciliation |
+| `act` | B→W | be able to do | the action produces an observable change on the W side |
+| `principle` | B→B | figure something out | the derived claim holds in a domain never tested before |
+| `solidify` | W→W | automatic | the same class of input no longer costs cognition |
 
-**现实是唯一裁判**：判断不由引擎自述，由现实对账定；判断本身也要进账（可被打脸）。
+**Reality is the only judge.** A judgement is not taken from the engine's own say-so; it is
+reconciled against reality, and the judgement itself goes into a ledger where it can be
+contradicted later.
 
-**成熟链**：一条经验从生到熟走四步 —— 判读 → 行动 → 原理 → 固化。
-第 4 步（固化）＝封顶；封顶不是死锁，而是**新入口**（见 §4 芽源②）。
+**Maturity chain**: an experience goes read → act → principle → solidify. Step 4 is the cap;
+the cap is not a dead end, it is a new entry point (see sprout source ②). There is no fifth step.
 
 ---
 
-## 2. 一拍做什么
+## 2. One tick
 
 ```
-组织会话（可选，需要执行者）→ 定 B猜 → 取题（队列排序）→ 动手（执行者，可选）
-→ W回（**动手之后**再读现实）→ 对账 → 差异 → 域饱和闸 → 生芽 → 记账 → 心跳
+org session (optional, needs an executor) → fix B-guess → pick a sprout → act (executor, optional)
+→ W-read (**after** acting) → reconcile → differences → domain gate → sprout → account → heartbeat
 ```
 
-- **B猜**：动手前写下的可对账承诺（对象 / 维度 / 预期态变 / 指针）。
-- **W回**：动手后现实侧的可查回答（账本行 / 文件 / 日志）。
-- 顺序是机制的一部分：W回 必须在动手**之后**——动手前读的现实，证明不了动手的效果。
-- 对账是**机械**的：按 `(对象, 维度)` 对齐，`预期 == 实际` 即判「对」。
-  语义型（事件、意图区硬冲突）的判断归组织会话，判断进账、可被打脸。
+- **B-guess**: the falsifiable commitments written down *before* acting (object, dimension,
+  expected state, pointer).
+- **W-read**: the world's answer read *after* acting. The order is part of the mechanism: a
+  reading taken before the action cannot prove anything about that action.
+- Reconciliation is mechanical: align by `(object, dimension)`, and `expected == actual` means
+  "confirmed". Semantic judgements (intent, hard conflicts) belong to the org session, and they
+  are recorded so they can be contradicted.
 
-### 2.1 引擎在长什么（生长主体）
+### 2.1 What the engine grows (the growth subject)
 
-引擎动手的地方是**生长主体**（growth subject）：一个目录，默认在仓库**同级**
-（`IG_SUBJECT_ROOT` 可指到任意目录）。主体对象一律命名 `主体/<相对路径>`。
+The engine acts inside a **growth subject**: a directory, by default a *sibling* of the repo
+(`IG_SUBJECT_ROOT` points anywhere). Objects are named `<subject>/<relative path>`.
 
-- 机械观测只读这些可查事实：主体根的存在性与文件数、**每个子目录的文件数**（目录对象
-  `主体/<相对路径>/`，N43：结尾 `/` 是判据，与同名文件对象永不撞名）、每个文件的
-  存在性与字节数（有界、稳定排序）；
-- 没有主体＝没有靶：机械拍只能观测自己的状态文件，那不是生长（上一代的病根之一）；
-- 引擎代码与主体分家：升级引擎不动生长痕迹，开源不带出主体。详见 `docs/growth-subject.md`。
+The mechanical observation surface is **read-only, bounded, no subprocesses, no network**:
 
-**观测面有界（判据写死，不是「大概」）**：
-
-- 逐文件观测最多 `SUBJECT_FILE_LIMIT＝20` 个（按 **mtime 最新**取，旧的不会永久霸占名额；
-  「文件数」维度始终是**真实总数**，不受这个上限影响——N42）；
-- 逐目录观测最多 `SUBJECT_DIR_LIMIT＝10` 个（按**名字**升序取前 10，N48-5/M6）。超出观测面的
-  目录**不进可对账清单** → 对它的提议/发现会被对象名机械闸拒收（`valid_subject_object`）。
-  当前主体只有 2 个目录（journal／archive），离边界很远——这是**已知边界**而不是隐患藏身处：
-  到了 10 个目录那天要改的是这条判据（改判据＝改文档＋代码＋测试），不是顺手调个数字；
-- **定键补观测**（M7/N45）：预测里出现过的键若被上面的名额边界挤出去，观测侧**补一条**
-  （只 stat 这些键，不扩观测面）——否则新增文件会把边界文件挤出名额，它被记成
-  「预测未执行」（它其实存在，实测 8 行假差异：拍 267/271/272/274/290/302/306/311）；
-
-**对称律（实测换来的）**：预测与观测必须**同对象同维度**。少一边就会凭空造差异——
-观测 6 个文件却只预测 3 个 → 每拍 3 条「预测外发现」；观测了文件存在性却不预测它
-→ 每拍「预测未执行」。两种都会让引擎给自己派无解的活，所以：
-
-- **引擎自身状态文件不进对账**：那些文件是引擎自己写的，每拍都因自己的记账而变；
-  把它们当差异读＝自己给自己派活。引擎自身健康由**园丁**看护（断流/锁/失败计数/轮转）；
-- **默认预测/观测只覆盖主体**；显式传入 `predictions`/`observations` 时按传入的来
-  （测试与嵌入用）。
-- **成熟链同拍每对象最多 +1**：一个对象一拍可能有多条被证实的差异（存在性＋字节数），
-  逐条推进会让它一拍 +2——所以推进前按对象去重。
-- 组织会话**可以**对「主体内尚不存在的文件」下预测（预期=存在）：现实读不到它 →
-  「预测未执行」→ 照样产芽——这是「该创建它」的**合法提议路径**。但它**不许发明**
-  机械层读不到的对象名（首拍实测：凭空写了个不存在的对象，直接制造一根假芽）。
-- **扫现实的对比窗口＝「自上次组织会话以来」**（K14/N55/N58）：组织会话的输入块
-  「本拍现实变化」比的是**锚点**（`subject-org-anchor.json`＝上次它跑时读到的清单）
-  与**此刻清单**之差——消费者是它，它就该看到自己缺席期间发生的事（它每 3~5 拍才跑一次）。
-  两次踩过的坑：①「上一拍快照 vs 本拍清单」两者之间什么也没发生 → **恒为空**（N55）；
-  ②改成「上一拍动手前后」后窗口只有 1 拍 → 天然错过其余几拍（实测七次全空，N58）。
-  另外触发判据④要求「上一拍安静」，而生长拍必写非「预测内对」行 → 经 ④ 触发的会话
-  窗口永远安静（两者反相关）——这也是窗口必须拉长的理由。条目＝
-  新出现／有变化（字节数变了）／从清单里消失／目录格数变化；
-  锚点缺失（首次跑／旧状态根）→ 退回「上一拍动手前后」并把窗口如实写在行里，不假装看过。
-- **提议「再长一格」用目录对象＋差额**（N43）：`主体/<目录>/`｜`文件数`｜`+1`。
-  名字里的拍号段是**创建拍**的（K7），提议方猜不到未来的创建拍——点名必然对不上
-  （实测：提议 `journal/0257-….md`，执行者在拍 291 建出 `0291-….md`，芽连领 3 拍耗尽）。
-  差额承诺的是「再推进一格」，引擎在**动手前**把它锚定成绝对值
-  （`resolve_relative_predictions`），所以目标不会过期。反向不成立：现实**已经超过**
-  预期（预期 < 实际）时，不把旧预期派回去（那会让执行者把现实改回错的样子）。
-
-### 2.2 执行者通道（谁在动手）
-
-「动手」由**执行者**完成：提示词经 stdin 进、stdout 出（`IG_EXECUTOR` / `--executor`）。
-不给执行者＝机械拍：零 token、零凭据、不出网。四种失败（非零退出／超时／空输出／起不来）
-全部记账，并进心跳的「执行者连续失败」计数（与拍失败分开计）。详见 `docs/running.md`。
-
----
-
-## 3. 差异（唯一的主芽源）
-
-四类（不许发明第五类）：
-
-| 类型 | 判据 | 产芽 |
+| Observed | Dimension | Evidence pointer |
 |---|---|---|
-| 预测内错 | 预期态变 ≠ 实际态变 | ✅ |
-| 预测内对 | 预期 = 实际 | ❌（计入被验证） |
-| 预测外发现 | 实际有、预测没提 | ✅ |
-| 预测未执行 | 预测写了没做 | ✅ |
+| the subject root | existence, file count | `subject root` |
+| each sub-directory (up to 10) | file count | `subject dir:<path>` |
+| each file (up to 20) | existence + byte size | `subject:<path>` |
 
-**证据指针强制**：每个差异点必须带来源指针；无指针 → 进「待补指针」区（机械登记，不丢），
-超过宽限拍数仍未补 → 「指针缺失」差异 → **照样产芽**（拒收≠丢弃）。
-粒度按**对象 × 态变维度**切：同一对象的同一维度错＝1 个差异；两个对象＝2 个。
+- Files are taken by **most recent mtime first** and directories by **name order** — the surface
+  is bounded on purpose (a tick must not be unbounded work). File count and total bytes are
+  **real totals**, not truncated counts.
+- A directory is itself an object: `<subject>/<path>/` (trailing `/` is the marker, so a
+  directory never collides with a file of the same name), and its accountable quantity is the
+  number of files inside. This exists so that "grow this directory by one entry" can be
+  proposed **without naming the file** — a future file's name contains its *creation* tick,
+  which the proposer cannot know (K7). See [`growth-subject.md`](growth-subject.md).
+- **Keyed supplemental reading**: if a key that appears in the predictions falls outside the
+  bounded window (a newly created file pushes the boundary out), the observation side reads
+  that key anyway — it only reads keys that were predicted, so the surface stays bounded.
+- Symmetry is the rule: predict and observe the **same object and dimension**, or the engine
+  manufactures differences out of thin air (observed 6 files but predicted 3 → three phantom
+  "unpredicted findings" per tick).
+- The engine's own state files are **never** reconciled: they change because the engine writes
+  them, and treating that as a difference is the engine assigning work to itself. Engine health
+  is the gardener's job (liveness, locks, failure counts, rotation).
+
+### 2.2 The executor channel
+
+"Acting" is done by an **executor**: prompt on **stdin**, answer on **stdout**
+(`IG_EXECUTOR` / `--executor`). No executor means a **mechanical tick**: zero tokens, zero
+credentials, no network. Four failure modes (non-zero exit / timeout / empty output / cannot
+start) are all recorded, and counted separately from tick failures. See [`running.md`](running.md).
 
 ---
 
-## 4. 芽（只有三个来源）
+## 3. Differences (the one primary sprout source)
 
-> **零差异零芽。** 没有差异、没有封顶、没有未用条目 → 本拍不产芽。
-> **执行会话不自产芽**——这是 v2 的实现层结构保证：`engine/tick.py` 里没有这样的入口。
+Four kinds, no fifth:
 
-| 芽源 | 机械判据（可查） | 芽题面 |
+| Kind | Test | Spawns? |
 |---|---|---|
-| ① 差异对账 | 带指针的差异点 | 消解这个差异 |
-| ② 成熟链封顶 | 对象**本拍恰好**到达第 4 步 | 基于它**开应用面** |
-| ③ 能力库未用 | 条目 `拍号差 ≥ 阈值` 且最近执行者留痕里未出现 | 它**为何没用上**／别域是否成立 |
+| predicted-wrong | expected state change ≠ actual state change | yes |
+| predicted-right | expected == actual | no (counts as confirmed) |
+| unpredicted finding | reality has it, the prediction did not mention it | yes |
+| not-executed | the prediction was written, nothing was done | yes |
 
-②③ 是 v2 新增的现实入口。v1 只有 ①：差异被消解完后，队列只剩执行会话自造的复述芽
-（实测 221 根待长里 186 根同族、题面逐字相同），引擎于是原地打转。
+**A pointer is mandatory**: every difference must carry a provenance pointer. A difference
+without one goes to a "pending pointer" area and, after a grace period, produces a
+**pointer-missing** difference — which *does* spawn a sprout (rejected ≠ dropped).
 
-**③ 的判据输入必须是真读数**（N48-1/N48-2 的修复）：`last_used_tick` 有**真实更新方**
-——执行者留痕里命中该条目名 → 记为已用（不再「创建那一拍写一次、此后永久为真」）；
-「本拍用过」这道闸读的是**执行者留痕输出**（最近若干份），不再读差异账的 `note`
-（那道闸此前形同虚设：实测那串文本总长 19 个字符）。
+Granularity is `object × state dimension`: one object and one dimension wrong is one
+difference; two objects are two.
 
-**提醒必须有出口**（N48-3，与去重同批落地——只修去重＝把这条渠道断电）：
+---
 
-| 出口 | 判据 | 动作 |
+## 4. Sprouts (three sources, no more)
+
+> **No difference, no sprout.** No difference, no cap, no unused entry → no sprout this tick.
+> **The acting session cannot create sprouts** — structurally: `engine/tick.py` has no entry
+> point for "register a new candidate".
+
+| Source | Mechanical test | The question it asks |
 |---|---|---|
-| **消费** | 条目名出现在执行者留痕**输出**里 | `last_used_tick` 更新；该条目在队的芽退场（只移动进冻结区），不再被问 |
-| **结案** | 被问满上限（复用连领上限 N＝3）仍无消费 | 库账本写 `closed_tick` ＋结案指针（指向最后一次被问的留痕）→ 条目**移出候选池**，不再产芽 |
+| ① difference | a difference with a pointer | resolve this difference |
+| ② maturity cap | the object reached step 4 **this tick** | what else can this be used for? |
+| ③ unused capability | entry idle ≥ threshold and absent from the executor's trace | why is this not used — does it hold elsewhere? |
 
-为什么非有不可：「可用性」是**机械层读不到**的维度（兑现账只能如实标 `verifiable=False`
-——已 240 行），没有出口它就是一条永真、可无限重生的提醒：每拍重立 ~36 根，把上限 50
-的队列占满，主芽源「差异对账」自 tick 189 起零取题，能做完的差异芽全被挤进冻结区。
+Sources ② and ③ were added deliberately: with ① alone, once the differences were resolved the
+queue filled with the acting session's own re-statements of what it had just done (a previous
+generation of this engine had 186 of 221 queued sprouts near-identical and ground to a halt).
 
-**队列纪律**：
+**The inputs of ③ must be real readings.** `last_used_tick` is updated when an entry is
+**mentioned in the executor's trace output**, and the "used this tick" gate reads those traces
+(not a free-text note stored elsewhere — that mistake made the gate a no-op).
 
-- 同对象同维度＝**一根**芽（新顶旧）；不同维度才各算一根。
-- **去重含冻结区**（N48 的真凶修复）：某对象在活跃队列**或冻结区**里已有一根芽时，
-  不再立新的——「挂起≠死亡」是这条合并律的另一半：冻结的芽还是那个问题的芽。
-  只扫活跃队列时，被挤出的同一对象下一拍又被当成「没生过」重新立芽（实测：库 91 条
-  条目**全部**已有芽，却每拍再立 ~36 根）。
-- 活跃队列上限 50；超限＝最旧的进**冻结区**（只动队列，账本全留）。
-- 同一根芽最多连领 3 拍；冻结区可**重新点亮**（挂起≠死亡）。
-  （`long_task` 豁免分支**登记为预留**（K16）：当前没有写入方，也没有「什么算长任务」的
-  机械判据——连领上限已能防霸占。保留字段只为止旧行读得进来，不接线。）
-- **冻结芽的重问判据**（M4/G9）：冻结不是**永久封存**。某对象**最近一根芽**也已冻结满
-  `frozen_requestion_ticks` 拍（默认 300）且未被点亮（＝没回到活跃队列）→ 不再拦它，
-  允许重新立芽。判据取「该对象全部冻结芽里最新的那次冻结」：只要还有一根是新近的，
-  就说明刚被问过，不重复立——否则积压的旧冻结芽会在同一拍把同一批对象全部放行（洪泛）。
-  `frozen_tick`＝被挤进冻结区那一拍（升级前的旧行没有这个字段 → 回退到 `created_tick`，不假装它刚冻结）。
-  默认 300 的理由：队列在健康差异速率下约一天翻一轮，两天的冷却保证「被推后的问题」不与
-  新问题抢取题位；91 条条目 / 300 拍 ≈ 0.3 根/拍，低于差异芽的到达速率（不反客为主）。
-- **冻结区有容量判据**（M5/N48-4）：行数超 `frozen_cap`（默认 5000）时把**最旧的**
-  移动进 `state/archive/files/frozen/`（保留尾部 `frozen_keep_tail`＝4000 行）。
-  与账本轮转同一套纪律：**只移动不删**，先落归档件再缩主件。
+**A reminder must be able to end** (the difference/cap sources can be resolved; "is this
+capability used?" cannot be, because no mechanical reading exists for it):
 
-**域饱和**（T7）：同一「对象域 × 标准可验证量」只养**一根未完成芽**。
-
-- 对象域＝对象名里最后一段 `/` 之前的部分（没有 `/` 的对象**自成域**，
-  于是退化成上面那条既有的合并律，不误伤旧行为）；标准可验证量＝差异的维度。
-- 饱和时的重复差异**不新生芽**：登记为已有芽的 `absorbed` 计数；
-  差异本身**照旧入账**（打标 `absorbed_by_domain`）——配额不是隐藏。
-- 解冻条件（四条，任一即释放占用、允许再立一根）：
-  ① **产出了新的量**（新差异的 actual ≠ 立芽时的 actual）；
-  ② 该芽**被消解**（本拍对账为「预测内对」）或**已不在队列**；
-  ③ **持有者芽已耗尽**（连领满上限且非长任务，永不再被领）——这个域的问题没人再管了；
-  ④ **差异对象 ≠ 占用对象**——同域同量下的**另一个**问题（例如 journal 下一篇），
-     视为新量，不再被旧占用吸收。
-  （③④ 是 N41 死锁的修复（K1）：`存在性` 这类有穷枚举维度「产出新量」几乎不成立，
-  若持有者又已耗尽，该域会被永久占用、新差异全被吸收、引擎停摆。）
-- 同拍内也守配额：一拍里同域同量的第二条差异同样被吸收（否则「一批差异」就能绕过它）。
-
----
-
-## 5. 账本（追加型，只增不改）
-
-| 账本 | 一行是什么 | 关键字段 |
+| Exit | Test | Action |
 |---|---|---|
-| 差异账 `diffs.jsonl` | 一个差异点（含「预测内对」） | 类型 / 对象 / 维度 / 预期 / 实际 / 指针 / 拍号 / 来源 |
-| 兑现账 `outcomes.jsonl` | 一根被做过的芽 | 芽ID / 预测边 / 实际边 / 兑现或打脸 / 指针 / 拍号 / **是否样本** |
-| 成熟链 `maturity.jsonl` | 对象到第几步 | 对象 / 步 / 拍号 / 是否本拍到顶 |
-| 能力库 `library.jsonl` | 一条可复用认知 | 名称 / 最近使用拍 / **结案（`closed_tick` ＋结案指针）** |
-| 执行者账 `executor.jsonl` | 一次执行者调用 | 用途 / rc / 耗时 / 提示与输出长度 / 用量 / 拍号 |
-| 组织发现账 `org-findings.jsonl` | 一条语义发现（**可被打脸**） | 类型 / 对象 / 维度 / 指针 / 拍号 |
-| 组织尝试账 `org-llm.jsonl` | 试过一次组织会话 | 拍号 / 机械时间戳 / 结果说明 |
-| 心跳 `tick_status.json` | 最后一拍的机械状态 | 连续失败 / **执行者连续失败** / rc / 时间戳 / 拍号 / 引擎身份 |
+| consumed | the entry's name appears in the executor's trace output | `last_used_tick` updated; its queued sprouts are moved to the frozen zone and not asked again |
+| closed | asked up to the lead limit (3) with no consumption | the library ledger gets `closed_tick` plus a **closure pointer** to the trace that was asked; the entry leaves the candidate pool permanently |
 
-**兑现率＝现算**，且**诚实呈现**（T11/G6）：
+**Queue discipline**
 
-- 分母只数 `sample=true` 的行（那一拍**真有执行者动手**）；
-- 一行样本都没有时，报告写「**无样本**」——兑现率**不可计算**，
-  不是 0、更不是「差」（机械拍不做语义判断，也不产出真实生长）。
+- One sprout per object × dimension (a new one replaces the old). **Deduplication includes the
+  frozen zone**: "suspended" is not "dead" — a frozen sprout is still the sprout for that
+  question. (Scanning only the active queue let every evicted object be re-created on the next
+  tick; measured: 39 new sprouts per tick against a queue cap of 50, which starved the
+  difference source for 137 ticks.)
+- Active queue cap 50; beyond that the oldest move to the **frozen zone** (the queue is mutable,
+  the ledgers are not).
+- One sprout may be led at most 3 times. A frozen sprout can be **re-lit** when its difference
+  reappears.
+- **Re-asking frozen sprouts**: after `frozen_requestion_ticks` (default 300) without being
+  re-lit, an object is no longer blocked by its frozen sprout — it may be asked again. The test
+  uses the *newest* freeze of that object, so a backlog of old frozen sprouts cannot release a
+  whole batch at once.
+- The frozen zone has a **capacity rule** of its own: past `frozen_cap` (default 5000) the
+  oldest lines are *moved* to `state/archive/` (move-only, same discipline as ledger rotation).
 
-**固化边不可机械验证**（T6/A7）：成熟链封顶芽（`cap*`）的维度「应用面」是**语义维度**，
-机械层永远读不到 → 它的兑现永远判不出。这是如实标注，不是失败：
+**Domain saturation**: one unfinished sprout per "object domain × accountable quantity".
 
-- `cap*` 行在兑现账里标 `verifiable=false`，**不计入兑现率分母**，也不算「打脸」
-  （读不到 ≠ 打脸）；
-- 对账报告里**单独列出**（`固化边` 段），与可对账样本分开计数；
-- `cap*` 芽**占取题位是刻意的**：封顶芽驱动执行者把已固化能力**应用到别域**
-  （一个真动作，产生主体生长），只是该动作的结果没有机械可读的判据——
-  想让它可对账，需要执行者在主体里留**证据文件**（例如 `app/<拍号>-<对象>.md`），
-  那是对账空间（对象, 存在性）能读到的东西（机制上可行，本版未启用）。
-
-**轮转**（T6/G7）：账本只增不减，历史由**轮转**搬进 `state/archive/`（**只移动不删**）。
-保留策略按账本语义分两种：历史型（差异/兑现/执行者/组织）保留尾部 N 行；
-状态型（成熟链/能力库）**每个键保留最新一行**——否则很久没碰过的对象会随轮转悄悄倒退。
-归档可检索（`infinigrow rotate --search <关键词>`）。**冻结区**（`sprouts-frozen.jsonl`）
-走同一套：超 `frozen_cap` 把最旧的移进 `state/archive/files/frozen/`（M5）。
-
-**信条**：会话可抛，账本持久——生芽/选芽会话每次都是新的，账本是唯一的记忆，
-所以每次增益预测都必须带兑现率引用。
+- The object domain is everything before the last `/` in the object name; an object without `/`
+  is its own domain, which reduces this rule to the merge rule above.
+- A saturated duplicate does not spawn: it is recorded as an `absorbed` count on the existing
+  sprout, and the difference itself is still written to the ledger.
+- Release conditions (any one): ① a new quantity appeared; ② the sprout was resolved or is no
+  longer queued; ③ the holder sprout is exhausted; ④ it is a *different* problem in the same
+  domain (a new quantity by definition).
 
 ---
 
-## 6. 目标隔离（激励相容）
+## 5. Ledgers (append-only)
 
-| 角色 | 业绩（账本现算） | 业绩里**不**包含 |
+| Ledger | One line is | Key fields |
 |---|---|---|
-| 执行会话 | 预测精准（B猜被 W回 证实的比率） | 生芽数量、分岔多少 |
-| 组织会话 | 生芽合理 + 增益预测精准 | 取了多少题、选了哪根芽 |
+| `diffs.jsonl` | one difference (confirmed ones included) | kind / object / dimension / expected / actual / pointer / tick / source |
+| `outcomes.jsonl` | one sprout that was led | sprout id / predicted edge / actual edge / redeemed / pointer / tick / **sampled** / verifiable |
+| `maturity.jsonl` | an object's step | object / step / tick / capped-this-tick |
+| `library.jsonl` | a reusable capability | name / created / last used / **closure (`closed_tick` + pointer)** |
+| `executor.jsonl` | one executor call | kind / rc / duration / prompt & output size / usage / tick |
+| `org-findings.jsonl` | one semantic finding (can be contradicted) | kind / object / dimension / pointer / tick |
+| `org-llm.jsonl` | one org attempt | tick / wall-clock stamp / note |
+| `tick_status.json` | the last tick's mechanical state | failures / **executor failures** / rc / timestamp / tick / engine identity |
 
-不靠藏机制，靠**业绩定义**让两边没有掺假动机：多生芽不是业绩，生芽的**合理性**才是。
+**The redemption rate is computed on read**, and it is honest about samples:
 
-**组织会话要有运行体**（T3/G3）：判据与提示词写好了但没人调用，等于不存在
-（上一代的 P0 根因）。所以它是一段真代码（`engine/org_session.py`）：走执行者通道，
-输入是 B猜＋留痕＋W回，输出是四类差异与规划预测；发现进 `org-findings.jsonl`，
-**结局由后来的对账现算**（`org-status`：待验／被证实／被推翻）——判断不由引擎自述。
+- the denominator counts only rows with `sample=true` (that tick really had an executor acting);
+- with no samples at all, the report says **"no samples"** — the rate is *not computable*, it is
+  not 0 and not "bad";
+- rows whose dimension is mechanically unreadable (the "application surface" of a capped
+  object) are marked `verifiable=false`, excluded from the denominator, and listed separately —
+  unreadable ≠ failure.
 
----
-
-## 7. 保真与守护
-
-- **保真闸**（全机械）：能不能真跑、能不能真验；不过闸不发题。
-- **断流判据＝机械时间戳**：最后一拍距今多久，由心跳文件的机械时间戳算，不用模型自述。
-- **失败必须可见**：心跳写不进去 → 抛 `TickHeartbeatError` → 进程非 0 退出（不许静默）。
-  执行者的失败（非零退出／超时／空输出／起不来）另有独立计数与告警旗。
-- **同拍步进上限**：成熟链 `+1` 硬编码，拒绝单拍连跳。
-- **并发**：`locks/` 独占锁；报告文件名带拍号。
-- **写盘只有一条路**：`ledger/store.py`（越界守卫 ＋ 原子替换）；
-  由静态规则 **R8** 守住（`src/infinigrow` 里除白名单外出现直接写盘即 FAIL）。
-- **退出码单一来源**：`core/exit_codes.py`；CLI 里出现裸整数（≥2）由规则 **R7** 判 FAIL。
-- **版本闸**：运转前过闸（默认用最新版；升不动就按现有版本照常跑）——见 `docs/upgrading.md`
-  与 `docs/running.md`。
+**Rotation** moves history into `state/archive/` (move-only). History-shaped ledgers keep the
+tail N lines; state-shaped ledgers (maturity, library) keep the **latest line per key**, so an
+object that has not been touched in a while cannot silently regress. Archives are searchable
+with `infinigrow rotate --search <term>`.
 
 ---
 
-## 8. 与提示词的同源
+## 6. Goals are separated (incentive compatibility)
 
-机制词（判读/行动/原理/固化/成熟链/差异/兑现账/成熟链封顶/能力库未用/零差异零芽/
-**生长主体/执行者/组织会话/域饱和/轮转**）在**代码**与**提示词**两侧都必须存在——
-表定义在 `src/infinigrow/rules/static_scan.py` 的 `SYNC_TERMS`（单一事实源），
-由 `tools/check_prompt_code_sync.py` 双向校验；规则 **R9** 再守住**表的覆盖下限**
-（有人静默删词＝漂移面回来了）。这是 v1「同一件事两套规则并存」那个病根的
-**结构性防复发手段**。
+| Role | Its score (computed from ledgers) | Not part of its score |
+|---|---|---|
+| acting session | predicted edge vs. actual edge (redemption) | how much text it produced |
+| org session | whether its findings survive later reconciliation | how many findings it filed |
+| engine | mechanical liveness, ledger health | how good the growth looks |
+
+The point is that no role can improve its own score by producing more words.
+
+---
+
+## 7. Static rules
+
+`infinigrow scan` (R1–R10) — zero tokens, runs on an empty repo: no absolute paths, prompt↔code
+sync, no self-sprout clause in prompts, state root gitignored, no credential literals, no BOM,
+single source for exit codes, a single write path, the sync table cannot be shrunk, and the
+scheduled task must use the hidden launcher. `infinigrow selftest` runs a positive and a
+negative case for every rule.
+
+---
+
+## Glossary
+
+The mechanism vocabulary, Chinese and English. These terms are identifiers in code, prompts and
+ledgers; the Chinese form is the canonical one.
+
+| 中文 | English | Meaning |
+|---|---|---|
+| 判读 | read | W→B edge: understanding reality |
+| 行动 | act | B→W edge: making reality change |
+| 原理 | principle | B→B edge: deriving new belief |
+| 固化 | solidify | W→W edge: no longer costs cognition |
+| 成熟链 | maturity chain | read → act → principle → solidify, 4 steps |
+| 差异 | difference | the reconciled gap between prediction and reality |
+| 预测内错 | predicted-wrong | expected change ≠ actual change |
+| 预测内对 | predicted-right | expected == actual (confirmed) |
+| 预测外发现 | unpredicted finding | reality has something the prediction did not mention |
+| 预测未执行 | not executed | predicted, but nothing was done |
+| 兑现账 | outcomes ledger | one line per sprout that was led |
+| 兑现率 | redemption rate | share of sampled, verifiable rows that redeemed |
+| 芽 | sprout | one resolvable difference, the unit of work |
+| 芽源 | sprout source | differences / maturity cap / unused capability |
+| 差异对账 | difference reconciliation | sprout source ① |
+| 成熟链封顶 | maturity cap | sprout source ② (step 4 reached) |
+| 能力库未用 | unused capability | sprout source ③ (library entry idle) |
+| 零差异零芽 | no difference, no sprout | the hard rule of the sprout economy |
+| 冻结区 | frozen zone | where evicted sprouts are suspended (not deleted) |
+| 重问 | re-ask | asking a frozen question again after its cooling period |
+| 结案 | closure | the exit that ends a reminder permanently |
+| 生长主体 | growth subject | the directory the engine grows |
+| 目录对象 | directory object | `<subject>/<path>/`, quantity = file count |
+| 执行者 | executor | whatever acts (prompt on stdin, answer on stdout) |
+| 组织会话 | org session | the semantic pass: reconcile, propose, file findings |
+| 域饱和 | domain saturation | one unfinished sprout per domain × quantity |
+| 轮转 | rotation | moving old ledger lines into `state/archive/` |
+| 定键补观测 | keyed supplemental reading | reading predicted keys that fell outside the window |
+| 观察面 | observation surface | the bounded set of mechanically readable facts |
+
+Chinese design document: [`zh/mechanism.md`](zh/mechanism.md).

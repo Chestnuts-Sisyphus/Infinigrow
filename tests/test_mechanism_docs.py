@@ -2,8 +2,12 @@
 """文档↔代码同源：**机制正本说的，代码里真得有**（反之亦然）。
 
 v1 的病根是「同一件事两处写、两边各自演化」。`tools/check_prompt_code_sync.py` 管的是
-提示词↔代码；本测试补上**文档↔代码**那一半：`docs/mechanism.md` 是机制正本，
-它写下的每条判据都必须在代码里有对应实现，否则文档就成了愿望清单。
+提示词↔代码；本测试补上**文档↔代码**那一半。
+
+**语言分层（2026-09-17）**：机制正本是**中文**（`docs/zh/mechanism.md`）——机制词是
+引擎的标识符（代码/提示词/账本都用它）；公开文档是英文（`docs/mechanism.md`），
+必须带**双语术语表**。所以：中文正本管「判据短语」的同源断言，
+英文公开文档管「术语覆盖」的断言（两边都不许缺）。
 """
 from __future__ import annotations
 
@@ -13,7 +17,11 @@ from infinigrow.engine.model import (EDGE_DIRECTION, EDGE_GROWTH_TEST, Edge, MAT
                                      MATURITY_CHAIN, SPROUTING_KINDS, DiffKind, SproutOrigin)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-MECHANISM = (REPO_ROOT / "docs" / "mechanism.md").read_text(encoding="utf-8")
+DOCS = REPO_ROOT / "docs"
+#: 机制正本（中文；判据短语在这里）
+MECHANISM = (DOCS / "zh" / "mechanism.md").read_text(encoding="utf-8")
+#: 公开设计文档（英文；术语与译文在这里）
+MECHANISM_EN = (DOCS / "mechanism.md").read_text(encoding="utf-8")
 PROMPTS = "\n".join((REPO_ROOT / "prompts" / n).read_text(encoding="utf-8")
                     for n in ("tick.md", "org-session.md"))
 
@@ -56,23 +64,42 @@ def test_no_self_sprout_claim_is_documented():
 
 def test_superseded_table_covers_the_self_sprout_clause():
     """废弃登记表必须点名那条旧条款（退役件不许悄悄消失）。"""
-    text = (REPO_ROOT / "docs" / "superseded.md").read_text(encoding="utf-8")
+    text = (DOCS / "zh" / "superseded.md").read_text(encoding="utf-8")
     assert "完成即分岔" in text and "已清" in text
+    english = (DOCS / "superseded.md").read_text(encoding="utf-8")
+    assert "Branch on completion" in english and "cleared" in english     # 英文公开版同样登记
 
 
-def test_changelog_known_limitations_exist():
-    """已知限制必须真的写着（Release 说明要引用它）。"""
-    text = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-    assert "已知限制" in text
+def test_release_notes_state_known_limitations():
+    """已知限制必须真的写着（Release 说明要引用它）——公开面是英文的。"""
+    changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "release-notes-v2.0.0.md" in changelog          # 变更日志指到发布说明
+    for name in ("release-notes-v2.0.0.md", "release-notes-v2.1.0.md"):
+        text = (DOCS / name).read_text(encoding="utf-8")
+        assert "Known limitations" in text, "%s 缺已知限制" % name
+
+
+def test_english_public_docs_carry_the_mechanism_glossary():
+    """公开文档必须是英文，且带**双语术语表**（机制词是标识符，不能只在中文正本里）。
+
+    语言分层：判据短语在中文正本（`docs/zh/`），公开英文文档负责「读得懂 + 术语可查」。
+    """
+    for edge in Edge:
+        assert edge.value in MECHANISM_EN, "英文文档缺术语：%s" % edge.value
+    for kind in DiffKind:
+        assert kind.value in MECHANISM_EN, "英文文档缺差异类型：%s" % kind.value
+    for origin in SproutOrigin:
+        assert origin.value in MECHANISM_EN, "英文文档缺芽源：%s" % origin.value
+    assert "Glossary" in MECHANISM_EN and "no difference, no sprout" in MECHANISM_EN
 
 
 def test_journal_naming_rule_is_synced_across_three_sources():
     """K7/A8：`journal/` 命名规则 `<创建拍号4位>-<创建日期YYYYMMDD>.md` 三处同源。
 
-    执行者提示词（tick.md）／组织会话提议（org-session.md）／主体文档（growth-subject.md）
+    执行者提示词（tick.md）／组织会话提议（org-session.md）／主体文档（`docs/zh/growth-subject.md`）
     必须写同一句；代码里 `subject.valid_journal_name` 是机械判据。改一处＝各处一起改。
-    （本机主体声明 `<仓库同级>/Infinigrow-subject/subject.md` 也同步该句，但它不在
-    仓库里、不在 CI 上——仓库内断言以 growth-subject.md 为准。）
+    （本机主体声明 `<仓库同级>/<主体名>/subject.md` 也同步该句，但它不在仓库里、不在 CI 上
+    ——仓库内断言以中文正本为准；英文公开文档用英文写出同一条规则。）
     """
     from infinigrow.engine.subject import valid_journal_name
     # 机械判据本身
@@ -85,11 +112,13 @@ def test_journal_naming_rule_is_synced_across_three_sources():
     texts = {
         "tick.md": (REPO_ROOT / "prompts" / "tick.md").read_text(encoding="utf-8"),
         "org-session.md": (REPO_ROOT / "prompts" / "org-session.md").read_text(encoding="utf-8"),
-        "growth-subject.md": (REPO_ROOT / "docs" / "growth-subject.md").read_text(encoding="utf-8"),
+        "zh/growth-subject.md": (DOCS / "zh" / "growth-subject.md").read_text(encoding="utf-8"),
     }
     for name, text in texts.items():
         assert "<创建拍号4位>-<创建日期YYYYMMDD>.md" in text, "%s 缺命名规则" % name
         assert "YYYYMMDD" in text, "%s 缺日期段说明" % name
+    english = (DOCS / "growth-subject.md").read_text(encoding="utf-8")
+    assert "YYYYMMDD" in english, "英文公开文档缺命名规则"
 
 
 def test_reminder_exit_and_requestion_are_documented():
@@ -114,9 +143,13 @@ def test_observation_surface_boundary_is_documented():
     from infinigrow.engine.subject import SUBJECT_DIR_LIMIT, SUBJECT_FILE_LIMIT
     assert str(SUBJECT_DIR_LIMIT) in MECHANISM and str(SUBJECT_FILE_LIMIT) in MECHANISM
     assert "定键补观测" in MECHANISM
-    architecture = (REPO_ROOT / "docs" / "architecture.md").read_text(encoding="utf-8")
-    assert "目录对象" in architecture, "架构文档的观测面摘要必须含目录对象（M9）"
-    assert str(SUBJECT_DIR_LIMIT) in architecture
+    # 英文公开文档必须同样写着（公开面与正本两边都不许缺）
+    assert "keyed supplemental reading" in MECHANISM_EN
+    architecture = (DOCS / "architecture.md").read_text(encoding="utf-8")
+    assert "directory object" in architecture.lower(), "架构文档的观测面摘要必须含目录对象（M9）"
+    assert str(SUBJECT_DIR_LIMIT) in MECHANISM_EN
+    zh_arch = (DOCS / "zh" / "architecture.md").read_text(encoding="utf-8")
+    assert "目录对象" in zh_arch
 
 
 def test_frozen_zone_has_a_capacity_rule_documented():

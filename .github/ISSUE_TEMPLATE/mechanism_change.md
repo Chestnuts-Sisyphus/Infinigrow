@@ -1,22 +1,22 @@
-<!-- 机制变更请先读 CONTRIBUTING.md 的「改机制」四步。 -->
+<!-- For a mechanism change, read the four steps under "Changing the mechanism" in CONTRIBUTING.md first. -->
 ---
-name: 机制变更提案
-about: 改判据（边 / 成熟链 / 差异类型 / 芽源 / 账本）
+name: Mechanism change proposal
+about: Change a test (edge / maturity chain / difference kind / sprout source / ledger)
 labels: ["mechanism"]
 ---
 
-**要改哪条判据**
-（指向 `docs/mechanism.md` 的节号）
+**Which test changes**
+(section number in `docs/mechanism.md`)
 
-**为什么现在的判据不够**
-（写清触发它的**具体状态**，不要写「最近经常……」这类频率式描述：
-那种描述无法被机械检验，本项目不接受它作为变更理由）
+**Why the current test is not enough**
+(describe the **specific state** that triggers it. Frequency-style descriptions such as "this
+keeps happening lately" cannot be checked mechanically and are not accepted here as a reason.)
 
-**改成什么**
-（改成什么样的可查状态？怎么在账本上判它成立/不成立？）
+**What it becomes**
+(what checkable state replaces it? how does a ledger show it holds or fails?)
 
-**影响面**
-- [ ] 提示词要同步改
-- [ ] 账本格式变了（旧账本怎么办？）
-- [ ] 已有测试要改
-- [ ] 需要退役登记（`docs/superseded.md` 加一行）
+**Impact**
+- [ ] prompts must change with it
+- [ ] ledger format changes (what happens to existing ledgers?)
+- [ ] existing tests must change
+- [ ] a retirement entry is needed (a row in `docs/superseded.md`)

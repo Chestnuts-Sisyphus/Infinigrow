@@ -174,5 +174,8 @@ def test_payload_runs_end_to_end_help():
 
 
 def test_upgrade_docs_state_the_rule():
-    text = (REPO_ROOT / "docs" / "upgrading.md").read_text(encoding="utf-8")
-    assert "run_latest" in text and "最新" in text
+    """「默认用最新版、升不动就按现有版本跑」这条规则必须在文档里写着（中英两边都不许缺）。"""
+    english = (REPO_ROOT / "docs" / "upgrading.md").read_text(encoding="utf-8")
+    assert "run_latest" in english and "latest" in english
+    chinese = (REPO_ROOT / "docs" / "zh" / "upgrading.md").read_text(encoding="utf-8")
+    assert "run_latest" in chinese and "最新" in chinese

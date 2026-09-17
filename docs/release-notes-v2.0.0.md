@@ -1,61 +1,67 @@
-# Infinigrow v2.0.0 — 纯正新版
+# Infinigrow v2.0.0 — the rewrite
 
-**一个靠「预测 → 对账 → 把差异变成芽」来生长的引擎。**
+**An engine that grows by predicting, reconciling, and turning differences into sprouts.**
 
-多数「自主 agent」循环靠累积生长：更多笔记、更多摘要。那种生长没有梯度，可以永远转下去而不变好。
-Infinigrow 靠**被现实反驳**生长：每一拍先写下预期（B猜），动手，然后由现实给出回答（W回），
-机械地对账；**每个差异成为一根芽。没有差异，就没有芽。**
+Most "autonomous agent" loops grow by accumulating: more notes, more summaries. That kind of
+growth has no gradient — it can run forever without getting better. Infinigrow grows by **being
+contradicted**: each tick writes down what it expects reality to become, acts, then lets reality
+answer, and reconciles mechanically. **Every difference becomes a sprout. No difference, no sprout.**
 
-本版是**断代重写**，不是上一代的补丁：只保留机制本身，其余从零搭起。
+This is a clean-break rewrite, not a patch on the previous generation: only the mechanism is
+carried over; everything else was built from scratch.
 
----
+## What is in it
 
-## 这一版里有什么
+- **Six packages, one-way dependencies**: `core → ledger → engine → rules/garden/scheduler → cli`.
+- **Parameterised state root**: defaults to `<repo>/state`, redirectable with `--state-root` /
+  `IG_STATE_ROOT`. **Zero absolute paths** in source or prompts (rule R1).
+- **Sprouts come only from ledgers** — differences, maturity cap ("what else can this be used
+  for?"), unused capability-library entries ("why is this not used?"). There is **no** code path
+  for the acting session to register a sprout; that is structural, not a comment.
+- **No difference, no sprout**; one sprout per object × dimension; queue cap 50 with a frozen zone
+  beyond it (the queue is mutable, the ledgers are not).
+- **Maturity chain advances at most +1 per tick**; reaching the cap spawns a "put it to other use"
+  sprout.
+- **Concurrency**: reports are named by tick (`reconcile-00007.md`), `locks/` serialises sessions,
+  stale locks are cleaned, and a session that cannot take the lock skips the tick idempotently.
+- **Failures are visible**: an unwritable heartbeat raises and exits non-zero — the gardener's
+  liveness check must never stall silently.
+- **Six static rules**, zero tokens, run on every push: no absolute paths, prompt↔code sync, no
+  self-sprout clause, state root gitignored, no credential literals, no BOM; each with a positive
+  and a negative case.
+- **CI runs a cold start**: three ticks in an empty state root, zero tokens, zero credentials, and
+  asserts no absolute path appears in the artifacts.
 
-- **六层包**（依赖单向）：`core → ledger → engine → rules/garden/scheduler → cli`
-- **状态根参数化**：默认 `<repo>/state`，可 `--state-root`／`IG_STATE_ROOT` 指到任意目录；
-  源码与提示词里**零绝对路径**（由静态规则 R1 守）
-- **芽只来自账本**（三个来源：差异对账／成熟链封顶「它还能在哪用」／能力库未用「为什么没用上」）
-  ——引擎**没有**「执行会话自己登记新芽」的入口，这是结构保证而不是注释约定
-- **零差异零芽**；同对象同维度只养一根芽；队列上限 50，超限进冻结区（只动队列，账本全留）
-- **成熟链同拍最多 +1**，封顶即止；封顶那一拍生「开应用面」芽
-- **并发治理**：对账报告名带拍号（`reconcile-00007.md`）、`locks/` 独占锁、陈旧锁自动清、
-  拿不到锁＝本拍幂等跳过
-- **失败可见**：心跳写不进去抛异常并让进程非 0 退出（园丁的断流判据不许静默停摆）
-- **六条静态规则**（零 token，CI 每次都跑）：零绝对路径／提示词代码同源／禁自造芽条款／
-  状态根被忽略／无凭据字面量／无 BOM；每条都配正反用例
-- **CI 含冷启动空仓跑三拍**：空状态目录、零 token、零凭据，并断言产物里没有绝对路径
-
-## 你可以自己验（零 token、零凭据、不出网）
+## Verify it yourself (zero tokens, zero credentials, no network)
 
 ```bash
-git clone <this-repo> && cd Infinigrow
+git clone https://github.com/Chestnuts-Sisyphus/Infinigrow && cd Infinigrow
 pip install -e ".[dev]"
-python -m pytest -q                     # 全部测试
-python -m infinigrow tick --probe       # 空仓跑一拍：差异 → 芽，看得见
-python -m infinigrow scan               # 六条静态规则
-python -m infinigrow selftest           # 规则正反用例
-python tools/privacy_scan.py --root .   # 隐私扫描（路径/凭据/邮箱）
+python -m pytest -q
+python -m infinigrow tick --probe        # one tick on an empty state root: differences → sprouts
+python -m infinigrow scan                # static rules
+python -m infinigrow selftest            # rule cases
+python tools/privacy_scan.py --root .    # paths / credentials / emails
 ```
 
----
+## Known limitations (read this part)
 
-## 已知限制（请先读这一节）
+1. **A mechanical tick does no cognition.** Without an executor a tick only observes and
+   reconciles; a "contradicted" outcome in that mode is correct behaviour, not a defect.
+2. **The executor interface is a plain function.** No vendor SDK, no key management, no retries or
+   provider rotation. Read `SECURITY.md` before wiring anything that runs commands.
+3. **The maturity chain records which step an object reached**, not the full evidence of each edge;
+   lookups go through ledger pointers.
+4. **Domain quotas are not implemented yet.** Convergence comes from "merge per object × dimension
+   + cap 50 + frozen zone"; a domain-level threshold waits for measured data rather than a guess.
+5. **The previous generation's deployment surface is not ported**: Windows scheduling, proxy
+   self-healing, multi-provider rotation — those are host environment, not mechanism.
+6. **This is the first version of the rewrite line**, not an equivalent replacement: the previous
+   generation's 28 rules, embedded fixtures and per-sprout change history were deliberately left
+   out — stacking new rules on old ones is what made it spin.
+7. **Packaging had not been exercised on GitHub Actions at release time**; every CI step had been
+   run locally in the same order, including the cold start.
 
-1. **机械拍不做认知**：不给执行器（`run_tick(..., llm=...)` 为空）时，一拍只做机械观测与对账，
-   不会产生真实生长——**兑现账里的「打脸」在没有执行者时是正确表现，不是缺陷**。
-2. **执行者接口就是一个普通函数**：本版不带任何厂商 SDK、不带密钥管理、不带重试与轮转。
-   怎么接、接谁，由使用者决定（接之前请读 `SECURITY.md`）。
-3. **成熟链只记「对象到第几步」**，不存每条边的证据全文；回查靠账本里的指针。
-4. **域饱和判据（同域配额）尚未实现**：目前靠「同对象同维度合并 + 上限 50 + 冻结区」三件收敛，
-   域级冷却留待按实测数据决定，而不是先拍一个阈值。
-5. **未移植上一代的部署面**：Windows 计划任务/双钟调度、出网代理自愈、多通道模型轮转
-   都不在本版（它们在宿主环境里，与机制无关）。
-6. **这是重写线的第一个版本**，不是上一代功能的等价替换：上一代的 28 条静态规则、
-   内嵌测试夹具与逐芽变更史**刻意没有带进来**——新旧规则叠加正是上一代原地打转的病根。
-7. **打包与发布尚未验证到「GitHub Actions 真跑」**：CI 工作流的每一步都在本地按相同顺序
-   复跑并通过（含打包安装与冷启动），但 runner 上的首次运行会发生在你看到这个 Release 之后。
+## License
 
-## 许可
-
-MIT。
+MIT.

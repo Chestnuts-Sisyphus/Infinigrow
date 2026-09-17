@@ -1,17 +1,19 @@
-# Infinigrow v2.2.3 — A20 根因硬化（执行者子进程强制 UTF-8 stdio）
+# Infinigrow v2.2.3 — root cause of the executor-400 family (UTF-8 stdin)
 
-真机定位并根治 A20（计划任务上下文执行者持续 400）：
+A live incident was traced to its root and fixed: an executor called from a scheduled task failed
+with HTTP 400 repeatedly, while the same call succeeded from an interactive shell.
 
-- **根因**：执行者适配器的 `harden_stdio()` 只重配了 stdout/stderr，漏了 stdin。
-  引擎经 subprocess 用 UTF-8 把提示词写进 stdin；计划任务启动的进程 stdin 默认编码
-  非 UTF-8，把提示词读坏 → 字符串混入孤立代理字符 → JSON 转义成 `\udXXX` →
-  上游报「lone leading surrogate in hex escape」→ 400。
-  交互 shell 的 stdin 默认就是 UTF-8，所以手动跑同一请求一直成功。
-- **引擎侧硬化**：`executor_env()` 注入 `PYTHONIOENCODING=utf-8`，任何适配器都不再
-  依赖自己的默认编码（测试锁定）。
-- **适配器侧修复**（私有文件）：`harden_stdio()` 补 `sys.stdin.reconfigure(encoding="utf-8")`。
-- **验证**：同一计划任务上下文，修复前 rc=1/请求含孤立代理；修复后 rc=0/无孤立代理；
-  交互自检连续通过。
+- **Root cause**: the executor adapter's `harden_stdio()` reconfigured stdout and stderr but not
+  **stdin**. The engine writes the prompt into the child's stdin as UTF-8; a process started by the
+  scheduler reads stdin with the system code page, so the prompt was corrupted, stray surrogate
+  characters appeared, and the upstream rejected the request ("lone leading surrogate in hex
+  escape"). An interactive shell happens to default to UTF-8, which is why manual runs always
+  worked.
+- **Fixes**: the adapter also reconfigures stdin, and the engine injects
+  `PYTHONIOENCODING=utf-8` into the executor's environment, so no adapter has to depend on its own
+  default code page.
+- **Verification**: same-context comparison before and after (rc=1 → rc=0, stray surrogate
+  present → absent), then end-to-end on the real scheduled task: two consecutive ticks with rc=0,
+  executor failure count 9 → 0, alert cleared.
 
-定位方法（可复跑）：放宽错误截断抓完整错误体 → 请求指纹打点（sha256/长度/孤立代理标记）
-→ 隐藏启动器诊断任务在计划任务上下文复现 → 修复前后同上下文对照。
+**Full changes**: [`CHANGELOG.md`](../CHANGELOG.md).

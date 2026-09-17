@@ -1,38 +1,44 @@
-# 隐私与发布清场（公开版）
+# Privacy and release hygiene
 
-> 本文件是**发布前清场规则的公开版**：只说规则，不写本机的具体清单。
-> 具体禁列（本机路径、个人标识）在仓库之外，由 `--deny` 传入，**从不进版本库**。
+> The public version of the pre-publish checklist: the rules, not this machine's specific
+> deny-list. Machine-specific paths and identity terms live outside the repository, are passed
+> in with `--deny`, and are **never committed**.
 
-## 三条硬线
+## Three hard lines
 
-1. **不出现绝对路径**：源码、提示词、文档、脚本里都不许有盘符路径或家目录路径。
-   状态根、提示词目录、凭据目录一律走配置项（`IG_*` 环境变量或配置文件）。
-   机器判据：静态规则 **R1** ＋ `tools/privacy_scan.py` 的 `abs-*-path`。
-2. **不出现凭据**：任何 key/token/私钥都不得以字面量形式出现；凭据只从环境或外部目录读，
-   且**默认不需要凭据**（空仓可跑）。机器判据：规则 **R5** ＋ 扫描器的 key 形态规则。
-3. **不出现个人与项目标识**：本机用户名、真实姓名、身份称呼、其它项目的名字、
-   私有基础设施（代理端口、VPN 目录、密钥目录名）一概不进仓库。
-   机器判据：扫描器的**项目层禁列**（`--deny <file>`，文件本身被 gitignore）。
+1. **No absolute paths** — not in source, prompts, docs or scripts: no drive letters, no home
+   directories. The state root, prompt directory and credential directory are all configuration
+   (`IG_*` env vars or the config file). Machine checks: rule **R1** and the `abs-*-path`
+   patterns in `tools/privacy_scan.py`.
+2. **No credentials** — keys, tokens and private keys never appear as literals. Credentials are
+   read from the environment or an external directory, and the engine **needs none by default**
+   (an empty repo runs). Machine checks: rule **R5** and the scanner's key-shape patterns.
+3. **No personal or project identifiers** — usernames, real names, other projects' names, private
+   infrastructure (proxy ports, VPN directories, key directories) stay out. Machine check: the
+   scanner's **project layer** (`--deny <file>`, and that file is gitignored).
 
-## 两类扫描，两层规则
+## Two scan layers
 
-| 层 | 内容 | 是否进仓库 | 何时跑 |
+| Layer | Content | In the repo? | When it runs |
 |---|---|---|---|
-| 通用层 | 绝对路径、凭据形态、邮箱 | **进**（随仓库发布，规则是通用的） | CI 每次都跑 |
-| 项目层 | 本机根路径、身份词、他项目名、私有设施 | **不进**（`.gitignore` 忽略） | 本地发布前跑 |
+| generic | absolute paths, credential shapes, emails | **yes** (the rules are generic) | every CI run |
+| project | this machine's roots, identity terms, other project names, private infra | **no** (`--deny` file, gitignored) | before publishing, locally |
 
-`tools/privacy_scan.py` 的规则写成「形态表达式」而不是「违禁词清单」：
-违禁词本身写进公开仓库，正是这套规则要防的事。
+The scanner's rules are **shape expressions, not a banned-word list** — putting the banned words
+themselves into a public repository is exactly what the rule exists to prevent.
 
-## 发布前清单
+## Before publishing
 
 ```bash
-python tools/privacy_scan.py --root .                      # 通用层必须零命中
-python tools/privacy_scan.py --root . --deny privacy-deny.txt   # 项目层必须零命中
-python -m infinigrow scan                                   # 十条规则全 PASS（R1-R10）
-python -m pytest -q                                         # 含冷启动与隐私测试
-git status --porcelain --ignored                            # state/ archive/ 秘密文件必须被忽略
+python tools/privacy_scan.py --root .                            # generic layer: zero hits
+python tools/privacy_scan.py --root . --deny privacy-deny.txt     # project layer: zero hits
+python -m infinigrow scan                                         # all ten rules PASS
+python -m pytest -q                                               # includes cold-start and privacy tests
+git status --porcelain --ignored                                  # state/, archive/, secrets ignored
 ```
 
-**空仓验收不通过不得发布**：在临时目录用空状态跑一拍（零 token、零凭据），
-产物里不得出现任何绝对路径——这条由 `tests/test_coldstart.py` 守着。
+**A cold-start check that fails blocks publishing**: run one tick in a temporary directory with an
+empty state root (zero tokens, zero credentials) and confirm no absolute path appears in any
+artifact. `tests/test_coldstart.py` guards that, and CI runs it on every push.
+
+Chinese original: [`zh/privacy.md`](zh/privacy.md).

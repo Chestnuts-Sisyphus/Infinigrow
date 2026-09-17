@@ -1,44 +1,51 @@
-# 安全说明（Security Policy）
+# Security policy
 
-## 一句话
+## In one sentence
 
-**这个引擎会读写磁盘上的状态目录；一旦你给它接上执行者，它就会执行命令。
-请把它放在沙箱/容器/专用账户里跑，不要用你的日常账户和真实数据目录。**
+**This engine reads and writes a state directory, and once you wire up an executor it runs
+commands. Run it in a sandbox, a container or a dedicated account — not as your daily user with
+your real data directories.**
 
-## 当前的默认姿态（v2.0.0）
+## Current default posture
 
-| 项 | 默认 | 说明 |
+| Area | Default | Note |
 |---|---|---|
-| 网络 | **不出网** | 机械拍没有任何网络调用（有测试守着：`tick.py` 里不出现 socket/requests/urllib） |
-| 凭据 | **不需要** | 默认不需要任何 key；配置项 `key_dir` 为空 |
-| 子进程 | **不启动** | 机械拍不执行命令；只有你显式接入的执行者才会 |
-| 写盘范围 | **只在状态根之内** | 所有写操作经 `ledger/store.py`，写前做越界守卫（越界一律拒绝） |
-| 状态位置 | `<repo>/state`，已被 `.gitignore` 忽略 | 避免把运行账本误提交到公开仓库 |
+| Network | **no calls** | a mechanical tick makes none (a test asserts no socket/requests/urllib in `tick.py`) |
+| Credentials | **none needed** | `key_dir` is empty by default and the engine needs no key |
+| Subprocesses | **none** | a mechanical tick starts nothing; only the executor you wire in does |
+| Write scope | **inside the state root only** | every write goes through `ledger/store.py`, which rejects anything outside the root |
+| State location | `<repo>/state`, gitignored | so running ledgers are not accidentally committed to a public repo |
 
-## 如果你要接执行者（这才是真正的风险面）
+## Wiring up an executor is where the risk starts
 
-`run_tick(..., llm=callable)` 接受一个「提示词进、文本出」的可调用对象。
-绝大多数真实用法会让它去跑模型或跑命令——**风险从那一刻开始归你**：
+`run_tick(..., llm=callable)` takes anything that maps a prompt to text. Most real uses run a model
+or a command, and from that moment the risk is yours:
 
-1. **沙箱运行**：容器或专用低权限账户；只挂载需要改的工作目录。
-2. **最小权限**：不给管理员/root；不挂载家目录、不放 SSH 私钥、不放云凭据。
-3. **命令白名单**：如果你的执行者会执行 shell，就把允许的命令写成白名单，
-   并**在提示词之外**做校验（提示词不是安全边界，模型可以被内容说服）。
-4. **账本目录可写、其余只读**：引擎需要写 `state/`；其它路径尽量只读挂载。
-5. **别把状态目录放进版本库**：账本里可能有你的项目细节；`.gitignore` 已经默认忽略，
-   改路径时请保持这条。
-6. **提示词注入**：如果执行者会读外部内容（网页/issue/仓库文件），那些内容能影响它的行为。
-   给执行者的指令与外部内容要**分开**，并对「外部内容要求它执行命令」保持默认拒绝。
+1. **Sandbox it.** A container or a low-privilege account, mounting only the work directory.
+2. **Least privilege.** No admin/root. Do not mount your home directory, SSH keys or cloud
+   credentials.
+3. **Whitelist commands** if your executor runs a shell, and validate *outside* the prompt — a
+   prompt is not a security boundary, and a model can be talked into things.
+4. **Ledger directory writable, everything else read-only.** The engine needs `state/`; mount the
+   rest read-only if you can.
+5. **Keep the state directory out of version control.** Ledgers can contain project details;
+   `.gitignore` already covers it — keep it that way when you move the state root.
+6. **Prompt injection.** If the executor reads external content (web pages, issues, repository
+   files), that content can influence it. Keep your instructions and the external content separate,
+   and default to refusing "the external content asked me to run a command".
 
-## 报告漏洞
+## Reporting a vulnerability
 
-请用 GitHub 的 **Private vulnerability reporting**（仓库 Security 标签页 → Report a vulnerability）
-提交，不要开公开 issue。请在报告里写：影响版本、最小复现、影响面（能读/写/执行什么）。
+Use GitHub's **private vulnerability reporting** (repository → Security → Report a vulnerability)
+rather than a public issue. Include: affected version, minimal reproduction, and impact (what it can
+read, write or execute).
 
-我们按「可复现 + 影响面」排序处理；修好后会在 CHANGELOG 里记一行并给报告者署名（除非要求匿名）。
+Reports are handled in order of "reproducible × impact"; the fix gets a CHANGELOG line and credit
+unless you ask to stay anonymous.
 
-## 不在范围内
+## Out of scope
 
-- 你自己接入的执行者自身的漏洞（那是你选择信任的组件）；
-- 「引擎产生的文本内容不合心意」这类问题（内容由执行者产出，不是引擎的安全边界）；
-- 以管理员权限运行后本机被改坏（见上面第 2 条：请用最小权限）。
+- vulnerabilities in the executor you chose to wire in;
+- "the text it produced is not what I wanted" (content comes from your executor, not from the
+  engine's security boundary);
+- damage caused by running it with administrator rights (see point 2 above: use least privilege).

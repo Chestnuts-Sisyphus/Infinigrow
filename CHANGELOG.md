@@ -1,537 +1,221 @@
-# 变更日志
-
-本文件只记「对外可见的变化」：机制、接口、判据。内部实现细节不进这里。
-
-版本体系说明见 [`docs/versioning.md`](docs/versioning.md)。
-
-## v2.2.12 — 输入块标题不再写死窗口（N58 收尾）（2026-09-17）
-
-主题：v2.2.11 把窗口拉成「自上次组织会话以来」，但输入块的**标题**仍写着「上一拍动手前 →
-动手后」——标题与内容两处各说各话（v2.2.9 修过一次同型问题）。标题改为**不含窗口**的写法
-（`K14 扫现实：机械对比；窗口写在下一行`），窗口只在下一行由代码给——**标题不可能再过期**。
-另把窗口行的「锚点＝拍 N」改成「起点＝拍 N」（回退路径下它不是锚点，说「锚点」是错话）。
-
-### 工程
-
-- 测试断言随窗口行措辞更新（`test_prompt_shows_dir_objects_and_reality_delta` 等三条）。
-
-## v2.2.11 — 扫现实的窗口拉到「自上次组织会话以来」（N58）（2026-09-17）
-
-主题：K14 的窗口**必须覆盖消费者缺席的那段时间**——组织会话每 3~5 拍才跑一次，
-1 拍窗口让它天然错过其余几拍的变化（实测拍 340/344/348/352/357/362/367 **七次全空**）。
-
-### 机制
-
-- **锚点式窗口（N58）**：组织会话的「本拍现实变化」块改为比对
-  `state/subject-org-anchor.json`（**上次它跑时**读到的清单，由拍循环在它跑完后刷新）
-  与**此刻清单**之差——这就是「自上次组织会话以来」的全部现实变化。
-  条目不变：新出现／有变化（字节数变了）／从清单里消失／目录格数变化。
-- **两条反相关的事实（为什么非改不可）**：①组织会话靠冷却闸＋触发判据触发，
-  两次之间隔 3~5 拍；②触发判据④要求「上一拍连续零差异行」，而**生长拍必然写
-  非「预测内对」行**（动作自因差异 `act_caused` 也如实入账）→ 经 ④ 触发的会话，
-  窗口**永远是安静的那一拍**。所以 1 拍窗口下「新出现」几乎永远为空——不是判据坏了，
-  是窗口太窄。
-- **诚实面**：锚点缺失（首次跑／旧状态根）→ 退回「上一拍动手前 → 动手后」，
-  并把窗口如实写在那一行里，**不假装看过**。
-
-### 工程
-
-- `core/paths.py` 增派生路径 `subject_org_anchor`；`tick.py` 在组织会话跑完后写锚点；
-  `subject-before.json` 保留为回退窗口与「那一手动作」的排查读数。
-- 测试 +2：窗口覆盖「自上次会话以来」的每一拍（含格数变化与消失项）、锚点缺失时的回退与如实说明。
-
-## v2.2.10 — 扫现实补上「有变化」那半边（N59）（2026-09-17）
-
-主题：提示词承诺「**新出现／有变化**的东西是候选」，而实现只报了「新出现／消失／格数」——
-**改名没改的改写/追加**（字节数变了）一条都不报。补上它，K14 的两条现实入口才都通。
-
-### 机制
-
-- **「有变化」行（N59）**：组织会话输入块「本拍现实变化」新增一行
-  `有变化（动手前后字节数不同、名字没变）：主体/<相对路径>（a→b 字节）`。
-  仍在**有界清单**里比（前一拍动手前后两份快照的最新 20 个文件），不扩观测面。
-- 提示词 §3.6 与实现对齐（对比项清单＝新出现／有变化／消失／格数）。
-
-### 工程
-
-- 测试：`tests/test_org_session.py::test_reality_delta_reports_byte_level_changes`
-  （字节变了 → 进「有变化」；名字没变 → **不**进「新出现」）。
-
-## v2.2.9 — 两处「报数说假话」的修正（N55 收尾 ＋ N56）（2026-09-17）
-
-主题：把两处**读数与单位/窗口对不上**的地方修准——判据可以慢，但不许报错数。
-
-### 机制 / 工程
-
-- **组织会话输入块的标题（N55 收尾）**：标题仍写着「上一拍快照 vs 本拍清单」，
-  而块内容已改成「上一拍动手前 → 动手后」（v2.2.8）。标题与内容不一致＝同一件事两处写，
-  改准一致性：标题＝`上一拍**动手前 → 动手后**`。
-- **组织段触发判据④的单位（N56）**：「连续 N 拍零差异」数的是**差异账的行数**
-  （一拍几十行），却把读数写成「连续 86 拍」——实测那是 86 行 ≈ 2 拍。
-  阈值语义**不动**（仍按行数 ≥ 10 触发：它与 30 分钟冷却闸配合，是既有的运行节奏），
-  但读数与理由同时给出**行数**与它覆盖的**拍数**（`连续预测内对行数` /
-  `连续零差异拍数`），报数不再混单位。
-- 测试：`tests/test_org_trigger.py` 的零差异用例同时断言行数与拍数；
-  组织会话输入块用例已按两份快照语义（v2.2.8）锁定。
-
-## v2.2.8 — 扫现实的对比窗口（N55：K14 的判据此前恒为空）（2026-09-16）
-
-主题：**把 K14「扫现实」的对比窗口修正到「上一手动作的前后」**——先前那块判据在正常
-连续运转下**恒为空**，等于没接上。
-
-### 机制
-
-- **对比窗口（N55）**：组织会话输入里的「本拍现实变化」原先比的是
-  「上一拍快照 vs 本拍清单」——而上一拍快照是**动手之后**写的、本拍清单是**本拍动手
-  之前**读的，两者之间什么也没发生 → 这块永远报「无新出现无变化」（实测：拍 326/331/335
-  三次组织会话输出全部如此，其中 335 的 notes 原文写着「K14本拍现实无新出现无消失
-  无格数变化故不另立finding」）。现在比的是**同一拍的两份快照**：
-  `state/subject-before.json`（`tick.py` 步 2，动手前）vs `state/subject.json`（步 8，动手后）
-  ——那正好是「上一手动作造成的现实变化」，也正是 K14 想抓的东西
-  （这类变化在差异账里被 `act_caused` 中和，只有这块能看见）。
-- **诚实面**：只有「动手后」快照、没有「动手前」那一份时，如实说这块空着，
-  **不拿别的读数凑**一个假对比（宁缺不假）。
-
-### 工程
-
-- `core/paths.py` 增派生路径 `subject_before_snapshot`；`tick.py` 步 2 写这份快照
-  （每拍一次目录列举，代价可忽略）。
-- 测试：`tests/test_org_session.py` 的输入块用例改为**两份快照**语义（断言点名新出现的
-  对象 ＋ 对比窗口写在输入里）＋补一条「缺动手前快照时如实报空」的用例。
-- 提示词 §3.6 与机制正本同步（对比窗口＝同一拍动手前后）。
-
-## v2.2.7 — 提醒的出口与冻结芽的重问（N48 修复）＋观测边界修边（M5/M6/M7/M8）（2026-09-16）
-
-主题：**修掉「一条永真、无出口、可无限重生的提醒把队列占满」这个结构缺陷**（N48），
-它的现场是主芽源「差异对账」**自 tick 189 起零取题**（能力库 91 条条目全部已有芽，
-却每拍再立 ~36 根；冻结区 3711 行里 3510 行从未被领过）。
-
-### 机制
-
-- **去重含冻结区（N48 真凶）**：「同对象同维度只有一根芽」这条合并律此前**只扫活跃队列**
-  ——被挤出的对象下一拍又被当成「没生过」重新立芽，每拍 ~36 根重复芽把上限 50 的队列占满。
-  现在既生集合＝活跃 ∪ **冻结**（挂起≠死亡：冻结的芽还是那个问题的芽）。
-- **提醒的出口（N48-3，根因）**：③能力库未用问的是「可用性」——机械层读不到的维度
-  （兑现账只能如实标 `verifiable=False`），没有出口它就是一条永真、可无限重生的提醒。
-  两条出口，都让它在队的芽**只移动**进冻结区：
-  - **消费**：条目名出现在**执行者留痕输出**里 → `last_used_tick` 更新（这条字段此前
-    只在创建那一拍写一次、此后没有任何更新方，「闲置 ≥20 拍」对每条条目永久为真）；
-  - **结案**：被问满上限（复用连领上限 N＝3）仍无消费 → 库账本写 `closed_tick`
-    ＋**结案指针**（指向最后一次被问的留痕，「为什么没用上」的答复原文在那里）
-    → 条目移出候选池，**不再产芽**。
-- **「本拍用过」这道闸换输入（N48-2）**：它读的是**执行者留痕输出**（最近 5 份），
-  不再读差异账最后 20 行的 `note`——实测那串文本总长 **19 个字符**，闸从不生效。
-  只读「## 输出（原样）」段、只认执行者留痕（组织会话的留痕是「提议」不是「动手」）。
-- **冻结芽的重问判据（N48-4/G9）**：冻结不是永久封存——某对象**最近一根芽**冻结满
-  `frozen_requestion_ticks`（默认 300 拍）且未被点亮 → 允许重新立芽。判据取该对象
-  全部冻结芽里**最新的那次冻结**（否则积压的旧冻结芽会在同一拍放行一整批，又是一次洪泛）。
-  新增 `frozen_tick` 字段（被挤进冻结区那一拍）；升级前的旧行没有它 → 回退到 `created_tick`。
-- **冻结区容量与整理（M5/N48-4）**：冻结区此前没有容量判据（每拍 +36~38 行单调增长）。
-  超 `frozen_cap`（默认 5000）时把最旧的**移动**进 `state/archive/files/frozen/`
-  （保留尾部 `frozen_keep_tail`＝4000 行），与账本轮转同一套纪律：只移动不删、
-  先落归档件再缩主件。园丁每次跑顺手做一次。
-- **观测边界修边（M6/M7 与 N45）**：观测面**有界**这条判据写进正本与文档（逐文件 20 个
-  按 mtime 最新；逐目录 10 个按名字升序——超出者不进可对账清单，对它的提议会被对象名机械闸拒收）；
-  新增**定键补观测**：预测里出现过的键被名额挤出观测面时补一条读数（只 stat 这些键，
-  不扩观测面），消掉「边界文件被记成预测未执行」的假差异（实测 8 行）。
-- **启动器不再把仓库绝对路径写进状态日志（M8/N47）**：`tools/run_latest.py` 起跑时打印过
-  仓库绝对路径，而计划任务把它的输出整份重定向进 `state/logs/tick.log`（实测 306 行带盘符）——
-  状态产物是「可以分享/迁移」的东西。现在只打印**目录名**。
-
-### 工程
-
-- 测试新增 27 条（合计 306）：去重含冻结区、重问判据（含「取最新那次冻结」与旧行回退）、
-  读侧按名字合并（幂等）、结案判据（满 3 次／已消费／已结案三种反例）、留痕命中两条规则、
-  端到端（结案后不再产芽／消费条目在队芽退场）、冻结区轮转（逐字不丢行）、
-  目录观测面边界、定键补观测（含不补观测时的假差异对照）、启动器零绝对路径、
-  文档↔代码同源（结案/重问/观测面边界/冻结区容量）。
-- 提示词与机制正本同步：`prompts/tick.md`（能力库题面最多被问 3 次、答复即结案依据）、
-  `prompts/org-session.md`（去重含冻结区＋提醒有出口）；同源词表新增 `结案`／`重问`。
-- `docs/architecture.md` 观测面摘要补目录对象与「定键补观测」；`docs/growth-subject.md`
-  补观测面边界（目录 10／文件 20）与补观测纪律。
-
-## v2.2.6 — 提议不再点名文件名（N43）＋组织会话扫现实（K14）＋TLS 截断纳入重试（K5 覆盖）（2026-09-16）
-
-主题：**把「提议」从「猜一个未来的文件名」改成「一个名字无关的可对账量」**。
-
-### 机制
-
-- **目录对象（N43）**：主体里的子目录现在是**可对账对象**——`主体/<相对路径>/`
-  （结尾的 `/` 是判据，与同名文件对象永不撞名），可对账量＝它里面的**文件数**。
-  观测/默认预测两侧对称（对称律不变），快照 `subject.json` 增加 `dirs`。
-- **提议「再长一格」（N43）**：组织会话提议执行者去写新记录时，改为对目录对象下
-  **差额**预测（`主体/journal/`｜`文件数`｜`+1`）。为什么：新文件名字里的拍号段是
-  **创建拍**的（K7），提议方猜不到未来的创建拍——点名必然对不上（实测：提议
-  `journal/0257-….md`、执行者在拍 291 建出 `0291-….md`，芽连领 3 拍耗尽、十次提议十次白烧）。
-  K7 命名规则**不变**：文件名仍由执行者按自己的创建拍定。
-- **差额锚定（N43）**：`+N` 在**动手前**的读数上锚成绝对值（组织会话的规划值、芽自带的
-  增量目标走同一条路）。反向仍不成立：现实已经**超过**预期（预期 < 实际）时，
-  **不**把旧预期派回去——那是让执行者把现实改回错的样子（实测踩过：文件数 1→2 是生长，
-  却派了一根「改回 1」的芽）。前向目标随芽带走的是**差额**（`+N`）而不是提议那一拍的
-  快照（快照会过期：实测「文件数＝97」在领做那拍现实已 103）。
-- **组织会话扫现实（K14 方案A）**：组织会话的输入块新增「**本拍现实变化**」——
-  上一拍主体快照 vs 本拍清单的**机械对比**（新出现／从清单里消失／目录格数变化，
-  含「消失可能只是被更新的文件挤出观测名额」的诚实声明）。值得长不值得长由它做
-  **语义判断**（写 finding，经既有通道立芽）；机械层只报对比，不替它决定。
-- **传输层截断重试覆盖面（K5）**：`SSLEOFError` / `UNEXPECTED_EOF_WHILE_READING`
-  （TLS 读期间对端半途关连接）纳入引擎侧重试。实测证据：拍 296/297 两次失败签名都是
-  `URLError(SSLEOFError(8, '[SSL: UNEXPECTED_EOF_WHILE_READING] ...'))`——旧正则不含它，
-  引擎侧没兜住（297 之后自动恢复＝典型瞬时抖动，本该被重试吃掉）。
-- **`long_task` 登记为预留（K16）**：字段保留（旧行读得进来）、**不接线、不删**。
-  当前没有「什么算长任务」的机械判据，也没有现实需求（连领上限已能防霸占）——
-  没有需求就接线＝给机制加没人用的分支。
-
-### 工程
-
-- 测试新增 14 条：目录对象观测/命名闸/快照、差额锚定、提议闭环端到端（芽带差额 →
-  执行者按创建拍命名 → 对账判「预测内对」→ 芽兑现）、TLS 截断签名重试、
-  组织会话扫现实输入块、`+1` 提议经 `run_tick` 端到端。
-- **修一个会过期的测试夹具**：园丁测试原先写死心跳时间戳（`2026-09-15 12:00:00`），
-  过了断流阈值那天起用例必红（与用例无关的断流旗把断言打红）。改为**相对当前时刻**，
-  并补一条专门的断流线用例（过期时间戳 → 断流旗）。
-
-## v2.2.5 — 可观测与成本（K4/K5/K6/K8/K9/K10）（2026-09-15）
-
-批 2「可观测与成本」：生长恢复（v2.2.4）之后，把状态面与成本账补齐。
-
-### 机制与可观测性
-
-- **status 显示可领数（K4/A5）**：`队列：可领 N 根／共 M 根（活跃 A／冻结 F）`。
-  可领＝`leads<3` 且非冻结（长任务豁免）。此前「活跃 25」≠可领 0——空转期状态面
-  曾误导（显示一堆活跃，实际一根可领都没有）。
-- **传输层截断重试（K5/A9）**：`IncompleteRead`／连接重置／远端断开／读超时 这类
-  **传输层失败**（响应体没读完，重跑大概率成功）纳入引擎侧重试
-  （`TRANSPORT_RETRY_MAX=2`、间隔 2s）。适配器侧的 5 次退避只覆盖 400 类；
-  截断不覆盖（实测 tick 50 因此白丢一拍）。账本新增 `attempt` 字段（第几次尝试，
-  旧行无此字段＝1，不破坏）。
-- **主体 journal 轮转（K6/A7）**：`journal/` 超上限（`IG_JOURNAL_KEEP_FILES`，
-  默认 200 篇）时**只移动**进 `<主体根>/archive/journal/`（主体自己的归档，不混进
-  引擎状态根）。园丁每次跑顺手做；观测按 mtime 取最新 N 个，轮转不影响新内容可见。
-- **空转成本显形（K8/A6）**：status 显示「空转：连续 N 拍无芽可领（零 token）」；
-  与 K3 的 ALERT 空转旗同一计数（`no_ticket_streak`）。
-- **失败调用成本不再缺席（K9/A10）**：失败调用（rc≠0/超时）没自报用量时账本显式记
-  `"usage":"unknown"`，status 单列「N 次失败未计费/未知」。成功但没自报仍是 `null`
-  （不拿长度冒充 token 的纪律不变）。
-- **判据样本量下限（K10/A11，观察协议）**：长窗口判定（如 T9「≥30 拍 rc≠0 ≤1」）
-  必须满足「窗口内调用数 ≥20」才能判通过；不足报「样本不足/待积累」。协议落盘于
-  观察器目录（`observer/观察协议-样本量下限-20260915.md`，本机私有，不进仓库）。
-
-### 工程
-
-- 测试：executor +3（截断重试成功/持续失败记次数/非截断不重试、usage unknown、
-  success 无 usage 仍 null）；rotation +3（journal 轮转/不超限幂等/园丁接入）；
-  cli +3（可领数/空转拍数/失败 unknown 单列）；fake_executor 新增 `flaky` 模式。
-
-**已知限制（延续 v2.2.4）**：见 `docs/release-notes-v2.2.3.md`。
-
-## v2.2.4 — 恢复生长：域饱和占用死锁根治（N41）+ 观测截断修复（N42）（2026-09-15）
-
-**这一版解决「引擎机械健康但停止生长」**：tick 86-122 连续 37 拍「无芽可领」、
-执行者零调用、主体 `journal/` 停在 0085 不再增长。根因是两个新登记缺陷
-（台账 N41/N42），本版双双修复，并补上「不生长」告警与 journal 命名规则的机械化。
-
-### 机制
-
-- **N41 域饱和占用死锁（K1）**：`存在性` 维度（取值只有存在/缺失）的占用
-  几乎不可能靠「产出新量」解冻——若持有者芽又已连领满上限（`leads≥3` 永不再被领），
-  该 (域×量) 就被**永久占用**，新差异全被吸收，引擎停摆。修法（三条释放通道）：
-  ① 持有者芽已耗尽 → 释放占用、差异放行（立芽后重新登记）；
-  ② 差异对象 ≠ 占用对象 → 视为**新量**（同域同量下的另一个问题，如 journal 下一篇）
-     → 释放并放行；
-  ③ 存量僵尸占用在 `sync()` 时自愈（只释放占用，不删任何文件）。
-  `gate()`／`sync()` 新增 `exhausted_sprout_ids` 参数；`tick.py`／`org_session.py`
-  传当前已耗尽的芽 ID 集合。
-- **N42 主体观测截断（K2）**：此前逐文件观测按**名字升序**取前 20 个，且「文件数」
-  维度用的是**截断后**的个数——磁盘 31 文件、引擎自报 20（journal/0070 起 10 篇
-  从未进观测/对账）。修法：① 「文件数」与「总字节数」＝**真实总数**
-  （`subject_count`/`subject_total_bytes`，不受上限影响）；② 逐文件观测按 **mtime
-  取最新 N 个**（旧的不会永久霸占名额）；③ 快照新增 `observed_files` 字段，注释与
-  文档同步。
-- **「不生长」告警（K3）**：心跳新增 `no_ticket_streak`（连续「无芽可领」拍数，
-  接了执行者但没活干才算）；园丁读到 ≥ 阈值（`IG_STALL_ALERT_TICKS`，默认 12 拍≈2 小时）
-  → ALERT 出「不生长/空转」旗。与断流（时间戳）/失败（rc 计数）三条线互不覆盖。
-  机械拍（没接执行者）不计——零 token 本来就是它的预期，不叫空转。
-- **journal 命名规则定死（K7）**：`<创建拍号4位>-<创建日期YYYYMMDD>.md`，执行者提示词
-  （`prompts/tick.md`）/组织会话提议（`prompts/org-session.md`）/主体声明（`subject.md`）
-  三处写同一句，代码 `subject.valid_journal_name()` 为机械判据（测试锁定同源）。
-
-### 工程
-
-- 测试：域饱和新增 4 条（对象不同释放／耗尽释放／sync 自愈／同对象复述保留）；
-  主体新增 3 条（mtime 最新 N／真实总数不受限）；园丁新增 5 条（空转旗/阈值/平息/
-  可配/双旗独立）；机制文档新增 1 条（journal 命名三处同源）。`test_cli.py` 的时间
-  戳改为动态「今天」（status 按当日过滤，跨天不再假红）。
-
-**真机验证（K1）**：发布前计划任务已跑修复后代码，tick 125 报告「域饱和：本拍释放：
-主体/journal|存在性（持有者芽已耗尽 …，释放）」，占用 1→0；tick 126 占用 0。
-
-**已知限制（延续 v2.2.3）**：见 `docs/release-notes-v2.2.3.md`。
-
-## v2.2.3 — A20 根因硬化：执行者子进程强制 UTF-8 stdio（2026-09-14）
-
-**A20（计划任务上下文执行者持续 400）的根因与防御性硬化**：
-
-- **根因**（真机定位，完整错误体＋请求指纹打点证实）：执行者适配器的 `harden_stdio()`
-  只重配了 `stdout/stderr`，**漏了 `stdin`**。引擎经 subprocess 用 UTF-8 把提示词写进
-  stdin；而计划任务（Task Scheduler）启动的进程 stdin 默认编码**不是 UTF-8**，把提示词
-  读坏 → 字符串混入**孤立代理字符** → `json.dumps` 转义成 `\udXXX` → 上游解析报
-  「lone leading surrogate in hex escape」→ 400。交互 shell 的 stdin 默认就是 UTF-8，
-  所以手动跑同一请求一直成功——这正是「只有计划任务上下文失败」的完整解释。
-- **引擎侧硬化**：`executor_env()` 为执行者子进程注入 `PYTHONIOENCODING=utf-8`，
-  任何适配器都不再依赖自己的默认编码（防御性硬化，测试锁定）。
-- 适配器侧修复（私有文件，不进仓库）：`harden_stdio()` 补
-  `sys.stdin.reconfigure(encoding="utf-8", errors="replace")`。
-- 验证：同一计划任务上下文（隐藏启动器诊断任务），修复前 rc=1/请求含孤立代理，
-  修复后 **rc=0/无孤立代理**；交互自检连续通过。
-
-## v2.2.2 — 运转收口（长周期可靠性与机制断链逐条补齐）（2026-09-14）
-
-这一轮是把「真机跑出来的长周期可靠性」与「机制断链」逐条补齐（T1-T10）。
-每条都对应一个上一轮清单里的遗留项；改动文件写在交接文档（台账第十一部分）。
-
-### 机制
-
-- **心跳序列倒退也恢复拍号**（`tick.current_tick`）：v2.2.1 只处理「心跳不可读」；
-  真机复见「心跳可读但拍号落后于账本最大拍号」（旧事故余波：账本跨拍 1-16、
-  心跳却是 4）→ 新序列 4、5、6… 会**逐一覆写**旧报告。现在只要「心跳拍号 <
-  账本最大拍号」就同样从账本恢复，并在本拍说明里点名。测试锁定（序列倒退用例）。
-- **能力库有了写入方**（T3/A4）：对象**本拍成熟链封顶** → 写一条「可复用认知」
-  （名称／末次使用拍／来源）。此前 `library.jsonl` 没有任何写入方 → 芽源③
-  「能力库未用」是死路径，永不产芽。现在封顶对象各写一条，芽源③有现实的输入。
-- **冻结区重看**（T4/A5）：`frozen_review_every` 从「只有配置项」变为每 N 拍真的
-  重看一次冻结区——(对象, 维度) 仍以未消解差异出现 → **重新点亮**（挂起≠死亡），
-  否则如实记「未点亮＋原因」。每拍最多重亮 3 根，防批量复活把队列顶爆。
-- **待补指针有了调用方**（T4/A6）：差异账里 `pending_pointer=True` 的条目超过
-  宽限拍数 → 生成「指针缺失」差异并**照样产芽**（机制正本：超时未补＝照样产芽），
-  报告点名，同一待补条目不重复产。此前 `reconcile.pending_pointer()` 只有实现没有调用方。
-- **组织会话对象名机械闸**（T5/A11）：`parse_org_output` 加校验——findings 的对象
-  必须在**可对账清单**里（描述现实的发现不许发明对象名）；predictions 的对象可在
-  清单里，也可以是**主体内合法新相对路径**（提议创建）。不合规丢弃并记
-  `parse_error`，不产芽。对象名纪律从此不只是提示词约定。
-- **固化边正式标为不可机械验证**（T6/A7）：`docs/mechanism.md` 写明「固化边不可
-  机械验证」，cap 芽占取题位是刻意的（驱动执行者把已固化能力应用到别域），
-  对账报告里 cap 行**单独列出**（`固化边` 段），不进兑现率分母、也不算打脸。
-- **兑现率桶口径对齐**（T7/A8）：桶＝**对象域 × 预测边 × 实际边**（与机制正本
-  措辞一致）。兑现账行新增 `obj` 字段，对象域用与域饱和判据同一条规则
-  （最后一段 `/` 之前；无 `/` 者自成域）；旧行（无 obj）如实归「（无对象）」桶。
-
-### 工程与 CLI
-
-- **留痕/报告/日志轮转**（T2/A3）：`rotate_files` 接管 `traces/`、`reconcile/`
-  （按份数留最近 N 份）与 `logs/tick.log`（按字节整体归档、另起空文件），
-  归档落 `state/archive/files/<类>/`，**只移动不删**，`infinigrow rotate --search`
-  可检索；园丁每次跑顺手做。配置：`IG_ROTATE_KEEP_FILES`。
-- **规则 R10 计划任务隐藏启动器**（T1/B1）：静态规则新增 R10——vbs 在且带窗口
-  样式 0、ps1 走 `wscript`＋vbs、不许直接 `-Execute` 那个 `.bat`（不弹窗是跨会话
-  硬约束）。规则从 9 条到 **10 条**，正反用例齐备。
-- **`.vbs` 进 `SCAN_SUFFIXES`**（T10/B3）：隐藏启动器从此也被 R1/R5/R6 扫到。
-- **一键 `status` / `pause` / `resume`**（T8/A15）：`infinigrow status` 一行看完
-  拍号／主体文件数／队列／兑现率判定／ALERT 首行／今日 token（只统计执行者自报的
-  `IG_USAGE`，不自报就写「不可估算」）；`pause`/`resume` 只切计划任务 Enabled
-  （**不删**），非 Windows 报「环境不满足」（rc=4）。
-- **隐私禁列补词**（T10/B6）：`privacy-deny.txt` 新增私有执行者模型名与私有通道域名形态
-  ——真机抓到一个泄露：v2.2.0 release notes 点名了本机私有执行者模型，已脱敏。
-
-### 测试与 CI
-
-- 全量测试含本轮新增用例（序列倒退恢复／能力库写入／冻结重看／待补指针超时／
-  对象名闸／固化边单独列出／桶口径／文件轮转／R10／vbs 扫描／CLI status）；
-  扫描 10/10、自检全绿、隐私双扫零命中、冷启动产物零绝对路径。
-
-## v2.2.1 — 运转可靠性补丁（2026-09-14）
-
-- **计划任务不再弹窗**：新增 `tools/run_tick_hidden.vbs`（WSH 窗口样式 0），
-  注册动作改为 `wscript //nologo <vbs>`——直接挂 `.bat` 会每跑一次闪一个控制台窗口。
-  （`New-ScheduledTaskSettingsSet -Hidden` 只隐藏任务列表**条目**，不隐藏窗口。）
-  测试守住：vbs 存在 ＋ `0, False` 窗口样式 ＋ ps1 走 wscript ＋ 不许再 `-Execute $bat`。
-- **心跳不可读时从账本恢复拍号**（`tick.current_tick`）：旧实现在心跳读不出时静默按
-  「新仓」起算（拍号回到 1）→ 对账报告被**同名覆写**、账本拍号跳变。现在从
-  diffs/outcomes/maturity/executor 账本反推最大拍号 +1，并把这件事写进本拍说明与心跳
-  （异常要显眼，不许静默）。测试锁定该行为。
-- **执行者通道抗抖动**：上游（Console Go）会成串返回 400「Invalid request／Upstream
-  request failed」，而同一题面稍后重放即成功（本地探针：短/整题面各两次全 OK）→
-  退避重试从 3 次加到 **5 次共约 52 秒**（首试带推理档，其后不带）。持续故障才记失败。
-- 测试：`update_local --check` 那条编码用例不再依赖网络（允许 rc 0 或 4——这一组测的是
-  **编码纪律**，不是网络）。
-
-## v2.2.0 — 运转线口径补全（2026-09-14）
-
-**公设未变**（四条边、成熟链四步、差异四类、芽源三个）。这一版是把 v2.1.0 落地时
-**真机跑出来的口径问题**逐条补全——每一处都对应一次实测：某处记账与事实不符、
-或某类芽注定消解不掉（空转）。
-
-### 机制口径（都是实测换来的）
-
-- **机械观测只读主体**：引擎自身状态文件**不进对账**。那些文件是引擎自己写的，
-  每拍都因自己的记账而变——把它们当差异读＝自己给自己派活
-  （实测：每拍凭空 3 根「diffs.jsonl/sprouts.jsonl/library.jsonl 字节数」的芽）。
-  引擎自身健康由园丁看护（断流/锁/失败计数/轮转），那是另一条线。
-- **预测/观测对称律**：两者必须**同对象同维度**。少一边就造假差异——
-  观测 6 个文件却只预测 3 个 → 每拍 3 条「预测外发现」；观测了每个文件的存在性、
-  却不预测它 → 每拍一条「预测未执行」。现在主体观测与默认预测逐一对称。
-- **动作自己造成的读数变化：入账，但不派芽**（差异账打标 `act_caused`）。
-  它们已经被那一手动作消解了；派回去就是让执行者「处理自己刚造成的结果」
-  （实测：模型只能拒绝，白烧一轮）。报告里如实列出这些变化。
-- **芽带着预期**：`预测未执行` 类差异产出的芽会带上那份预期，领做它的那一拍
-  **并进本拍 B猜**——否则真把差异消解了也会被记成「预测外发现 → 打脸」
-  （实测：题面要求某文件存在、执行者建好了，兑现账却记打脸）。
-  `预测内错` 类**不**带：现实已经推翻旧预期，派回去＝让执行者把现实改回错的样子
-  （实测：文件数从 1 变 2 是生长，却派了一根「改回 1」的芽）。
-- **可对账性（读不到 ≠ 打脸）**：兑现账新增 `verifiable` 字段。维度机械层读不到的芽
-  （例如「应用面」这类语义维度）**不计入兑现率分母**，报告里单独报数。
-  此前它们永远判「打脸」，把兑现率拖成结构性的 0%。
-- **成熟链同拍每对象最多 +1（含多维度）**：一个对象一拍可能有多条被证实的差异
-  （存在性＋字节数），逐条推进会一拍 +2——推进前按对象去重。
-- **组织会话补上「提议者」职责**：除了对账，每跑一次至少提一条**指向主体声明目的**
-  的预测（对尚不存在的文件下「预期=存在」→ 预测未执行 → 产芽 → 执行者去建）。
-  实测：没有这条职责时，主体声明写着「把运转写成 `journal/` 记录」，
-  却连续八拍没有任何东西提议 `journal/` 存在，主体一个字节没长。
-  同时：主体**内容**进组织会话输入（没有它只能靠文件名猜，实测凭空发明了一个对象名），
-  并要求对象名取自已给的可对账清单（不许发明机械层读不到的对象名）。
-- **题面加「本拍事实」机械摘录**（拍号/队列读数/差异账计数/兑现账判定/主体读数/
-  可对账对象）：只拿到一句题面的执行者写出来的只能是空话。
-- **执行者三态汇报**：未接执行者 ≠ 接了但本拍无芽可领 ≠ 跑过了（此前都印成「机械拍」）。
-
-### 文档清场（对齐全库现状）
-
-- `docs/architecture.md` 重写：分层图与数据流补上 v2.1 的四块运行体、
-  状态目录全景、以及「为什么这样切」对应的事故表；
-- `README.zh-CN.md` 补齐「它在长什么」「接执行者（CLI/环境变量/stdin-stdout）」
-  「让它自己按时跑」三节，规则列表更新到 R1-R9，限制一节改挂当前版本；
-- `docs/privacy.md` 规则条数（六 → 九）；`CONTRIBUTING.md` 同源词表补齐五个新词；
-- 升级提示从转发壳 `update_local.py` 改指真实实现 `run_latest.py --update`；
-- `src/infinigrow/__init__.py` 的设计红线从 5 条补到 8 条（写盘单一入口/退出码单一来源/
-  断流判据用机械时间戳/主体在仓库之外）。
-
-## v2.1.0 — 运转线（2026-09-14）
-
-**判据层未变**（四条边、成熟链四步、差异四类、芽源三个，一个都没动），
-新增的是「让它真的运转起来」所需的能力：引擎终于知道**自己在长什么**、**由谁动手**、
-**语义判断由谁跑**，以及三条配套纪律。
-
-### 机制与能力
-
-- **生长主体**：引擎动作的地方被显式定义成一个目录（默认在仓库**同级**，
-  `IG_SUBJECT_ROOT` 可指到任意目录）。机械观测改为**读主体**（存在性 / 文件数 /
-  每个文件字节数，有界且稳定排序），主体对象命名 `主体/<相对路径>`。
-  没有主体时不会报错，也不会硬造题——「缺失」本身就是一种如实的观测。
-  见 [`docs/growth-subject.md`](docs/growth-subject.md)。
-- **执行者通道**：`infinigrow tick --executor "<命令>"`（或 `IG_EXECUTOR`）。
-  提示词经 **stdin** 进、**stdout** 出；输出原文落 `state/traces/`，每次调用记
-  `state/executor.jsonl`（rc / 耗时 / 提示与输出长度 / 可选用量）。
-  **不给执行者＝机械拍**（零 token、零凭据、不出网），这条默认姿态没有变。
-  四种失败（非零退出／超时／空输出／命令起不来）全部可见，且与拍失败**分开计数**。
-  见 [`docs/running.md`](docs/running.md)。
-- **组织会话运行体**：语义判断从「写在提示词里的判据」变成一段真代码
-  （`engine/org_session.py`）：输入 B猜＋留痕＋W回，输出四类差异与**规划预测**，
-  发现落 `state/org-findings.jsonl`，结局由后来的对账现算
-  （`infinigrow org-status`：待验／被证实／被推翻）——判断不由引擎自述。
-- **规划预测覆盖默认**：默认 B猜是「不变」；组织会话写的规划值会**覆盖**它。
-  没有这层覆盖，任何真动手的一拍都会被判成「预测内错」——那说明的不是「干错了」，
-  而是「没预测」。
-- **域饱和判据**：同一「对象域 × 标准可验证量」只养**一根未完成芽**。
-  域＝对象名里最后一段 `/` 之前的部分（无 `/` 者自成域，退化成既有的同对象合并律）；
-  重复差异不新生芽而是登记为已有芽的 `absorbed`，差异**照旧入账**（配额不是隐藏）；
-  解冻只由**新产出的量**或被消解触发；同拍内也守配额。
-- **账本轮转**：按大小阈值把历史行**移动**到 `state/archive/`（只移动不删）。
-  历史型账本保留尾部 N 行；**状态型账本（成熟链／能力库）每个键保留最新一行**
-  ——否则很久没碰过的对象会随轮转悄悄倒退。归档可检索
-  （`infinigrow rotate --search <关键词>`）。园丁每次跑顺手轮转一次。
-
-### 判据与诚实
-
-- **兑现率的诚实呈现**：兑现账新增 `sample` 字段，分母只数「执行者真动过手」的拍。
-  一行样本都没有时，对账报告写「**无样本**」（兑现率不可计算），**不写 0、不写「差」**。
-  旧行（无该字段）一律不当样本。
-- **三种新静态规则**（正/反用例齐备，`selftest` 全绿）：
-  - **R7 rc 语义单一来源**：CLI 里不许出现裸的退出码整数（≥2），一律用
-    `core/exit_codes.py` 的常量；
-  - **R8 写盘窗口一致**：`src/infinigrow` 里只有 `ledger/store.py` 与 `core/encoding.py`
-    可以直接写盘（越界守卫与原子替换收在一条路上）；
-  - **R9 同源表不缩表**：`SYNC_TERMS` 有覆盖下限，静默删词即 FAIL。
-  同源表本身扩到 15 条（新增 生长主体／执行者／组织会话／域饱和／轮转）。
-
-### 工程
-
-- **一键件与计划任务**：`tools/run_tick.bat`（**版本闸 → 跑一拍 → 园丁**）、
-  `tools/manage_scheduled_task.bat`、`tools/scheduled_task.ps1`
-  （默认 `Infinigrow_tick`，每 10 分钟，可由 `IG_TICK_MINUTES` 改）。
-  **批处理与 PowerShell 脚本一律纯 ASCII**：cmd 用 OEM 代码页读 `.bat`、
-  Windows PowerShell 5.1 把无 BOM 的 `.ps1` 当 ANSI 读——中文写在里面会被打乱甚至
-  破坏解析（实测：`install` 直接报「不是内部或外部命令」）。中文说明在 `docs/` 里。
-- **CI 双平台**：矩阵加 `windows-latest`（引擎实际跑在 Windows 上）；
-  冷启动产物检查改用跨平台工具 `tools/check_no_abs_paths.py`
-  （原先是一段只有 bash 能跑的 heredoc；该工具现在**跳过二进制文件并报数**，
-  修掉一次对 PNG 的误报）。
-- **非 UTF-8 控制台修复**（Windows CI 第一次跑就抓到的一族真缺陷）：
-  `tools/*` 与两个执行者夹具此前**直接打印中文**，在 cp1252 控制台上
-  `UnicodeEncodeError` → 进程 rc=1；现在所有入口都先过
-  `core/encoding.harden_stdio`（单一实现），并有 `tests/test_stdio_encoding.py`
-  用 `PYTHONIOENCODING=cp1252` 复现环境逐入口锁住。
-- **`update_local.py` 归并**：升级逻辑只剩一份（`tools/run_latest.py --update`），
-  旧命令退化成会自我说明的转发壳（参数按白名单转发，无子进程）。
-- **两个真缺陷**：① `run_latest.py --repo <路径>` 原先只影响起跑目录，
-  **版本判定仍在看本仓库**（拿落后 2 个提交的副本去问，它会回答「已是最新」）；
-  ② 取题顺序按芽 ID 字典序，而 ID 带芽源前缀 → `cap*`（封顶芽）**永远插在**
-  `sp*`（差异芽）前面，把主芽源饿死（现场连跑 12 拍取到的全是封顶芽）。
-  前者由端到端测试锁住（本地 bare 远端，不出网）；后者改为
-  「最久未碰优先 → 出生拍 → 字典序」，与提示词里写的纪律一致。
-
-### 已知限制（v2.1.0 新增部分）
-
-- 组织会话的语义能力**取决于执行者**：不接执行者时它整段不跑（只留下「该跑了」的提示）。
-- 域饱和会把同域同量的后续差异记成 `absorbed`：这是**配额**，不是解决——
-  想看全貌请读差异账（`absorbed_by_domain` 标记的行）。
-- 轮转不做压缩：历史行原样留在 `state/archive/`（只移动不删是刻意选择）。
-
-## v2.0.0 — 纯正新版（2026-09-14）
-
-**这是一次断代重写，不是 v1 的补丁。**
-
-v1（内部代号 `Cultivar`）是一个长期演化的运行体：单体源文件里混着运行时代码、
-内嵌测试夹具、逐次改动的考古注释，状态根挂在宿主目录下，命名与路径都带本机痕迹。
-继续在它上面打补丁，只会得到「新旧规则叠加」——实测后果是引擎**原地打转**。
-
-v2 只保留机制本身，其余重写：
-
-### 机制（判据层）
-
-- **芽＝预测差异的产物**：`reconcile` 产出差异 → `sprout_sources` 生芽，**N 差异 N 芽，零差异零芽**。
-  引擎**不提供**「执行会话登记新芽」的入口（结构保证，不是注释约定）。
-- **芽源只有三个**：①差异对账 ②成熟链封顶（对象爬到第 4 步 → 开应用面）
-  ③能力库未用（条目连续 N 拍未消费 → 为何未用／别域是否成立）。
-  v1 只有第 ①，旁路灭失后队列被自造芽淹没——②③就是补上的那两条现实入口。
-- **成熟链同拍最多 +1**：封顶＝第 4 步（固化）；`advance_maturity` 显式拒绝连跳。
-- **兑现账**：每根被做过的芽一行（预测边 / 实际边 / 兑现或打脸 / 指针 / 拍号）；
-  兑现率**现算**，桶＝对象域 × 边类型 × 成熟链步（机械锚，防换类名操纵统计）。
-- **差异四类**：预测内错 / 预测内对（不产芽）/ 预测外发现 / 预测未执行；证据指针强制。
-
-### 工程（可搬运层）
-
-- **状态根参数化**：默认 `<repo>/state`，可用 `--state-root`／`IG_STATE_ROOT` 指到任意目录；
-  源码与提示词里**零绝对路径**（由静态规则 R1 守）。
-- **包结构**：`core / ledger / engine / rules / garden / scheduler`，线性依赖链，不再是单体。
-- **并发治理**：对账报告文件名带拍号（`reconcile-00007.md`），`locks/` 独占锁串行化会话，
-  陈旧锁按 mtime 自动清；拿不到锁＝本拍**幂等跳过**。
-- **拍循环自己查「该看语义层了吗」**：组织段触发判据（四条具体状态＋冷却闸）由拍自己算，
-  结果写 `state/org-due.json` 并随本拍返回——上一代的病根之一正是「判据写好了但没人调用，
-  诊断产出后就地过期」；把这件事留给外部调度器，等于把同一个洞留给下一代。
-- **心跳响亮**：心跳写不进去抛 `TickHeartbeatError`（园丁断流判据的上游不许静默停摆）。
-- **引擎版本规则**：`tools/run_latest.py` 是推荐运行入口——**默认用最新版引擎**
-  （有条件升级就 `pull --ff-only` ＋ 重装 ＋ 自检，然后跑新版）；**升不动就按现有版本照常跑**
-  并说明原因，绝不因为「不是最新版」把引擎停掉；`--require-latest` 才是严格模式。
-  每一拍的心跳与对账报告都带**引擎身份**（版本＋提交号），所以升级之后
-  「这一拍是哪个版本跑的」仍然查得到。
-- **规则层 6 条**（零 token）：零绝对路径／提示词代码同源／禁自造芽条款／状态根被忽略／
-  无凭据字面量／无 BOM；每条配正反用例（`infinigrow selftest`）。
-- **CI**：lint ＋ pytest ＋ 规则扫描 ＋ 同源校验 ＋ 隐私扫描 ＋ **冷启动空仓跑三拍**。
-
-### 已知限制（v2.0.0）
-
-- **机械拍不烧认知**：不给执行器（`llm` 参数为空）时，一拍只做机械观测与对账；
-  真正的生长需要接入执行者（模型或脚本）。默认不联网、不需要凭据。
-- **执行器接口是函数位**：`run_tick(..., llm=callable)`，本版不带任何厂商 SDK 与密钥管理。
-- **成熟链只记「到第几步」**，不记每条边的证据行全文（账本按指针回查）。
-- **未移植 v1 的宿主集成**：Windows 计划任务/双钟、代理自愈、多通道轮转等属部署面，不在本版。
-- **域饱和判据（同域配额）尚未实现**：目前靠「同对象同维度合并 + 队列上限 50 + 冻结区」
-  三件收敛；域级冷却留待按实测数据决定。
+# Changelog
+
+Only externally visible changes are recorded here: mechanism, interface, tests. Internal
+implementation detail stays out. Versioning rules: [`docs/versioning.md`](docs/versioning.md).
+The long-form reasoning behind each entry (incident, measurement, decision) lives in the design
+documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals in
+[`docs/zh/`](docs/zh/).
+
+## v2.2.13 — public surface: English-first docs, no file mixes two languages (2026-09-17)
+
+- **Every public file is single-language now.** `README.md`, `CONTRIBUTING.md`, `SECURITY.md`,
+  `CODE_OF_CONDUCT.md`, all of `docs/` and the issue/PR templates are English; `README.zh-CN.md`
+  and `docs/zh/` are the Chinese mirrors. Previously the README, the docs and the templates mixed
+  both languages in the same file.
+- **The Chinese design documents moved to `docs/zh/`** (they are the design of record for the
+  mechanism's Chinese vocabulary); the English `docs/mechanism.md` is the public rendering and
+  carries a **bilingual glossary** (every mechanism term, Chinese ↔ English).
+- **The docs were rewritten for a cold reader**, not translated word for word: what it is, what you
+  can use it for, quick start, the four edges in one table, machine-enforced guarantees, honest
+  limitations, and a documentation index.
+- **`CHANGELOG.md` is English and much shorter** (the long-form reasoning stays in the design
+  documents); the release notes for v2.0.0–v2.2.3 were rewritten in English.
+- **Commit messages are English and short from here on** (see the convention in `CONTRIBUTING.md`);
+  history is not rewritten.
+- Tests: the documentation↔code checks now assert both languages (Chinese design of record for the
+  test phrases, English public docs for the glossary and the observation-surface boundary).
+
+## v2.2.12 — the input block's heading no longer hard-codes a window (2026-09-17)
+
+- The "reality change" block's **heading** stopped naming a window (`K14 … ; window on the next
+  line`); the window is written by code on the following line, so a heading can no longer go stale.
+- The window line says "start = tick N" instead of "anchor = tick N" (on the fallback path it is
+  not an anchor, and calling it one was wrong).
+
+## v2.2.11 — the reality window now spans "since the last org session" (2026-09-17)
+
+- **The window must cover the consumer's absence.** The org session runs every 3–5 ticks, but the
+  "reality change" window was a single tick, so it structurally missed the ticks in between
+  (measured: seven consecutive org sessions with an empty "newly appeared" list). On top of that,
+  trigger criterion ④ requires the previous tick to be quiet, while any tick that acted writes
+  non-confirmed rows — so criterion ④ sessions always look at a quiet tick.
+- The window is now an **anchor comparison**: `state/subject-org-anchor.json` (the listing the org
+  session saw when it last ran) against the current listing. Entries are unchanged: newly appeared /
+  changed (byte size) / disappeared / directory file-count changes.
+- **The trigger criteria and the cooldown are untouched** — cadence and token cost do not change.
+  A missing anchor falls back to the old one-tick window and says so on the line.
+- Tests: window coverage across several ticks, and the fallback being honest about itself.
+
+## v2.2.10 — "changed" is now reported too (2026-09-17)
+
+- The prompt promised "newly appeared / **changed** things are candidates", but the comparison only
+  looked at name sets and directory counts: a **rewrite** (same name, different bytes) was never
+  reported. Added the line `changed (byte size differs, name unchanged): …`.
+- Still compared inside the bounded listing (newest 20 files of the two snapshots), so the
+  observation surface stays bounded.
+- Test: a byte change lands under "changed" and not under "newly appeared".
+
+## v2.2.9 — two places that reported the wrong unit/window (2026-09-17)
+
+- The org input block's heading still said "previous tick's before → after" while its content had
+  moved to the anchor window (title and content disagreeing is the same disease as a rule written
+  in two places).
+- Trigger criterion ④ was named "N consecutive ticks with no difference" but counted **ledger
+  rows** (a tick writes dozens): the reported "86 ticks" was 86 rows ≈ 2 ticks. The threshold
+  semantics are unchanged (still row-based; they pair with the 30-minute cooldown), but the reading
+  and the reason now give **both** rows and the ticks they cover.
+
+## v2.2.8 — the reality window was structurally empty (2026-09-17)
+
+- The "reality change" block compared the **previous tick's snapshot** with **this tick's
+  pre-action listing** — and the previous snapshot is written *after* acting, so nothing could
+  happen in between: the block **always reported "no change"** (measured on three org sessions).
+- Now it compares the **same tick's before → after** pair (`subject-before.json` step 2 vs
+  `subject.json` step 8), which is exactly "what the last action changed" — those changes are
+  neutralised as `act_caused` in the difference ledger, so this block is the only place they show.
+- When the before-snapshot is missing, the block says so instead of substituting other readings.
+
+## v2.2.7 — a reminder gets an exit; deduplication includes the frozen zone (2026-09-16)
+
+- **Deduplication includes the frozen zone**: "one sprout per object × dimension" was only scanning
+  the active queue, so every evicted object was re-created on the next tick (~39 new sprouts per
+  tick against a queue cap of 50). Measured effect: **39 → 0 new sprouts per tick**.
+- **The reminder has exits.** "Capability unused" asks about a dimension no mechanical reading can
+  see (its outcome rows can only be marked `verifiable=false`), so with no exit it is a
+  permanently true reminder. Two exits, both moving its queued sprouts into the frozen zone:
+  **consumed** (the entry's name appears in the executor's trace output → `last_used_tick` is
+  updated) and **closed** (asked up to the lead limit, 3, without consumption → the library ledger
+  gets `closed_tick` plus a closure pointer to the trace that was asked, and the entry leaves the
+  candidate pool permanently).
+- **The "used this tick" gate reads the executor's trace output** (the most recent 5 traces) rather
+  than a note in the difference ledger — that note measured 19 characters, so the gate never fired.
+  Only the output section is read, and only executor traces (an org session's trace is a proposal,
+  not an action).
+- **Re-asking frozen sprouts**: after `frozen_requestion_ticks` (default 300) without being
+  re-lit, an object is no longer blocked. The test uses the newest freeze of that object so a
+  backlog cannot release a whole batch at once. New `frozen_tick` field; pre-upgrade rows fall back
+  to `created_tick`.
+- **Frozen-zone capacity**: past `frozen_cap` (default 5000) the oldest lines are **moved** into
+  `state/archive/files/frozen/` (keeping `frozen_keep_tail`, default 4000) — move-only, same
+  discipline as ledger rotation.
+- **Bounded observation surface, written down and tested**: 20 files by newest mtime, 10 directories
+  by name; **keyed supplemental reading** for keys that appear in the predictions but fall outside
+  the window (this removes the false "not executed" rows for boundary files, measured at 8 rows).
+- **The launcher no longer prints the repository's absolute path** into the state log (the scheduler
+  redirects its output there); the live state root now passes
+  `tools/check_no_abs_paths.py` (315 historical occurrences redacted).
+- Tests 279 → 306.
+
+## v2.2.6 — proposals stop naming files; the org session watches reality; TLS truncation retried (2026-09-16)
+
+- **Directory objects**: a subject sub-directory is an accountable object (`<subject>/<path>/`, the
+  trailing slash is the marker) whose quantity is its file count — so "grow this directory by one
+  entry" can be proposed without naming a file. A future file's name contains its **creation** tick,
+  which the proposer cannot know.
+- **Delta predictions**: `+1` is anchored to an absolute value against the reading **before** acting,
+  so a target cannot expire. The reverse does not hold: when reality has already passed the
+  prediction, the old value is not sent back.
+- **The org session scans reality**: its input gained a mechanical "reality change" block.
+- **TLS truncation**: `SSLEOFError` / `UNEXPECTED_EOF_WHILE_READING` joined the transport-layer
+  retry signatures (two live failures had exactly that signature and were not caught).
+- `long_task` is registered as a reserved field: present for old rows, not wired, not deleted.
+
+## v2.2.5 — observability and cost (2026-09-15)
+
+- **Stall alerting**: N consecutive ticks with an executor wired in but no sprout to pick (N=12,
+  ≈2 hours) raises a flag — "the engine is burning time without growing" must be visible.
+- **Claimable count** and **stall-cost** readings in `status`.
+- **Rotation** extended to traces, reconciliation reports and the tick log (move-only).
+- **Failed calls are recorded as `usage: unknown`** rather than `null`: whether a failed request
+  was billed upstream is not knowable, and a cost ledger must not pretend otherwise.
+- **Sample floors** for long-window judgements: a window with fewer than 20 executor calls is
+  reported as "insufficient sample", never as a pass.
+
+## v2.2.4 — growth resumed: the domain-saturation deadlock and observation truncation (2026-09-15)
+
+- **Domain-saturation deadlock (the real stall)**: an existence dimension's "new quantity" condition
+  can never hold, so an exhausted holder sprout held its domain hostage for 37 ticks with nothing
+  being picked. Occupancy is now also released when the holder sprout is exhausted or no longer
+  queued.
+- **Observation truncation**: the file count was computed from the *truncated* list, so with 31
+  files on disk the engine reported 20. File count and total bytes are real totals now, and the
+  per-file window takes the newest by mtime.
+- Naming rule for new `journal/` files fixed and synced across prompt, org-session prompt and
+  subject document: `<created tick, 4 digits>-<created date YYYYMMDD>.md`.
+
+## v2.2.3 — executor subprocess forced to UTF-8 stdio (2026-09-14)
+
+- **Root cause of a family of HTTP 400s**: the executor adapter reconfigured stdout/stderr but not
+  **stdin**; a scheduler-started process read the UTF-8 prompt with the system code page, corrupting
+  it into stray surrogates that the upstream rejected. The adapter now also reconfigures stdin, and
+  the engine injects `PYTHONIOENCODING=utf-8`.
+- Verified same-context before/after (rc=1 → rc=0) and end-to-end on the real scheduled task
+  (executor failure count 9 → 0).
+
+## v2.2.2 — closing the loop on long-run reliability (2026-09-14)
+
+- **Heartbeat sequence regression** is recovered too (readable heartbeat that is behind the ledgers'
+  maximum tick used to overwrite old reports one by one).
+- **Rotation** for traces / reports / logs; **frozen sprout review**; **pending-pointer timeout**
+  produces a sprout; the capability-library writer exists (the third sprout source was a dead path
+  before this); the org session's object names are machine-checked.
+- **`status` / `pause` / `resume`** one-liners; the executor's working directory is the repository
+  root while the subject location comes from `IG_SUBJECT_ROOT`.
+
+## v2.2.1 — runtime reliability patch (2026-09-14)
+
+- **The scheduled task no longer opens a console window**: the action became
+  `wscript //nologo tools\run_tick_hidden.vbs` (window style 0). A scheduled `.bat` or bare `python`
+  flashes a console every run and steals focus.
+- **Tick number recovery** when the heartbeat cannot be read (it used to fall back to 1 and
+  overwrite `reconcile-00001.md`); the number is rebuilt from the ledgers with a visible note.
+- **Transport-layer retries** for `IncompleteRead` and friends, with the attempt number recorded.
+
+## v2.2.0 — calibration from a live run (2026-09-14)
+
+The premises did not change. Every item below came from a tick where the accounting disagreed with
+reality, or where a class of sprout could never be resolved:
+
+- the engine no longer reconciles its own state files (six observed, three predicted → three
+  phantom sprouts per tick that nothing could act on);
+- observation and prediction are symmetric per object and dimension;
+- changes the action itself caused are recorded but never spawned (tagged `act_caused`);
+- a sprout carries the expectation it came from (otherwise a correct action is recorded as
+  contradicted because the acting tick forgot to predict it);
+- unreadable dimensions are marked `verifiable=false` and excluded from the redemption denominator
+  (unreadable ≠ failure);
+- the maturity chain advances at most +1 per object per tick;
+- the org session gained a proposer role and a machine-checked object-name gate, and its input
+  includes a bounded excerpt of subject content;
+- the executor's three states (not wired / wired but nothing to do / ran) are reported separately
+  instead of being collapsed into "mechanical tick, zero tokens";
+- a heartbeat that cannot be read no longer silently resets the tick number.
+
+## v2.1.0 — the runtime line (2026-09-14)
+
+- **Growth subject**: an explicit directory to grow (a sibling of the repo by default), observed
+  mechanically — existence, file count, byte sizes — with objects named `<subject>/<relative path>`
+  ([`docs/growth-subject.md`](docs/growth-subject.md)).
+- **Executor channel**: `infinigrow tick --executor "<command>"`; prompt on stdin, answer on stdout,
+  traces under `state/traces/`, every call in `state/executor.jsonl`, four failure modes visible and
+  counted separately ([`docs/running.md`](docs/running.md)).
+- **Org session runtime**: the semantic pass as code — findings land in `state/org-findings.jsonl`
+  and their fate is computed later by reconciliation (`infinigrow org-status`).
+- **Domain saturation**, **ledger rotation**, an **honest redemption rate** (`sample`, "no samples"
+  instead of 0), and three more static rules (R7 single source for exit codes, R8 single write path,
+  R9 the sync table cannot shrink).
+- Engineering: `tools/run_tick.bat`, a scheduled-task registrar, CI on Windows as well as Linux,
+  `update_local.py` merged into `run_latest.py --update`, and fixes for the two-platform CI's first
+  findings (console encodings, non-ASCII launcher scripts, a binary false positive in the artifact
+  checker).
+
+## v2.0.0 — the rewrite (2026-09-14)
+
+The first release of the rewrite line: six packages with one-way dependencies, a parameterised state
+root, sprouts only from ledgers, no self-sprout path for the acting session, queue cap plus frozen
+zone, maturity chain +1 per tick, locking and tick-named reports, a heartbeat that raises when it
+cannot be written, six static rules with positive/negative cases, and a CI cold start (three ticks,
+empty state root, zero tokens, no absolute paths in the artifacts).
+
+Release notes with the known limitations of each line: [`docs/release-notes-v2.0.0.md`](docs/release-notes-v2.0.0.md)
+and following.

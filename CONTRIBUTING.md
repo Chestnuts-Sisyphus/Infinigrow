@@ -1,64 +1,76 @@
-# 参与贡献（CONTRIBUTING）
+# Contributing
 
-先读 [`docs/mechanism.md`](docs/mechanism.md)——**机制是判据，不是风格**。
-改判据与改代码是同一件事的两半，缺一半会被机器拦下。
+Read [`docs/mechanism.md`](docs/mechanism.md) first — **the mechanism is a set of tests, not a
+style**. Changing a test and changing code are two halves of the same change, and a machine
+rejects a one-sided edit.
 
-## 本地开发
+## Local development
 
 ```bash
 pip install -e ".[dev]"
-python -m pytest -q              # 全部测试
-python -m infinigrow scan        # 静态规则（必须全 PASS）
-python -m infinigrow selftest    # 规则的正/反用例
-python tools/check_prompt_code_sync.py
-python tools/privacy_scan.py --root .
-python tools/check_no_abs_paths.py state   # 状态产物不得含本机路径（有产物时）
+python -m pytest -q                          # all tests
+python -m infinigrow scan                    # static rules (must be all PASS)
+python -m infinigrow selftest                # positive and negative rule cases
+python tools/check_prompt_code_sync.py       # bidirectional prompt↔code check
+python tools/privacy_scan.py --root .        # paths / credentials / emails
+python tools/check_no_abs_paths.py state     # state artifacts must not contain local paths
 ```
 
-推 PR 前请把上面这些跑一遍；CI 也会跑一遍（现在**双平台**：ubuntu 与 windows，
-含**冷启动空仓跑三拍**、产物零绝对路径、一键件语法解析）。
+Run these before opening a pull request. CI runs the same set on **two platforms** (ubuntu and
+windows, Python 3.11 and 3.12) plus a **cold start** (three ticks in an empty state root, asserting
+no absolute path in any artifact) and a syntax parse of the Windows launcher files.
 
-## 改机制（P0 变更）
+## Changing the mechanism (a premise-level change)
 
-机械词（判读/行动/原理/固化/成熟链/差异/兑现账/成熟链封顶/能力库未用/零差异零芽/
-生长主体/执行者/组织会话/域饱和/轮转）
-是**同源词**：它们在 `docs/mechanism.md`、代码、提示词三处必须同时存在。
-同源表定义在 `src/infinigrow/rules/static_scan.py` 的 `SYNC_TERMS`（单一事实源），
-`tools/check_prompt_code_sync.py` 做双向检查；规则 **R9** 再守住这张表的**覆盖下限**
-（有人静默删词＝漂移面回来了）。
+The mechanism words (the edges, the maturity chain, the difference kinds, the sprout sources, the
+queue and ledger concepts) are **sync terms**: each must appear in `docs/mechanism.md`, in the code
+and in the prompts. The table is defined once in `SYNC_TERMS`
+(`src/infinigrow/rules/static_scan.py`), `tools/check_prompt_code_sync.py` checks it in both
+directions, and rule **R9** guards a coverage floor (someone silently dropping a term brings the
+drift surface back).
 
-改判据的四步：
+Four steps for a premise change:
 
-1. 改 `docs/mechanism.md`（写清「为什么」，不只是「改成什么」）；
-2. 改代码（`engine/` 下的词汇表与函数）；
-3. 改提示词（`prompts/`）；
-4. 跑上面那组命令，全绿。
+1. `docs/mechanism.md` — say *why*, not only *what* (the English document and the Chinese original
+   in `docs/zh/` are both part of the change);
+2. the code (`engine/` — the vocabulary and the functions);
+3. the prompts (`prompts/`);
+4. the commands above, all green.
 
-**只改一处＝漂移**，CI 会失败——这是刻意的：本项目的上一代就是因为「同一条规则两处写、
-各自演化」而原地打转。
+**A single-sided change is drift**, and CI fails on it. That is deliberate: the previous generation
+of this project span in place because one rule was written in two places and the two evolved apart.
 
-## 加一条静态规则
+## Adding a static rule
 
-1. 在 `src/infinigrow/rules/static_scan.py` 写规则函数（返回 `(明细, 是否通过)`）；
-2. 在 `RULES` 表加一行；
-3. 在 `SELFTEST_CASES` 加**正例与反例**（只加正例会被覆盖检查判 FAIL）；
-4. 让它在真实仓库上 PASS（若规则第一次跑就 FAIL，先把仓库改干净，别关掉规则）。
+1. Write the rule function in `src/infinigrow/rules/static_scan.py` (returns `(detail, passed)`).
+2. Add a row to the `RULES` table.
+3. Add **both a positive and a negative case** to `SELFTEST_CASES` (a positive case alone fails the
+   coverage check).
+4. Make it PASS on the real repository. If a new rule fails on first run, clean the repository up —
+   do not switch the rule off.
 
-## 代码风格
+## Style
 
-- 行宽 100（`ruff` 管）；中文注释与文档是这个项目的正常形态，不要翻译成英文。
-- 注释只写**为什么**（约束、坑、代价），不写「这行在干什么」。
-- 三处改动永远一起做：文档 / 代码 / 测试。
+- Line width 100 (`ruff` enforces it).
+- **Comments state constraints, not narration.** Write *why* (the constraint, the trap, the cost),
+  never "this line does X".
+- Comments and design documents are Chinese; that is this project's normal form, and it is part of
+  the mechanism language (the public English docs carry a glossary). Do not translate them as a
+  drive-by change.
+- Documentation, code and tests change together.
 
-## 提交信息
+## Commit messages
+
+Short and in English, one line, imperative mood. Put the reasoning in the commit body only when it
+is not obvious, and keep it to a couple of lines:
 
 ```
-<范围>: <做了什么>（一句话，中文或英文都行）
+<area>: <what changed>
 
-为什么这么做：<约束或事故，若不是显然>
-验证：<跑了哪条命令，结果如何>
+Why: <the constraint or the incident, if not obvious>
+Verified: <the command you ran and its result>
 ```
 
-## 行为准则
+## Code of conduct
 
-见 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)。
+See [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).

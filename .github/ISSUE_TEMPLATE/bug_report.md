@@ -1,23 +1,23 @@
-<!-- 一套三问，够用就好：不问「你做了什么」，问「它长了什么」。 -->
+<!-- Three questions, that is enough: not "what did you do", but "what did it grow". -->
 ---
-name: 缺陷报告
-about: 引擎行为与文档/测试不一致
+name: Bug report
+about: Engine behaviour disagrees with the docs or the tests
 labels: ["bug"]
 ---
 
-**发生了什么**
-（一句话：期望什么，实际什么）
+**What happened**
+(one sentence: what you expected, what you got)
 
-**复现**
+**Reproduction**
 ```bash
-# 最小复现命令。注意：请先把状态根指到临时目录，
-# 例如 `infinigrow --state-root /tmp/ig tick`，别贴你自己的账本内容。
+# Minimal reproduction. Please point the state root at a temporary directory first,
+# e.g. `infinigrow --state-root /tmp/ig tick`, and do not paste your own ledger content.
 ```
 
-**环境**
-- 版本：`infinigrow version` 的输出
-- Python：
-- 系统：
+**Environment**
+- Version: the output of `infinigrow version`
+- Python:
+- OS:
 
-**相关判据**
-（如果涉及机制判据：是 `docs/mechanism.md` 的哪一节？）
+**Related design section**
+(if a mechanism test is involved: which section of `docs/mechanism.md`?)

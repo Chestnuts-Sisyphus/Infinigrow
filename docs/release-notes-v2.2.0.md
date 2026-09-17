@@ -1,54 +1,41 @@
-# Infinigrow v2.2.0 — 运转线口径补全
+# Infinigrow v2.2.0 — calibration from a live run
 
-**公设未变**（四条边、成熟链四步、差异四类、芽源三个）。这一版把 v2.1.0 落地时
-**真机跑出来的口径问题**逐条补全：每一处都对应一次实测——某处记账与事实不符，
-或某类芽注定消解不掉（空转）。
+**The premises are unchanged** (four edges, four-step maturity chain, four difference kinds, three
+sprout sources). This release closes the calibration gaps that only a real run exposes: each item
+below corresponds to one observed tick where the accounting disagreed with reality, or where a
+class of sprout could never be resolved.
 
-## 机制口径
+## Fixed, each from a live observation
 
-- **机械观测只读主体**：引擎自身状态文件不进对账。那些文件是引擎自己写的，每拍都因
-  自己的记账而变——把它们当差异读＝自己给自己派活（实测每拍凭空 3 根「账本文件字节数」的芽）。
-  引擎自身健康由园丁看护（断流/锁/失败计数/轮转）。
-- **预测/观测对称律**：两者必须同对象同维度。少一边就造假差异——观测 6 个文件却只预测 3 个
-  → 每拍 3 条「预测外发现」；观测了每个文件的存在性却不预测它 → 每拍一条「预测未执行」。
-- **动作自己造成的读数变化：入账，但不派芽**（差异账打标 `act_caused`）。它们已经被那一手
-  动作消解了；派回去就是让执行者「处理自己刚造成的结果」（实测：模型只能拒绝，白烧一轮）。
-- **芽带着预期**：`预测未执行` 类差异产出的芽会带上那份预期，领做它的那一拍并进本拍 B猜
-  ——否则真把差异消解了也会被记成「打脸」（实测：题面要求某文件存在、执行者建好了，
-  兑现账却记打脸）。`预测内错` 类不带：现实已推翻旧预期，派回去＝把现实改回错的样子。
-- **可对账性（读不到 ≠ 打脸）**：兑现账新增 `verifiable`。维度机械层读不到的芽
-  （如「应用面」这类语义维度）不计入兑现率分母，报告里单独报数——此前它们永远判打脸，
-  把兑现率拖成结构性 0%。
-- **成熟链同拍每对象最多 +1（含多维度）**：一个对象一拍可能有多条被证实的差异
-  （存在性＋字节数），逐条推进会一拍 +2。
-- **组织会话补上「提议者」职责**：每跑一次至少提一条**指向主体声明目的**的预测
-  （对尚不存在的文件下「预期=存在」→ 预测未执行 → 产芽 → 执行者去建）。
-  实测：没有这条职责时，主体声明写着「把运转写成 `journal/` 记录」，
-  却连续八拍没有任何东西提议 `journal/` 存在，主体一个字节没长。
-  同时：主体**内容**进组织会话输入；对象名必须取自已给的可对账清单。
-- **题面加「本拍事实」机械摘录**（拍号/队列/差异账计数/兑现判定/主体读数/可对账对象）。
-- **执行者三态汇报**：未接执行者 ≠ 接了但本拍无芽可领 ≠ 跑过了。
+- **The engine no longer reconciles its own state files.** It observed six of its own ledgers while
+  predicting three of them, producing three phantom "byte size" sprouts per tick that no executor
+  could ever act on. Engine health is the gardener's job.
+- **Observation and prediction are symmetric per object and dimension.** Predicting a file's
+  existence without observing it produced a "not executed" difference on the very first tick.
+- **Changes the action itself caused are recorded but never spawned.** Creating a file changed the
+  file count, which came back as a sprout telling the executor to deal with the result of its own
+  action (four consecutive ticks of refusals). Such rows are tagged `act_caused`.
+- **A sprout carries the expectation it came from.** Otherwise the most frustrating case appears:
+  the executor did exactly what was asked, and the outcome was recorded as contradicted because the
+  acting tick's prediction list did not mention it.
+- **Unreadable dimensions are marked, not counted as failures.** The "application surface" of a
+  capped object cannot be read mechanically, so those outcome rows carry `verifiable=false`, are
+  excluded from the redemption denominator, and are listed separately.
+- **The maturity chain advances at most +1 per object per tick** (one object with several confirmed
+  dimensions used to jump two steps).
+- **The org session gained a proposer role and a machine-checked object-name gate.** It used to
+  only reconcile; the subject sat still for eight ticks while its own declaration said what it
+  should grow. Its input now includes subject content (a bounded excerpt) and the accountable
+  object list, and object names are validated.
+- **Three-state reporting for the executor**: not wired / wired but nothing to do / actually ran.
+  Collapsing these into "mechanical tick, zero tokens" was dishonest.
+- **A heartbeat that cannot be read no longer silently resets the tick number to 1** (which
+  overwrote reports); the number is recovered from the ledgers, with a visible note.
 
-## 文档清场
+## Engineering
 
-`docs/architecture.md` 重写（补四块运行体与状态目录全景、事故对应表）；
-中文 README 补齐三节并更新规则列表到 R1-R9；`docs/privacy.md` 条数；
-`CONTRIBUTING.md` 同源词表；升级提示改指 `run_latest.py --update`；
-`__init__.py` 设计红线 5 → 8 条。
+- Public docs rewritten for a cold reader, with the incident behind each rule.
+- Defect registry (`docs/superseded.md`) so retired mechanisms are neither quietly gone nor quietly
+  alive.
 
-## 实测（12 拍真机，接一个真实模型执行者）
-
-- 报告 `reconcile-00001..00012` **无缺口**；主体从 1 个文件长到 **7 个**（6 篇 `journal/` 记录 + 声明）；
-- 兑现账：样本 3 条、**兑现率 1.00**（桶 `sp0001 × 行动 × 行动`）；不可对账 8 条单独报数；
-- 11 个键出现「错 → 对」（例如 `主体/journal/0001-20260914.md×存在性`：拍 1 预测未执行 → 拍 2 起预测内对）；
-- 执行者 14 次调用（0 失败），7.0 万 input + 2.0 万 output token；
-- 状态产物零绝对路径；园丁 `ALERT.md` = 引擎正常。
-
-## 已知限制
-
-- 组织会话的提议质量取决于你接的执行者；不接执行者时整段不跑（只留「该跑了」提示）。
-- 「应用面」这类语义维度的芽不可机械对账（如实标 `verifiable=false`，不计入兑现率）。
-- 域饱和会把同域同量的后续差异记成 `absorbed`（配额，不是解决）；差异照旧入账。
-- 轮转不做压缩：历史行原样留在 `state/archive/`。
-
-**完整变更**：[`CHANGELOG.md`](https://github.com/Chestnuts-Sisyphus/Infinigrow/blob/main/CHANGELOG.md)
+**Full changes**: [`CHANGELOG.md`](../CHANGELOG.md).
