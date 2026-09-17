@@ -158,3 +158,28 @@ def test_frozen_zone_has_a_capacity_rule_documented():
     assert "frozen_cap" in MECHANISM and "frozen_requestion_ticks" in MECHANISM
     assert hasattr(Settings, "frozen_cap") and hasattr(Settings, "frozen_requestion_ticks")
     assert hasattr(Settings, "frozen_keep_tail")
+
+
+def test_replacement_keeps_the_age_is_documented_everywhere():
+    """Q1/A1：同键「新顶旧」时**继承旧芽出生拍**——五处同改，缺一处就是漂移面。
+
+    这条规则曾经只落在代码 docstring、测试与 CHANGELOG 里，两份机制正本与提示词都没写
+    （收尾自检抓到的静默漂移面）。所以这里把它**钉住**：中英正本＋组织会话提示词
+    都必须写着「重提不改年龄」（含推论：连领预算不继承）。判据短语在中英两侧各取一个
+    不可歧义的说法，机械可判。
+    """
+    from infinigrow.engine.sprout_queue import SproutQueue
+    from infinigrow.engine.model import Sprout, SproutOrigin
+    # 机械行为本身（正本说的，代码真做）
+    q = SproutQueue(cap=10)
+    q.add(Sprout(id="s1", obj="A", dimension="大小", pointer="p",
+                 origin=SproutOrigin.DIFF, created_tick=10))
+    q.add(Sprout(id="s2", obj="A", dimension="大小", pointer="p",
+                 origin=SproutOrigin.DIFF, created_tick=90))
+    assert q.sprouts[0].created_tick == 10
+    # 五处文本（中英正本各一处 ＋ 提示词一处）
+    assert "重提不改问题的年龄" in MECHANISM, "中文正本缺 Q1 规则"
+    assert "连领计数不继承" in MECHANISM, "中文正本缺「连领预算不继承」"
+    assert "does not change the question's age" in MECHANISM_EN, "英文正本缺 Q1 规则"
+    assert "lead budget is not inherited" in MECHANISM_EN, "英文正本缺「连领预算不继承」"
+    assert "重提不改问题的年龄" in PROMPTS, "提示词缺 Q1 规则"

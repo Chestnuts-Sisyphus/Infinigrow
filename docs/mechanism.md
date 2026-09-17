@@ -174,6 +174,12 @@ capability used?" cannot be, because no mechanical reading exists for it):
   question. (Scanning only the active queue let every evicted object be re-created on the next
   tick; measured: 39 new sprouts per tick against a queue cap of 50, which starved the
   difference source for 137 ticks.)
+- **A re-proposal does not change the question's age** (Q1/A1): the new sprout inherits the older
+  **birth tick** and the previous record's *last touched* tick, so a long-waiting question is not
+  reset to newborn by being re-proposed, and the merge never moves it ahead of the sprout it
+  replaced. The **lead budget is not inherited** — it belongs to the record row; inheriting it
+  would permanently kill a difference that reappears after being asked three times. The new row
+  keeps its own budget, exactly as before.
 - Active queue cap 50; beyond that the oldest move to the **frozen zone** (the queue is mutable,
   the ledgers are not).
 - One sprout may be led at most 3 times. A frozen sprout can be **re-lit** when its difference

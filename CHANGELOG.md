@@ -6,6 +6,17 @@ The long-form reasoning behind each entry (incident, measurement, decision) live
 documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals in
 [`docs/zh/`](docs/zh/).
 
+## v2.2.18 — the re-proposal rule is written down where the mechanism is (2026-09-17)
+
+- **The queue rule from v2.2.14 is now stated in all five places.** "A re-proposal does not change
+  the question's age" — the new sprout inherits the older birth tick and the last-touched tick, and
+  **not** the lead budget — was implemented, tested and in the changelog, but neither mechanism
+  document nor the prompts said it. Both documents (`docs/mechanism.md`, `docs/zh/mechanism.md`,
+  queue discipline section) and `prompts/org-session.md` (where the merge rule already lived) now
+  carry it, and `tests/test_mechanism_docs.py` pins the rule in Chinese, English and the prompts
+  together with the mechanical behaviour — so a one-sided edit fails the suite instead of drifting
+  silently.
+
 ## v2.2.17 — the reading that shows the solidify edge got connected (2026-09-17)
 
 - **`status` now shows the windowed reading of the solidify edge**, next to the cumulative one:
