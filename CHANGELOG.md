@@ -8,10 +8,12 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
 
 ## v2.2.13 — public surface: English-first docs, no file mixes two languages (2026-09-17)
 
-- **Every public file is single-language now.** `README.md`, `CONTRIBUTING.md`, `SECURITY.md`,
-  `CODE_OF_CONDUCT.md`, all of `docs/` and the issue/PR templates are English; `README.zh-CN.md`
-  and `docs/zh/` are the Chinese mirrors. Previously the README, the docs and the templates mixed
-  both languages in the same file.
+- **No public file mixes two languages in its prose.** `README.md`, `CONTRIBUTING.md`,
+  `SECURITY.md`, `CODE_OF_CONDUCT.md`, all of `docs/` and the issue/PR templates are English;
+  `README.zh-CN.md` and `docs/zh/` are the Chinese mirrors. The only cross-language elements are
+  the link label pointing at the Chinese README and the glossary's Chinese mechanism terms (which
+  are identifiers, not prose). Previously the README, the docs and the templates mixed both
+  languages inside the same file.
 - **The Chinese design documents moved to `docs/zh/`** (they are the design of record for the
   mechanism's Chinese vocabulary); the English `docs/mechanism.md` is the public rendering and
   carries a **bilingual glossary** (every mechanism term, Chinese ↔ English).
