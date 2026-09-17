@@ -13,6 +13,8 @@
     org-check        看组织会话该不该触发（打印判据明细）
     org-session      跑一次组织会话（需要执行者；独立于拍）
     org-status       看组织会话发现账的**结局**（待验/被证实/被推翻）
+    status           一键总览（拍号/主体/队列/兑现率/能力库候选池/告警）
+    redemption       兑现分桶归因（谁在领做／打脸里「提议过期」与「真没做」各几条）
 
 退出码语义见 `core/exit_codes.py`（单一来源；R7 守「cli 里不出现裸整数」）。
 """
@@ -84,6 +86,11 @@ def main(argv=None) -> int:
     p_orgs.add_argument("--json", action="store_true")
     sub.add_parser("org-status", help="看组织会话发现的结局（可被打脸的机械形态）")
     sub.add_parser("status", help="一键总览：拍号/主体/队列/兑现率/告警一行看完")
+    p_red = sub.add_parser("redemption", help="兑现分桶归因：谁在领做／打脸归因（可复跑）")
+    p_red.add_argument("--from-tick", type=int, default=None, help="只看该拍及之后的领做行")
+    p_red.add_argument("--stale-after", type=int, default=None,
+                       help="「提议过期」的芽龄阈值（拍；默认 30）")
+    p_red.add_argument("--json", action="store_true")
     p_pause = sub.add_parser("pause", help="暂停引擎（停计划任务，**不删**；可 resume 恢复）")
     p_pause.add_argument("--task", default=None, help="计划任务名（默认 Infinigrow_tick）")
     p_resume = sub.add_parser("resume", help="恢复引擎（启用计划任务）")
@@ -285,6 +292,38 @@ def main(argv=None) -> int:
     if args.cmd == "status":
         return _cmd_status(settings)
 
+    if args.cmd == "redemption":
+        from .engine.reconcile import STALE_LEAD_TICKS, redemption_attribution
+        from .ledger.store import read_jsonl
+        layout = resolve_state(settings.state_root, settings.repo_root, create=False)
+        report = redemption_attribution(
+            read_jsonl(layout.outcome_ledger), tick_from=args.from_tick,
+            stale_after=(args.stale_after if args.stale_after is not None
+                         else STALE_LEAD_TICKS))
+        if args.json:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return rc.OK
+        win = report["窗口"]
+        print("兑现分桶归因（拍 %s→%s，%d 行领做）"
+              % (win["起拍"], win["止拍"], win["行数"]))
+        print("  领做：总 %d（按芽源前缀 %s）"
+              % (report["领做"]["总"],
+                 json.dumps(report["领做"]["按前缀"], ensure_ascii=False)))
+        for source, stat in sorted(report["按芽源"].items()):
+            print("  - %s：领做 %d／可对账 %d（兑现 %d、打脸 %d）／不可对账 %d"
+                  % (source, stat["领做"], stat["可对账"], stat["兑现"],
+                     stat["打脸"], stat["不可对账"]))
+        attribution = report["打脸归因"]
+        print("  打脸归因：提议过期 %d／真没做 %d（芽龄阈值 %d 拍）"
+              % (attribution["提议过期"]["n"], attribution["真没做"]["n"],
+                 attribution["提议过期"]["阈值拍"]))
+        total = report["领做"]["总"]
+        if total:
+            cap_leads = (report["按芽源"].get("cap") or {}).get("领做", 0)
+            print("  固化边占取题位：%d/%d = %.2f"
+                  % (cap_leads, total, cap_leads / total))
+        return rc.OK
+
     if args.cmd in ("pause", "resume"):
         return _toggle_task(args.cmd, args.task)
 
@@ -347,6 +386,19 @@ def _cmd_status(settings) -> int:
     cap = report.get("固化边") or {}
     if cap.get("n"):
         print("  固化边（不可机械验证，单独列出）：%d 条" % cap["n"])
+
+    # N62/A8：能力库候选池组成——渠道静默是**预期**（池已空）还是**故障**（池有货却不出芽），
+    # 这两种状态在状态面上必须能分开；此前没有任何读数说明这件事。
+    from .engine.sprout_sources import library_entries, library_pool_summary
+    tick_now = int(status.get("tick") or 0)
+    pool = library_pool_summary(library_entries(read_jsonl(layout.library)), tick_now,
+                                known_objects=queue.known_objects(
+                                    tick_now, settings.frozen_requestion_ticks))
+    print("  能力库候选池：未结案且未消费 %d 条／已结案 %d 条／已消费 %d 条"
+          "（本可出芽 %d；重问冷却挡 %d／未到闲置阈值 %d）"
+          % (pool["未结案未消费"], pool["已结案"], pool["已消费"],
+             pool["本可出芽"], pool["重问冷却中"], pool["未到闲置阈值"]))
+    print("  能力库渠道判定：%s" % pool["判定"])
 
     alert_line = "（无 ALERT.md）"
     alert_path = layout.root / "ALERT.md"

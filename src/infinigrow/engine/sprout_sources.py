@@ -348,3 +348,67 @@ def consumed_entries(entries) -> set[str]:
         if int(entry.get("last_used_tick") or 0) > int(entry.get("created_tick") or 0):
             consumed.add(name)
     return consumed
+
+
+def library_pool_summary(entries, tick: int = 0,
+                         idle_ticks: int = LIBRARY_IDLE_TICKS,
+                         known_objects: Iterable[str] = ()) -> dict:
+    """能力库候选池组成（N62/A8）：**未结案且未消费 N／已结案 M／已消费 K**。
+
+    为什么要有这条读数（[已证明] 现场）：M2 的两条出口落地后库芽全部退场，「能力库未用」
+    这条提醒渠道**完全静默**——而静默有两种含义，在状态面上长得一模一样：
+
+    | 含义 | 期望读数 |
+    |---|---|
+    | **预期**（问题都有结论了，或还不到该问的时候） | 候选池 0 条，或 N 条全被挡住 |
+    | **故障**（渠道死了：产芽逻辑不工作） | **本可出芽**的条数 > 0 却长期不出芽 |
+
+    没有这条读数，「渠道安静」与「渠道断了」分不开（这就是 N48 修根留下的可观测性缺口）。
+
+    分类判据（互斥，按出口优先级：结案 > 消费 > 在池）：
+    条目 `closed_tick` 有值 → 已结案；否则 `last_used_tick > created_tick` → 已消费；
+    否则 → 未结案且未消费（**候选池**＝`from_unused_library` 的输入）。
+    候选池再按**两道闸**分开（与 `from_unused_library` 的判据同源）：
+
+    - `重问冷却中`：该对象已有芽（活跃 ∪ 冻结）→ 去重闸会跳过（M1：挂起≠死亡）；
+    - `未到闲置阈值`：`tick − 末次使用 < idle_ticks` → 还算「最近用过」；
+    - `本可出芽`：两道闸都没挡——**这一条 > 0 而库里长期不出芽，才是渠道故障的证据**。
+    """
+    known = set(known_objects)
+    rows = list(entries.values() if isinstance(entries, dict) else entries)
+    closed = consumed = 0
+    open_rows: list[dict] = []
+    for entry in rows:
+        name = entry.get("name") or ""
+        if not name:
+            continue
+        if entry.get("closed_tick") is not None:
+            closed += 1
+        elif int(entry.get("last_used_tick") or 0) > int(entry.get("created_tick") or 0):
+            consumed += 1
+        else:
+            open_rows.append(entry)
+    idle = [tick - int(e.get("last_used_tick") or e.get("created_tick") or 0)
+            for e in open_rows]
+    # 两道闸各自计数（一条可以同时被两道挡），`本可出芽`＝两道都没挡的条数
+    # ——只有它 > 0 才是「渠道该出芽却没出芽」的证据。
+    cooled = too_young = ready = 0
+    for entry, age in zip(open_rows, idle, strict=True):
+        in_cooldown = (entry.get("name") or "") in known
+        young = age < idle_ticks
+        cooled += 1 if in_cooldown else 0
+        too_young += 1 if young else 0
+        ready += 1 if not in_cooldown and not young else 0
+    if not open_rows:
+        verdict = "静默＝预期（候选池已空：结案 %d／消费 %d）" % (closed, consumed)
+    elif ready > 0:
+        verdict = ("本可出芽 %d 条（重问冷却挡 %d／未到闲置阈值 %d）"
+                   "——若后续该出芽却不出，即渠道故障" % (ready, cooled, too_young))
+    else:
+        verdict = ("静默＝预期：%d 条待问但全被挡（重问冷却 %d／未到闲置阈值 %d）"
+                   % (len(open_rows), cooled, too_young))
+    return {"总条目": closed + consumed + len(open_rows),
+            "未结案未消费": len(open_rows), "已结案": closed, "已消费": consumed,
+            "重问冷却中": cooled, "未到闲置阈值": too_young, "本可出芽": ready,
+            "最早闲置拍数": max(idle) if idle else None, "闲置阈值": idle_ticks,
+            "判定": verdict}

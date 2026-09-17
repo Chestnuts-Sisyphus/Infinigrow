@@ -89,6 +89,34 @@ The mechanical observation surface is **read-only, bounded, no subprocesses, no 
 credentials, no network. Four failure modes (non-zero exit / timeout / empty output / cannot
 start) are all recorded, and counted separately from tick failures. See [`running.md`](running.md).
 
+### 2.3 The org session (the semantic pass) and when it runs
+
+The **org session** is the one place where a semantic judgement is allowed (intent, hard
+conflicts, "what should come next"). It needs the executor channel; without one it never runs.
+
+It runs when **any** of four criteria holds (the cooldown gate has the final say):
+
+| # | Criterion | Reading |
+|---|---|---|
+| ① | never ran | org ledger has 0 rows |
+| ② | longest gap | `tick − last_org_tick ≥ org_gap_ticks` (5) |
+| ③ | pending-pointer differences | count > 0 |
+| ④ | "quiet streak" | consecutive predicted-OK **rows** at the tail of the difference ledger ≥ `zero_gap` (10) |
+
+**Unit honesty (N56, [proven])**: ④ counts **ledger rows, not ticks**. A quiet tick writes
+~40–43 rows; a growth tick writes at least one non-OK row, which resets the counter to 0.
+Measured over the last 40 ticks (400–439): the reading is either ~40–43 or 0, and it reached
+≥ 10 on **14 of those 40 ticks**. So `zero_gap = 10` **means ≈ "the previous tick was quiet"**
+(about 0.23 tick) — not "ten consecutive quiet ticks". The label was fixed in v2.2.9 to say
+rows; the *semantics* are deliberately unchanged — changing them changes the org cadence and
+its token cost, which is an open decision (N58-①).
+
+**Measured cadence ([proven])**: the cooldown gate allows one run per 30 minutes, and the
+measured interval is **median 40.0 min / mean 42.3 min** (`state/org-llm.jsonl`, 100 intervals,
+manual runs under 10 minutes excluded). The reason is structural: ④ can only fire after a
+*quiet* tick, and the ticks that actually move the subject always write a non-OK row — ④ and
+growth are negatively correlated (N58). The effective cadence is the cooldown plus one quiet tick.
+
 ---
 
 ## 3. Differences (the one primary sprout source)

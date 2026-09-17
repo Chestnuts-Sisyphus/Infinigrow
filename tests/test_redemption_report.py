@@ -12,7 +12,8 @@ import json
 from infinigrow.core.config import load_settings
 from infinigrow.core.paths import REPO_ROOT, resolve_state
 from infinigrow.engine.model import Observation, Prediction
-from infinigrow.engine.reconcile import redemption_report, sampled
+from infinigrow.engine.reconcile import (redemption_attribution, redemption_report,
+                                        sampled, sprout_created_tick, sprout_prefix)
 from infinigrow.engine.tick import run_tick
 
 
@@ -131,3 +132,88 @@ def test_cap_sprout_outcome_is_marked_unverifiable(tmp_path):
     cap_rows = [r for r in rows if r["sprout_id"].startswith("cap")]
     assert cap_rows, "封顶芽应当被领过（成熟链四步到顶）"
     assert all(r["verifiable"] is False for r in cap_rows)
+
+
+# --------------------------------------------------- Q6：兑现分桶归因（可复跑的函数形态）
+def test_sprout_id_prefix_and_created_tick_are_parsed_mechanically():
+    """芽 ID 的拍号段与前缀是**机械锚**（`sp0326-001-…` → 前缀 sp／出生拍 326）。"""
+    assert sprout_prefix("sp0326-001-主体_journal_") == "sp"
+    assert sprout_prefix("cap0380-002-x") == "cap"
+    assert sprout_prefix("") == "（无前缀）"
+    assert sprout_created_tick("sp0326-001-主体_journal_") == 326
+    assert sprout_created_tick("cap0380-002-x") == 380
+    assert sprout_created_tick("没有拍号段的旧行") is None    # 取不到就不猜
+
+
+def test_attribution_splits_leads_by_source_and_failure_by_sprout_age():
+    """M10/B2/B3：按芽源分桶 + 打脸按**领做时芽龄**分桶（提议过期 vs 真没做）。
+
+    芽龄 = 领做拍 − 出生拍（出生拍取自芽 ID）。≥ 阈值＝提议过期（[归纳待证] 的机械代理），
+    < 阈值＝真没做。不可对账的行单独计数（读不到≠打脸）。
+    """
+    rows = [
+        # 差异芽：出生 100、101 拍就被领做（芽龄 1）→ 兑现
+        {"sprout_id": "sp0100-001-a", "tick": 101, "redeemed": True,
+         "sample": True, "verifiable": True},
+        # 差异芽：出生 10、390 拍才被领做（芽龄 380 ≥ 30）→ 打脸 → 提议过期
+        {"sprout_id": "sp0010-002-b", "tick": 390, "redeemed": False,
+         "sample": True, "verifiable": True},
+        # 差异芽：出生 400、402 拍被领做（芽龄 2 < 30）→ 打脸 → 真没做
+        {"sprout_id": "sp0400-003-c", "tick": 402, "redeemed": False,
+         "sample": True, "verifiable": True},
+        # 固化边：可对账 0（A3/N60 的现场形态：占取题位却永远判不出兑现）
+        {"sprout_id": "cap0380-001-d", "tick": 433, "redeemed": False,
+         "sample": True, "verifiable": False},
+    ]
+    report = redemption_attribution(rows, stale_after=30)
+    assert report["领做"]["总"] == 4
+    assert report["领做"]["按前缀"] == {"sp": 3, "cap": 1}
+    assert report["可对账样本"] == 3 and report["兑现"] == 1 and report["打脸"] == 2
+    assert report["不可对账"] == 1
+    assert report["按芽源"]["cap"] == {"领做": 1, "可对账": 0, "兑现": 0, "打脸": 0,
+                                       "不可对账": 1}
+    attribution = report["打脸归因"]
+    assert attribution["提议过期"]["n"] == 1 and attribution["真没做"]["n"] == 1
+    stale = attribution["提议过期"]["行"][0]
+    assert (stale["sprout_id"], stale["出生拍"], stale["等待拍数"]) == ("sp0010-002-b", 10, 380)
+    undone = attribution["真没做"]["行"][0]
+    assert (undone["sprout_id"], undone["等待拍数"]) == ("sp0400-003-c", 2)
+    # 窗口：只看该拍及之后（长窗口复验收口用同一个函数复跑）
+    windowed = redemption_attribution(rows, tick_from=400, stale_after=30)
+    assert windowed["领做"]["总"] == 2 and windowed["领做"]["按前缀"] == {"sp": 1, "cap": 1}
+    assert windowed["窗口"]["起拍"] == 402
+
+
+def test_attribution_threshold_is_explicit_and_changeable():
+    """阈值是**显式参数**（默认 30 拍），不是藏在代码里的魔数——判据可复核、可改口径。"""
+    rows = [{"sprout_id": "sp0010-002-b", "tick": 40, "redeemed": False,
+             "sample": True, "verifiable": True}]        # 芽龄 = 40 − 10 = 30
+    assert redemption_attribution(rows)["打脸归因"]["提议过期"]["n"] == 1     # 30 ≥ 默认 30
+    looser = redemption_attribution(rows, stale_after=31)
+    assert looser["打脸归因"]["真没做"]["n"] == 1 and looser["打脸归因"]["提议过期"]["n"] == 0
+
+
+def test_attribution_reports_no_sample_instead_of_zero():
+    """零领做行 → 窗口为空、不假装有数据（与兑现率的诚实口径一致）。"""
+    report = redemption_attribution([])
+    assert report["领做"]["总"] == 0 and report["可对账样本"] == 0
+    assert report["窗口"]["起拍"] is None and report["窗口"]["止拍"] is None
+    assert report["打脸归因"]["提议过期"]["n"] == 0
+
+
+def test_redemption_cli_prints_attribution(tmp_path, capsys):
+    """`infinigrow redemption` 打出可复跑的读数（谁在领做／打脸归因／固化边占比）。"""
+    from infinigrow.cli import main
+    (tmp_path / "state").mkdir()
+    rows = [{"sprout_id": "cap0380-001-d", "tick": 433, "redeemed": False,
+             "sample": True, "verifiable": False, "obj": "主体/x", "predicted_edge": "固化"},
+            {"sprout_id": "sp0430-002-e", "tick": 433, "redeemed": True,
+             "sample": True, "verifiable": True, "obj": "主体/y", "predicted_edge": "判读"}]
+    lines = "\n".join(json.dumps(r, ensure_ascii=False) for r in rows)
+    (tmp_path / "state" / "outcomes.jsonl").write_text(lines + "\n", encoding="utf-8")
+    rc_ = main(["--state-root", str(tmp_path / "state"), "redemption"])
+    out = capsys.readouterr().out
+    assert rc_ == 0
+    assert "兑现分桶归因" in out and "固化边占取题位：1/2" in out
+    assert "打脸归因：提议过期 0／真没做 0" in out
+

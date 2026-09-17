@@ -6,6 +6,37 @@ The long-form reasoning behind each entry (incident, measurement, decision) live
 documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals in
 [`docs/zh/`](docs/zh/).
 
+## v2.2.14 — a re-proposal no longer makes an old question look new (2026-09-17)
+
+- **A sprout that is re-proposed keeps its age.** When a new sprout replaces an existing one for
+  the same object and dimension ("new over old"), it now **inherits the older birth tick** instead
+  of being reborn at the current tick, and carries the previous record's "last touched" state with
+  it. Before this, a question that had been waiting a long time was reset to newborn every time the
+  org session re-proposed it (measured: `sp0326-001` was created at tick 326 and only got a topic
+  slot at 338, after being re-proposed every 3 ticks). The ordering key itself is unchanged
+  (least-recently-touched first); a merged sprout is never moved **ahead** of the sprout it
+  replaced.
+- **`status` and reconciliation reports now show the capability-library candidate pool:**
+  open-and-unconsumed N / closed M / consumed K, plus how many of the N are held back by the
+  re-question cooldown or by the idle threshold, and how many could sprout right now. Silence on
+  this channel used to be unreadable — "expected" (the pool is empty) and "the channel is dead"
+  looked identical. Measured on the live state root: 25 open, 17 closed, 110 consumed, 0 able to
+  sprout (all 25 held by the re-question cooldown).
+- **Org-session criterion ④ is documented with its real semantics and measured cadence** (no
+  semantic change): it counts difference-ledger **rows**, not ticks — a quiet tick writes ~40–43
+  rows and a growth tick resets the counter, so `zero_gap = 10` means ≈ "the previous tick was
+  quiet" (measured: 14 of 40 ticks reached the threshold). The cooldown gate is 30 minutes but the
+  measured org cadence is **median 40.0 min / mean 42.3 min**, because ④ and growth are negatively
+  correlated. See `docs/mechanism.md` §2.3.
+- **New `infinigrow redemption` command and `redemption_attribution()`** — leads bucketed by sprout
+  source (`sp`/`cap`/`lib`) with a verifiable/unverifiable split, and non-redeemed rows attributed
+  by **age at lead time**: "proposal went stale" (age ≥ 30 ticks) vs "genuinely not done". The
+  bucket is a mechanical proxy and the report says so; the age is read from the birth tick encoded
+  in the sprout id.
+- Tests: `+11` (age inheritance and no-earlier ordering on replacement, lead-limit history across
+  replacement, candidate-pool classification, expected-silence vs dead-channel, attribution
+  buckets, and the new command).
+
 ## v2.2.13 — public surface: English-first docs, no file mixes two languages (2026-09-17)
 
 - **No public file mixes two languages in its prose.** `README.md`, `CONTRIBUTING.md`,

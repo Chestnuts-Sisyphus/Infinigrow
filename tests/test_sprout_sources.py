@@ -6,7 +6,8 @@ from infinigrow.engine.sprout_sources import (LIBRARY_IDLE_TICKS, consumed_entri
                                              entries_to_close, entry_mentioned,
                                              from_diffs, from_maturity_cap,
                                              from_unused_library, library_asks,
-                                             library_entries, library_usage_updates)
+                                             library_entries, library_pool_summary,
+                                             library_usage_updates)
 
 
 def _diff(obj="A", dim="大小", kind=DiffKind.WRONG, evidence="留痕:1"):
@@ -227,3 +228,43 @@ def test_consumed_entries_marks_used_after_creation():
         {"name": "B", "created_tick": 3, "last_used_tick": 8},          # 后来被用过
     ])
     assert consumed_entries(entries) == {"B"}
+
+
+def test_library_pool_summary_splits_the_three_exits():
+    """N62/A8：候选池组成可判（未结案且未消费 N／已结案 M／已消费 K）——三条出口互斥。"""
+    entries = library_entries([
+        {"name": "open", "created_tick": 1, "last_used_tick": 1},        # 在池
+        {"name": "used", "created_tick": 1, "last_used_tick": 9},        # 已消费
+        {"name": "closed", "created_tick": 1, "last_used_tick": 1},      # 已结案
+        {"name": "closed", "closed_tick": 7, "closed_by": "asked-out"},
+    ])
+    pool = library_pool_summary(entries, tick=100)
+    assert (pool["总条目"], pool["未结案未消费"], pool["已结案"], pool["已消费"]) == (3, 1, 1, 1)
+
+
+def test_library_pool_summary_separates_expected_silence_from_a_dead_channel():
+    """静默两种含义必须分得开：**全被挡**＝预期；**本可出芽却不出**＝渠道故障的证据。
+
+    两道闸与 `from_unused_library` 同源：重问冷却（该对象已有芽，去重闸会拦）、
+    未到闲置阈值（还算「最近用过」）。
+    """
+    entries = library_entries([{"name": "A", "created_tick": 1, "last_used_tick": 1},
+                               {"name": "C", "created_tick": 95, "last_used_tick": 95}])
+    # A：闲置 99 拍 ≥ 20，但对象 A 已有芽（活跃∪冻结）→ 被重问冷却挡住
+    cooled = library_pool_summary(entries, tick=100, known_objects=["A"])
+    assert (cooled["重问冷却中"], cooled["本可出芽"]) == (1, 0)
+    assert "静默＝预期" in cooled["判定"]
+    # C：没有芽挡着，但进库才 5 拍（未结案未消费，闲置 5 < 20）→ 未到闲置阈值
+    assert cooled["未到闲置阈值"] == 1
+    # 闸都放开（A 无芽在队）→ 本可出芽 1 条（这一条 > 0 才可能是渠道故障）
+    ready = library_pool_summary(entries, tick=100, known_objects=[])
+    assert ready["本可出芽"] == 1
+    assert "渠道故障" in ready["判定"]
+
+
+def test_library_pool_summary_empty_pool_is_expected_silence():
+    entries = library_entries([{"name": "A", "created_tick": 1, "last_used_tick": 5}])
+    pool = library_pool_summary(entries, tick=100)
+    assert pool["未结案未消费"] == 0 and pool["本可出芽"] == 0
+    assert "静默＝预期" in pool["判定"]
+

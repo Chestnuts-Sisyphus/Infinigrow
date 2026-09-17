@@ -200,3 +200,126 @@ def redemption_report(records: Iterable) -> dict:
                      % (len(rows) - len(samples) - unverifiable, unverifiable,
                         len(cap_rows)))}
 
+
+#: 「提议过期」的机械阈值（拍）：领做时芽龄 ≥ 这个数，就说这条提议的**前提**太老了。
+STALE_LEAD_TICKS = 30
+
+
+def sprout_prefix(sprout_id) -> str:
+    """芽 ID 的**芽源前缀**（`sp0326-001-…` → `sp`；`cap0380-001-…` → `cap`）。
+
+    前缀是 `sprout_sources` 里写死的机械锚（sp＝差异／cap＝成熟链封顶／lib＝能力库未用），
+    不换名、不猜——兑现账里没有单独的「芽源」字段，前缀就是它。
+    """
+    text = str(sprout_id or "")
+    out = []
+    for ch in text:
+        if ch.isdigit():
+            break
+        out.append(ch)
+    return "".join(out) or "（无前缀）"
+
+
+def sprout_created_tick(sprout_id) -> Optional[int]:
+    """从芽 ID 里取**出生拍**（`sp0326-001-…` → 326）。取不到 → None（不猜）。
+
+    ID 的拍号段是 `sprout_sources._sprout_id` 写死的格式（`<前缀><拍号4位>-<序号>-<对象>`），
+    所以「第一段连续数字」就是创建拍——这是机械锚，不是解析模型自述。
+    """
+    text = str(sprout_id or "")
+    digits = ""
+    for ch in text:
+        if ch.isdigit():
+            digits += ch
+            continue
+        if digits:
+            break
+    if len(digits) < 4:
+        return None
+    return int(digits[:4])
+
+
+def redemption_attribution(records: Iterable, tick_from: Optional[int] = None,
+                           stale_after: int = STALE_LEAD_TICKS) -> dict:
+    """领做与兑现的**分桶归因**（M10/B2/B3；可复跑的命令形态）。
+
+    三件事一次说清，全部机械可判：
+
+    1. **谁在领做**：按芽源前缀（`sp`／`cap`／`lib`）数领做次数，并各报
+       「可对账／不可对账」——固化边（`cap*`）占了多少取题位，是 B4/A3 的核心读数；
+    2. **兑现与打脸**：可对账样本行里，兑现多少、打脸多少；
+    3. **打脸归因**：把打脸行按**领做时的芽龄**分开——
+       `等待拍数 = 领做拍 − 出生拍`（出生拍取自芽 ID 的拍号段，机械可判）。
+       芽龄 ≥ `stale_after`（默认 30 拍）→ **提议过期**：这条提议做出来时看的是
+       30 拍前的现实，而引擎在领做时**不会重新校验前提**（判据只锚 `(对象, 维度)`），
+       所以「前提已经过期」是这条打脸的**机械代理**，不是替它开脱；
+       芽龄 < 阈值 → **真没做**（提议是新的，执行者拿到了题面却没让现实满足它）。
+
+    **证明等级**：分桶与芽龄是 [已证明]（全部读账本现算）；「提议过期」是
+    [归纳待证] 的**归因代理**——它说的是「前提老」，不是「提议内容本身已失效」
+    （后者是语义判断，机械层不代替它下结论）。报数只说这两桶各几条 + 原始芽龄。
+
+    `tick_from` 给了就只看该拍及之后的领做行（长窗口复验收口用同一个函数复跑）。
+    """
+    rows = [r for r in records if isinstance(r, dict)]
+    if tick_from is not None:
+        rows = [r for r in rows if int(r.get("tick") or 0) >= tick_from]
+    tick_now = max((int(r.get("tick") or 0) for r in rows), default=0)
+
+    leads: dict[str, int] = {}
+    by_source: dict[str, dict] = {}
+    stale_rows: list[dict] = []
+    undone_rows: list[dict] = []
+    undone_ages: list[int] = []
+    for r in rows:
+        prefix = sprout_prefix(r.get("sprout_id"))
+        leads[prefix] = leads.get(prefix, 0) + 1
+        stat = by_source.setdefault(prefix, {"领做": 0, "可对账": 0, "兑现": 0,
+                                             "打脸": 0, "不可对账": 0})
+        stat["领做"] += 1
+        if not verifiable(r):
+            stat["不可对账"] += 1
+            continue
+        stat["可对账"] += 1
+        if _redeemed(r):
+            stat["兑现"] += 1
+            continue
+        stat["打脸"] += 1
+        created = sprout_created_tick(r.get("sprout_id"))
+        tick = int(r.get("tick") or 0)
+        age = None if created is None else max(0, tick - created)
+        item = {"sprout_id": r.get("sprout_id"), "tick": tick,
+                "出生拍": created, "等待拍数": age}
+        if age is not None and age >= stale_after:
+            stale_rows.append(item)
+        else:
+            undone_rows.append(item)
+            if age is not None:
+                undone_ages.append(age)
+
+    checkable = sum(s["可对账"] for s in by_source.values())
+    redeemed = sum(s["兑现"] for s in by_source.values())
+    failed = sum(s["打脸"] for s in by_source.values())
+    unverifiable = sum(s["不可对账"] for s in by_source.values())
+    return {
+        "窗口": {"起拍": (min((int(r.get("tick") or 0) for r in rows), default=None)
+                          if rows else None),
+                 "止拍": tick_now or None, "行数": len(rows)},
+        "领做": {"总": len(rows), "按前缀": leads},
+        "按芽源": by_source,
+        "可对账样本": checkable, "兑现": redeemed, "打脸": failed,
+        "不可对账": unverifiable,
+        "打脸归因": {
+            "提议过期": {"n": len(stale_rows), "阈值拍": stale_after,
+                         "行": stale_rows,
+                         "说明": "领做时芽龄 ≥ 阈值：提议的前提已老（机械代理，[归纳待证]）"},
+            "真没做": {"n": len(undone_rows), "行": undone_rows,
+                       "芽龄中位数": (sorted(undone_ages)[len(undone_ages) // 2]
+                                      if undone_ages else None),
+                       "说明": "领做时芽龄 < 阈值：提议是新的，现实没被满足"},
+        },
+        "说明": ("按芽源前缀分桶现算；「不可对账」＝该维度机械层读不到（读不到≠打脸），"
+                 "固化边（cap*）的取题位占比＝ 按芽源.cap.领做 ÷ 领做.总。"
+                 "打脸归因按「领做时芽龄」机械分桶（出生拍取自芽 ID 拍号段）。"),
+    }
+

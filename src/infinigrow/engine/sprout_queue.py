@@ -35,12 +35,27 @@ class SproutQueue:
 
         动作取值：`added`｜`replaced`（同对象同维度，新顶旧）｜`duplicate`（同 id 已存在）。
         `tick`＝本次加入发生在哪一拍——被挤出的芽据此记 `frozen_tick`（M4 的重问判据锚在它上面）。
+
+        `replaced` 的语义（N61/A1）：新芽**继承旧芽的出生拍**（取更早的那个）与
+        「最后一次被碰」的记录（`last_lead_tick`／`leads`）——被替换的是记录行，
+        不是问题本身。`id` 仍用新芽的（账本按 id 留痕），年龄看 `created_tick` 字段。
         """
         for i, exist in enumerate(self.sprouts):
             if exist.id == sprout.id:
                 return "duplicate", None
             if exist.key == sprout.key:
-                self.sprouts[i] = sprout          # 同对象同维度：新顶旧（单槽语义）
+                # 同对象同维度：新顶旧（单槽语义）。但**问题的年龄属于问题，不属于记录行**
+                # （N61/A1）：重提不能把等了很久的问题刷成刚出生——真机现场 `sp0326-001`
+                # 出生 326、到 338 才拿到取题位，期间组织会话每 3 拍重提一次，每次都被
+                # 刷回新芽位置。新芽继承旧芽的出生拍（取更早的那个）。
+                # 「最后一次被碰」的记录一并带过来：`order_key` 排的是 `last_lead_tick`
+                # （最久未碰优先），不带走它，合并后的芽会比它替换掉的那根**更靠前**
+                # ——那是排序变动，不是本修法的目的（K15 未定，排序键不动）。
+                sprout.created_tick = min(exist.created_tick, sprout.created_tick)
+                if exist.last_lead_tick is not None:
+                    sprout.last_lead_tick = exist.last_lead_tick
+                    sprout.leads = exist.leads
+                self.sprouts[i] = sprout
                 return "replaced", None
         self.sprouts.append(sprout)
         # 没给 tick 时用「刚加进来的这根芽的出生拍」——挤出发生在这根芽被加入的那一拍，

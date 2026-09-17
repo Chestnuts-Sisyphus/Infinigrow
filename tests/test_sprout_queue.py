@@ -25,6 +25,50 @@ def test_duplicate_id_ignored():
     assert action == "duplicate" and len(q.sprouts) == 1
 
 
+def test_replace_inherits_the_older_birth_tick():
+    """N61/A1：同键「新顶旧」时**继承旧芽的出生拍**——问题的年龄属于问题，不属于记录行。
+
+    真机现场：`sp0326-001` 出生 326、到 338 才拿到取题位；期间组织会话每 3 拍重提一次，
+    每次重提都把它的年龄刷回当前拍（在取题序里永远排在新芽位置）。
+    """
+    q = SproutQueue(cap=50)
+    q.add(_sprout("s1", "A", tick=10))
+    q.add(_sprout("s2", "A", tick=90))
+    assert q.sprouts[0].created_tick == 10          # 继承更早的那个（min）
+    assert q.sprouts[0].id == "s2"                  # 记录行仍是新的（账本按 id 留痕）
+
+
+def test_replace_does_not_move_the_order_key_earlier():
+    """合并后的 `order_key` **不得比它替换掉的那根更靠前**（否则就是动了排序＝K15 领域）。
+
+    口径：`order_key` 排的是 `last_lead_tick`（最久未碰优先）——旧芽被领过（leads=1），
+    合并时若不带走这条记录、只继承出生拍，合并芽就会插到旧芽**前面**去。
+    """
+    q = SproutQueue(cap=50)
+    old = _sprout("s1", "A", tick=10)
+    q.add(old)
+    q.mark_lead(old, tick=60)                       # 旧芽被领做过一次（last_lead=60, leads=1）
+    before = q.order_key(q.sprouts[0])
+    q.add(_sprout("s2", "A", tick=90))              # 同键重提（新顶旧）
+    merged = q.sprouts[0]
+    after = q.order_key(merged)
+    assert merged.created_tick == 10
+    assert merged.last_lead_tick == 60 and merged.leads == 1   # 连领记录一并继承
+    assert after[:2] == before[:2] and after >= before          # 不前移
+
+
+def test_replace_keeps_the_lead_limit_history():
+    """连领上限是**问题**的属性：重提不能把「问过 3 次」刷成「没问过」。"""
+    q = SproutQueue(cap=50, lead_limit=3)
+    old = _sprout("s1", "A", tick=10)
+    q.add(old)
+    for t in (20, 30, 40):
+        q.mark_lead(old, t)
+    assert q.eligible(50) == []                     # 问满 3 次：不可领
+    q.add(_sprout("s2", "A", tick=90))
+    assert q.eligible(50) == []                     # 重提之后仍不可领（历史跟着问题走）
+
+
 def test_cap_freezes_oldest():
     q = SproutQueue(cap=3)
     for i in range(5):

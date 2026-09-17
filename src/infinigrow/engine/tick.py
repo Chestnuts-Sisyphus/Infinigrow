@@ -35,7 +35,7 @@ import os
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Callable, Optional, Sequence
+from typing import Callable, Iterable, Optional, Sequence
 
 from ..core.config import Settings, load_settings
 from ..core.encoding import harden_stdio, read_text
@@ -643,7 +643,8 @@ def _make_runner(settings: Settings, layout: StateLayout, subject_root: Path, ti
 
 
 # --------------------------------------------------------------------- 报告
-def _redemption_lines(layout: StateLayout) -> list[str]:
+def _redemption_lines(layout: StateLayout,
+                      known_objects: Optional[Sequence[str]] = None) -> list[str]:
     """兑现率段（**诚实呈现**：无样本就说无样本，不说 0，不说「差」）。"""
     report = redemption_report(read_jsonl(layout.outcome_ledger))
     lines = ["## 兑现率（现算，不存缓存）", "",
@@ -660,6 +661,20 @@ def _redemption_lines(layout: StateLayout) -> list[str]:
     if cap.get("n"):
         lines.append("- 固化边（应用面，不可机械验证）：%d 条，单独列出：%s"
                      % (cap["n"], "、".join(cap.get("单独列出") or [])[:160]))
+    # N62/A8：能力库候选池组成——「提醒渠道安静」是预期还是故障，报告里也要能判。
+    from .sprout_sources import library_entries, library_pool_summary
+    try:
+        tick_now = int(read_tick_status(layout).get("tick") or 0)
+    except (OSError, ValueError, json.JSONDecodeError):
+        tick_now = 0
+    pool = library_pool_summary(library_entries(read_jsonl(layout.library)), tick_now,
+                                known_objects=known_objects or ())
+    lines.append("- 能力库候选池：未结案且未消费 %d 条／已结案 %d 条／已消费 %d 条"
+                 "（总 %d 条；本可出芽 %d，重问冷却挡 %d／未到闲置阈值 %d）"
+                 % (pool["未结案未消费"], pool["已结案"], pool["已消费"],
+                    pool["总条目"], pool["本可出芽"], pool["重问冷却中"],
+                    pool["未到闲置阈值"]))
+    lines.append("- 能力库渠道判定：%s" % pool["判定"])
     return lines
 
 
@@ -672,7 +687,8 @@ def _short_names(names: Optional[Sequence[str]], limit: int = 6) -> str:
     return "（%s%s）" % (head, " 等 %d 条" % len(items) if len(items) > limit else "")
 
 
-def write_reconcile_report(layout: StateLayout, result: TickResult) -> Path:
+def write_reconcile_report(layout: StateLayout, result: TickResult,
+                           known_objects: Optional[Iterable[str]] = None) -> Path:
     """写对账报告：**文件名带拍号**（同拍重跑＝同一个文件，不会互相覆盖）。"""
     from ..core.build_info import engine_label
     path = layout.reconcile_dir / ("reconcile-%05d.md" % result.tick)
@@ -707,7 +723,7 @@ def write_reconcile_report(layout: StateLayout, result: TickResult) -> Path:
         lines += ["- %s" % f for f in result.org["findings"]] + [""]
     if result.new_sprouts:
         lines += ["## 本拍新生芽", ""] + ["- `%s`" % s for s in result.new_sprouts] + [""]
-    lines += _redemption_lines(layout)
+    lines += _redemption_lines(layout, known_objects)
     if result.outcomes:
         lines += ["", "## 兑现判定（本拍领过的芽）", ""] + [
             "- `%s` 预测边=%s 实际边=%s → %s%s%s"
@@ -1087,7 +1103,9 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
                     json.dumps(snapshot, ensure_ascii=False, indent=2),
                     layout.root, require_markers=("root_name",))
 
-    report = write_reconcile_report(layout, result)
+    report = write_reconcile_report(
+        layout, result,
+        known_objects=queue.known_objects(tick, cfg.frozen_requestion_ticks))
     result.notes.append("对账报告：%s" % report.name)
 
     # 组织段到期提示：**拍循环自己查判据**，不把「该看语义层了」留给外部调度器。
