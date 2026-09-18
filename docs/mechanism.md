@@ -122,15 +122,23 @@ manual runs under 10 minutes excluded). The reason is structural: ④ can only f
 *quiet* tick, and the ticks that actually move the subject always write a non-OK row — ④ and
 growth are negatively correlated (N58). The effective cadence is the cooldown plus one quiet tick.
 
-**"Last time" counts attempts, not LLM calls ([proven], measured here 2026-09-19)**: ①, ② and the
-cooldown all read the **org-attempt ledger**, and a mechanical tick (no executor configured) writes a
-row to it too — a freshly created state root that only ever ran mechanical ticks already had one row at
-tick 1. The consequence is operational: where an executor is wired up, "attempted" and "called the LLM"
-coincide; in a purely mechanical deployment — or after **one manual debugging tick** — that tick
-consumes the cooldown window and delays the real LLM org segment by up to `org_cooldown_min` minutes.
-Making "attempt" mean "LLM call actually happened" is a mechanism change (write condition, tests and
-both originals move together); until that is decided the behaviour stands and this paragraph's only job
-is to say which quantity the text is talking about.
+**"Last time" counts org-segment attempts, not successful LLM calls ([proven], measured here
+2026-09-19)**: ①, ② and the cooldown all read the **org-attempt ledger**, and a row is written on
+only three paths, each of them *after* the org segment actually started — the prompt file is
+missing (that one never touches the executor), the executor call fails (rc≠0 / timeout), or the
+segment completes. The first two are why "attempted" is not the same as "the LLM answered".
+**With no executor configured the org segment does not run at all and writes nothing**: measured
+on a fresh state root with `IG_EXECUTOR=""`, three ticks left no `org-llm.jsonl` file and
+`org-check` still reported "never attempted" — a purely mechanical deployment does not throttle
+itself. (**The previous version of this paragraph said the opposite** — that a state root running
+only mechanical ticks had a row at tick 1 — because a debugging run that had inherited
+`IG_EXECUTOR` from the environment was read as an executor-less one.) The consequence keeps a
+sharper edge: a tick **with an executor wired** — including one manual tick typed for debugging —
+occupies the cooldown window and delays the next real LLM segment by up to `org_cooldown_min`
+minutes. **Settled 2026-09-19: the unit stays "attempt"; it is not being narrowed to "the LLM call
+succeeded".** The reason: if a failed call did not count, the cooldown would stop protecting
+anything, and ①②③④ would release a retry against the same broken executor every tick — spending
+tokens on a call already known to fail, which is exactly what that gate was installed to prevent.
 
 ---
 

@@ -310,23 +310,29 @@ def test_every_numeric_knob_is_listed_in_the_config_table():
 
 
 def test_org_trigger_measures_attempts_not_llm_calls():
-    """组织段判据的单位是**一次尝试**（机械拍也算）——四处文案必须同一口径。
+    """组织段判据的单位＝**一次起跑过的组织段尝试**，四处文案同一口径（且不许写反）。
 
-    为什么锁这条：那份账的文件名是 `org-llm.jsonl`，旧文案也写「距上次 LLM 段」，
-    但实测（2026-09-19，只跑机械拍的新状态根）拍 1 就往里写了一行。文案说成 LLM
-    会让人以为「手动跑一拍调试」无害，实际那一拍会占用冷却窗、把真正的 LLM 组织段
-    推迟至多 `org_cooldown_min` 分钟。旧措辞出现即红。
+    为什么锁这条（第二轮订正）：那份账的文件名是 `org-llm.jsonl`，最早的文案写「距上次
+    LLM 段」——但一行也可以在执行者失败、甚至提示词缺失时写下，「试过」不等于「调成过」。
+    而上一轮订正时又走向另一个反面：写着「只跑机械拍的根拍 1 也会留一行」，实测（`IG_EXECUTOR=""`
+    连跑 3 拍：无 `org-llm.jsonl`、`org-check` 仍报①）证明**没接执行者时组织段根本不跑**。
+    两头都是同一件事：文案说的单位必须与写入条件一致。旧措辞（两种）出现即红。
     """
     trigger = (REPO_ROOT / "src" / "infinigrow" / "engine" / "org_trigger.py").read_text(
         encoding="utf-8")
-    assert "距上次组织段尝试不足" in trigger, "冷却闸文案又回到不准确的单位"
+    assert "一次组织段尝试" in trigger, "冷却闸文案又回到不准确的单位"
+    assert "距上次组织段尝试不足" in trigger, "冷却闸的 reason 不再说「尝试」"
+    assert "没接执行者时组织段根本不跑" in trigger, "自述还留着上一版写反的那半句"
     assert "LLM 段" not in trigger, "面向使用者的文案把「尝试」说成了「LLM 调用」"
     assert "①从未跑过组织段" in trigger
     for doc in (MECHANISM, MECHANISM_EN):
         assert ("组织段尝试账" in doc) or ("org-attempt ledger" in doc), "正本没写单位"
-        assert ("机械拍" in doc) or ("mechanical tick" in doc), "正本没说机械拍也算一次"
+        assert ("三条路径" in doc) or ("three paths" in doc), "正本没说清写入条件是三条"
+        assert ("定案" in doc) or ("Settled" in doc), "正本没记下 2026-09-19 的判定"
+        assert "机械拍（没接执行者）跑组织段时同样写一行" not in doc, "写反的那句回来了"
     cfg = (REPO_ROOT / "src" / "infinigrow" / "core" / "config.py").read_text(encoding="utf-8")
-    assert "机械段也算一次尝试" in cfg, "配置表那行没跟上正本口径"
+    assert "没接执行者时它根本不跑" in cfg, "配置表那行没跟上正本口径"
+    assert "机械段也算一次尝试" not in cfg, "配置表把没发生过的事写成了判据"
 
 
 def test_security_doc_states_the_two_scan_scopes_separately():

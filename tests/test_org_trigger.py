@@ -39,6 +39,25 @@ def test_first_tick_says_org_is_due_and_persists_it(tmp_path):
     assert due["should_run_org"] is True and due["tick"] == 1
 
 
+def test_mechanical_ticks_without_an_executor_record_no_attempt(tmp_path):
+    """**没接执行者＝组织段不跑，也不写尝试账**：纯机械部署不会把自己节流住。
+
+    为什么用行为而不是文案钉：上一版文档（含 `org_trigger.py` 的自述）把这件事写反了——
+    说「只跑机械拍的新状态根拍 1 也会留下一行尝试」，实际那一次跑带着从环境继承来的
+    `IG_EXECUTOR`，是接了执行者的调试拍。判据①与冷却闸都读这份账，写错方向会让人以为
+    「不接执行者也该跑组织段」，或反过来在纯机械部署里永远等不到第一次语义段。
+    """
+    settings = _settings(tmp_path, "noexec")
+    assert settings.executor_command() == "", "夹具必须是无执行者的机械拍"
+    for _ in range(2):
+        run_tick(settings=settings)
+    layout = resolve_state(settings.state_root, settings.repo_root)
+    assert not org_ledger_path(layout).exists(), \
+        "无执行者的机械拍写了尝试账＝冷却窗被一次没发生的调用占用"
+    decision = should_run_org_session(layout, tick=9)
+    assert decision.should_run is True and "从未跑过" in decision.reason
+
+
 def test_cooldown_blocks_after_a_real_attempt(tmp_path):
     """刚跑过组织段（机械时间戳在冷却窗内）→ 不触发：冷却闸认时间不认心情。"""
     settings = _settings(tmp_path, "cooldown")
