@@ -44,6 +44,13 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   ticks" reading is not a slower org cadence but an unreachable one. The verdict is recorded in
   both originals and in `engine/org_trigger.py`, and `tests/test_mechanism_docs.py` now refuses
   the old "open decision" wording on its way back.
+- **A subject-state sentence in the Chinese original is now a dated snapshot**
+  (`docs/zh/growth-subject.md`). It enumerated the subject's current top-level directories as
+  "journal / archive"; measured here (tick 633) they are `journal` and `app`, and `archive/` only
+  appears at the first journal rotation. The rule next to it (directory limit 10, and raising it is
+  a judgement change) was never wrong — the observation masquerading as a fact was. It now carries
+  its measurement date and points at `infinigrow status` for the live reading, and
+  `tests/test_mechanism_docs.py` rejects the old enumeration on its way back.
 
 ## v2.2.25 — log rotation moves to the launcher's handle gap, where it can actually work (2026-09-18)
 

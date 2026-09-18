@@ -222,3 +222,17 @@ def test_bucket_axes_claimed_in_readme_and_prompt_match_the_code():
         assert must_have in text, "%s 缺正确的桶轴" % rel
         for phrase in wrong:
             assert phrase not in text, "%s 又宣称成熟步是桶的轴：%s" % (rel, phrase)
+
+
+def test_subject_state_claims_in_the_design_of_record_are_dated_snapshots():
+    """讲主体的文档只能写**带日期的快照**，不能写成无日期的现状——主体在库外会长。
+
+    为什么锁这条：`docs/zh/growth-subject.md` 一度写「当前主体只有 2 个目录
+    （journal／archive）」，而实测（拍 633）两个顶层目录是 `journal`／`app`，
+    `archive/` 要到首次轮转才建。判据（目录上限 10）一直是对的，错的是**当成现状的观测**。
+    反向断言＝旧枚举回来即红；正向断言＝快照必须带日期。
+    """
+    text = (DOCS / "zh" / "growth-subject.md").read_text(encoding="utf-8")
+    assert "journal／archive" not in text, "主体目录枚举又写回旧的那一份"
+    assert "带日期的快照" in text, "库外现状必须标注为快照（附实测日期），否则会长成假事实"
+    assert "目录上限 10 个" in text, "判据本身不许被顺手改掉（改判据＝改文档＋代码＋测试）"
