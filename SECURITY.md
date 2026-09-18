@@ -56,8 +56,18 @@ unless you ask to stay anonymous.
 |---|---|---|
 | Insecure pseudo-random number generator (`random.Random(seed=...)`) | `src/infinigrow/engine/sprout_queue.py` (cold-start shuffle) | Deterministic on purpose: the cold-start order must be reproducible from the tick number alone (so a rerun of the same tick produces the same order). No security use — nothing here is a token, key, nonce or secret. |
 
-The scanner also reports ~48 findings under `archive/legacy-20260914/_venvtest/` — that is a
-vendored copy of third-party packages from a retired virtualenv, not this project's code.
+What the scanner reports depends on which root you point it at — measured here on 2026-09-18, and
+both cases are worth stating because the old sentence conflated them:
+
+- `privacy_scan.py --root .` (the release-boundary run) scans 126 files and reports **no hits**.
+  Since v2.2.26 its skip list comes from `.gitignore`, so local-only trees — `state/`, `archive/`,
+  `.qoder/` — are not scanned at all, which is the same scope rule as static rule R1 and
+  [`docs/privacy.md`](docs/privacy.md).
+- `privacy_scan.py --root archive` is a deliberate, non-default look inside an ignored directory. It
+  reports thousands of hits (measured: 667 files, 2,017 `abs-win-path`, 90 `abs-posix-path`,
+  16 `email`), the bulk of them under `archive/legacy-20260914/_venvtest/` — a vendored copy of
+  third-party packages from a retired virtualenv, not this project's code, and never shipped.
+
 Nothing in `src/` is flagged beyond the exception above (after v2.2.22: path traversal
 findings are cleared — `engine.subject.subject_path` guards name→path joins and
 `core.encoding.write_text` normalises its target, refuses `..` segments and takes an optional

@@ -99,6 +99,16 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   `org_cooldown_min` minutes. Behaviour is unchanged (only a mechanism change would alter it: gate the
   write on an actual LLM call — undecided); the four places that state the unit now agree, and the
   new case rejects the old wording on its way back.
+- **`SECURITY.md`'s scanner-scope sentence was describing a run that no longer happens**
+  (`SECURITY.md` ＋ `tests/test_mechanism_docs.py`). It said the scanner "also reports ~48 findings
+  under `archive/legacy-20260914/_venvtest/`". After this version moved the skip list to
+  `.gitignore`, the default pass does not enter `archive/` at all (measured: 126 files, no hits),
+  and the number was never the whole story: pointing the scanner at that tree explicitly
+  (`--root archive`) reports 667 files with 2,017 / 90 / 16 hits by rule. Both cases are now stated
+  separately and a case forbids the conflated wording from returning. Part of a full read of the
+  remaining public docs against code: `upgrading.md`'s exit codes do match
+  `core/exit_codes.py` (`BEHIND=3`, `REFUSE=4`), and the `versioning.md` / `privacy.md` /
+  `SECURITY.md` claims that were checked held.
 
 ## v2.2.25 — log rotation moves to the launcher's handle gap, where it can actually work (2026-09-18)
 

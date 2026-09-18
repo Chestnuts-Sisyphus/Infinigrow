@@ -327,3 +327,17 @@ def test_org_trigger_measures_attempts_not_llm_calls():
         assert ("机械拍" in doc) or ("mechanical tick" in doc), "正本没说机械拍也算一次"
     cfg = (REPO_ROOT / "src" / "infinigrow" / "core" / "config.py").read_text(encoding="utf-8")
     assert "机械段也算一次尝试" in cfg, "配置表那行没跟上正本口径"
+
+
+def test_security_doc_states_the_two_scan_scopes_separately():
+    """SECURITY.md 的扫描面必须与实测一致：默认那一遍不进被忽略目录，显式指定才扫。
+
+    为什么锁这条：旧文案写「扫描器还在 `archive/…/_venvtest` 下报 ~48 条」，把两种情形
+    混成一句。隐私扫描对齐 `.gitignore` 之后，默认那一遍连 `archive/` 都不进；而那串
+    数字也不对——显式 `--root archive` 实测是数千条。文案若不分开写，读的人会以为
+    「默认扫描里有一堆已知豁免」，而实际默认扫描是零命中。旧措辞出现即红。
+    """
+    security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
+    assert "privacy_scan.py --root ." in security and "privacy_scan.py --root archive" in security
+    assert "not scanned at all" in security
+    assert "~48 findings" not in security, "旧措辞回来了：它把默认扫描与显式扫描混为一谈"
