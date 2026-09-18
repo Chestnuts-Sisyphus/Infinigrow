@@ -287,6 +287,30 @@ that tick's prompt, and reconciles the file's **existence**:
 - every tick's prompt states this verdict (symmetric with the cap-sprout clause, so the
   executor never has to guess).
 
+**How far this long run carries a redemption-rate study** (proven, live at tick 624 on
+2026-09-18):
+
+- Global reading: 575 led rows, **212 checkable sample rows**, 208 redeemed → rate **0.98**
+  (Wilson 95% interval 0.95–0.99). The number has to be quoted with its denominator share:
+  **363 rows (63%) are `verifiable=false`** and sit outside the denominator.
+- The bucket axes are object domain × predicted edge × actual edge; **maturity step is not one of
+  them** — an outcome row carries no step, it takes a join against the maturity ledger on
+  (object, tick ≤ lead tick). Joined that way all 212 samples land on step 4 (the cap) and steps
+  1–3 have **no samples**, so "which step predicts better" is *not computable* here (not 0).
+  Another 42 sample rows name an object the maturity ledger does not carry (the two ledgers spell
+  objects differently) and must be normalised before the join.
+- Coverage is uneven across sprout origins: the solidify / read / act / principle edges all have
+  samples, while every historical `lib*` row (179 of them) predates the trace-mention fix — that
+  origin is still **no samples**.
+- The shape of the misses: 4 failures = 3 dropped on the executor side + 1 proposal went stale +
+  **0 genuinely not done**, and **no row** has a predicted edge different from the actual edge.
+  So this data answers "did the announced action really happen", not "was the wrong edge chosen" —
+  the second question needs rows where an edge *was* mis-chosen, and 0 cases cannot be read as
+  1.00.
+- **Verdict**: the format and the analysis surface are already there (computed on read, bucketed,
+  three-way failure attribution, reproducible with `infinigrow redemption --json`); what a further
+  study of "are the judgements accurate" lacks is not more ticks but **samples that can be wrong**.
+
 **Rotation** moves history into `state/archive/` (move-only). History-shaped ledgers keep the
 tail N lines; state-shaped ledgers (maturity, library) keep the **latest line per key**, so an
 object that has not been touched in a while cannot silently regress. Archives are searchable
