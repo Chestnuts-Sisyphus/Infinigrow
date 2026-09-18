@@ -53,6 +53,13 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   a judgement change) was never wrong — the observation masquerading as a fact was. It now carries
   its measurement date and points at `infinigrow status` for the live reading, and
   `tests/test_mechanism_docs.py` rejects the old enumeration on its way back.
+- **A live knob that no document mentioned is now documented** (`frozen_review_every`, default 20;
+  config table ＋ both mechanism originals ＋ `tests/test_mechanism_docs.py`). The engine sweeps the
+  frozen zone every N ticks so a frozen sprout can be re-lit into the active queue — it has been
+  doing that since T4/A5, but the setting appeared in neither the config table nor the mechanism
+  document, which made `IG_FROZEN_REVIEW_EVERY` undiscoverable. The new case fails if any integer
+  setting is missing from that table, or if a stated default or env-var name disagrees with code:
+  a missing row raises no error, it just becomes a switch nobody knows about.
 
 ## v2.2.25 — log rotation moves to the launcher's handle gap, where it can actually work (2026-09-18)
 

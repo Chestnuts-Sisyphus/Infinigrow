@@ -24,6 +24,7 @@
 | `queue_cap` | `IG_QUEUE_CAP` | 50 | 活跃芽队列上限 |
 | `lead_limit` | `IG_LEAD_LIMIT` | 3 | 同一芽连领上限（拍）|
 | `cold_start_ticks` | `IG_COLD_START_TICKS` | 50 | 冷启动随机化拍数（之后走字典序）|
+| `frozen_review_every` | `IG_FROZEN_REVIEW_EVERY` | 20 | **冻结区重看节奏（拍）**：每这么多拍扫一次冻结区，给其中的芽「重新点亮」（回到活跃队列）的机会 |
 | `frozen_requestion_ticks` | `IG_FROZEN_REQUESTION_TICKS` | 300 | 冻结芽**重问**年限（拍）：冻结满这么多拍仍未被点亮 → 允许重新立芽（挂起≠永久封存）|
 | `frozen_cap` | `IG_FROZEN_CAP` | 5000 | 冻结区行数上限（超限＝最旧的**移动**进 `state/archive/`，只移不删）|
 | `frozen_keep_tail` | `IG_FROZEN_KEEP_TAIL` | 4000 | 冻结区整理后保留的**尾部行数**（历史行全在归档）|

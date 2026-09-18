@@ -198,6 +198,12 @@ capability used?" cannot be, because no mechanical reading exists for it):
   re-lit, an object is no longer blocked by its frozen sprout — it may be asked again. The test
   uses the *newest* freeze of that object, so a backlog of old frozen sprouts cannot release a
   whole batch at once.
+- **Frozen-zone review cadence** (T4/A5): every `frozen_review_every` ticks (default 20) the
+  frozen zone is swept and a frozen sprout gets a chance to be **re-lit** into the active queue.
+  Different job from the rule above: re-lighting pulls a sprout back (criterion: ticks, blind to
+  the object), while re-asking permits a *new* sprout for the same object (criterion: the age of
+  that object's newest freeze). The cadence ran in code before anyone wrote it down, which left
+  `IG_FROZEN_REVIEW_EVERY` undiscoverable.
 - The frozen zone has a **capacity rule** of its own: past `frozen_cap` (default 5000) the
   oldest lines are *moved* to `state/archive/` (move-only, same discipline as ledger rotation).
 

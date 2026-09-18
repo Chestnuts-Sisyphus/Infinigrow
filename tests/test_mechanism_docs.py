@@ -268,3 +268,27 @@ def test_readme_size_figures_match_the_tree():
         assert abs(pair[0] - src) <= 100, "%s 的 Python 行数 %s 与实测 %s 对不上" % (rel, pair[0], src)
         assert abs(pair[1] - tests) <= 100, "%s 的测试行数 %s 与实测 %s 对不上" % (rel, pair[1], tests)
     assert claimed["README.md"] == claimed["README.zh-CN.md"], "双语规模数字各说一遍"
+
+
+def test_every_numeric_knob_is_listed_in_the_config_table():
+    """`core/config.py` 的配置表必须收录每个整型旋钮，默认值与环境变量名都要对得上。
+
+    为什么锁这条：`frozen_review_every` 每拍都在 `tick.py` 里用（`tick % cfg.frozen_review_every`），
+    却在**任何文档里都不存在**——表就是这张表的读者唯一的旋钮清单，漏一行不会报错，
+    只会安静地变成「没人知道的开关」。反向也查：表里不许有字段表没有的行。
+    """
+    import re
+
+    from infinigrow.core.config import ENV_PREFIX, _FIELDS
+    src = (REPO_ROOT / "src" / "infinigrow" / "core" / "config.py").read_text(encoding="utf-8")
+    rows = {m[0]: (m[1], m[2]) for m in re.findall(
+        r"^\| `([a-z_]+)` \| `(IG_[A-Z_]+)` \| (\d+) \|", src, re.M)}
+    ints = {name: default for name, (kind, default) in _FIELDS.items() if kind is int}
+    assert ints, "配置表判据失去对象：整型字段一个都没有了"
+    for name, default in sorted(ints.items()):
+        assert name in rows, "旋钮 `%s` 没进配置表（使用者无从发现它）" % name
+        env, stated = rows[name]
+        assert env == ENV_PREFIX + name.upper(), "%s 的环境变量名与表不一致" % name
+        assert stated == str(default), "%s：表里写 %s，真实默认 %s" % (name, stated, default)
+    for name in sorted(rows):
+        assert name in _FIELDS, "表里有 `%s` 但字段表没有（凭空造的旋钮）" % name
