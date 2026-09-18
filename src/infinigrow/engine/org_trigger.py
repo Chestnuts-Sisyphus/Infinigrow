@@ -1,21 +1,27 @@
 # -*- coding: utf-8 -*-
-"""组织会话（LLM 段）触发判据——**具体状态判据，不用「频率高」这类归纳**。
+"""组织会话触发判据——**具体状态判据，不用「频率高」这类归纳**。
 
 放在 `engine/` 而不是 `scheduler/`，是因为**拍循环本身必须查它**：
 上一代引擎的 P0 根因之一就是「语义判断段一直没有调度入口」——诊断报告产出后没人回灌，
 就地过期。判据若只存在于外部调度器里，拍循环就看不见「我该看语义层了」，
 同一个洞会以另一种形式重开。`scheduler/triggers.py` 只是它的对外门面（给外部调度器用）。
 
+**这里量的单位是「一次组织段尝试」，不是「一次 LLM 调用」**。没接执行者时组织段照跑、照记账
+（`run_tick(..., org_session=True)` 是默认）——本机实测（2026-09-19）：一个只跑机械拍的新状态根，
+拍 1 就往 `org-llm.jsonl` 写了一行。所以下表所有「上次」都指**上次尝试**，不管那次有没有真调 LLM。
+这层区别有后果：接了执行者的部署里两者重合；纯机械或调试性手动一拍里，它会**推迟**真正的 LLM 组织段
+（至多 `cooldown_min` 分钟）。改成「只有调过 LLM 才算」是机制变更，未拍板前保持现状。
+
 触发条件（任一成立即触发，冷却闸在后）：
 
 | # | 条件 | 判据形态 |
 |---|---|---|
-| ① | 从未跑过 LLM 组织段 | 账本无记录（具体状态：记录数＝0） |
-| ② | 距上次 LLM 段拍号差 ≥ `gap` | 拍号差（整数比较，不是「大概多久」） |
+| ① | 从未试过组织段 | 账本无记录（具体状态：记录数＝0） |
+| ② | 距上次尝试拍号差 ≥ `gap` | 拍号差（整数比较，不是「大概多久」） |
 | ③ | 存在待补指针差异 | 具体状态：待补指针条目数 > 0 |
 | ④ | 本拍零差异且已连续 `zero_gap` 拍 | 需要的是**具体计数**：连续零差异拍数 ≥ 阈值 |
 
-冷却闸：距上次 LLM 段**机械时间戳**不足 `cooldown_min` 分钟 → 不触发
+冷却闸：距上次尝试的**机械时间戳**不足 `cooldown_min` 分钟 → 不触发
 （硬约束：断流/节流类判据一律用机械时间戳，不用模型留痕时间）。
 
 **判据④的真实语义（Q3/A2/N56，[已证明]）**：它数的是差异账**行数**，不是拍数——
@@ -106,12 +112,12 @@ def should_run_org_session(layout: StateLayout, tick: int,
     }
 
     if last is None:
-        return OrgTriggerDecision(True, "①从未跑过 LLM 组织段（账本 0 条）", criteria)
+        return OrgTriggerDecision(True, "①从未跑过组织段（尝试账 0 条）", criteria)
 
     now = now or _dt.datetime.now()
     stamp = _parse_stamp(last.get("time", ""))
     if stamp is not None and (now - stamp).total_seconds() < cooldown_min * 60:
-        return OrgTriggerDecision(False, "冷却闸：距上次 LLM 段不足 %d 分钟" % cooldown_min,
+        return OrgTriggerDecision(False, "冷却闸：距上次组织段尝试不足 %d 分钟" % cooldown_min,
                                   criteria)
 
     last_tick = int(last.get("tick") or 0)
@@ -128,7 +134,10 @@ def should_run_org_session(layout: StateLayout, tick: int,
 
 
 def record_org_session(layout: StateLayout, tick: int, note: str = "") -> None:
-    """记一次 LLM 组织段**尝试**（含拍号与机械时间戳——缺了拍号，条件②就永远推不出来）。"""
+    """记一次组织段**尝试**（含拍号与机械时间戳——缺了拍号，条件②就永远推不出来）。
+
+    机械拍跑组织段也走这里：这条账记的是「试过」，不是「调过 LLM」。
+    """
     append_jsonl(org_ledger_path(layout),
                  {"tick": tick, "time": _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                   "note": note}, layout.root)

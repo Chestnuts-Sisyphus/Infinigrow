@@ -18,7 +18,7 @@
 | `executor_timeout_s` | `IG_EXECUTOR_TIMEOUT_S` | 120 | 单次执行者调用超时（秒）|
 | `llm_command` | `IG_LLM_COMMAND` | 空 | 旧字段（与 `executor` 同义，保留兼容）|
 | `llm_model` | `IG_LLM_MODEL` | 空 | 模型标识（透传给执行者，供其自行取用）|
-| `org_gap_ticks` | `IG_ORG_GAP_TICKS` | 5 | 组织会话 LLM 段最长空窗（拍）|
+| `org_gap_ticks` | `IG_ORG_GAP_TICKS` | 5 | 组织段最长空窗（拍）——读的是**尝试账**，机械段也算一次尝试 |
 | `org_cooldown_min` | `IG_ORG_COOLDOWN_MIN` | 30 | 组织段冷却（分钟，机械时间戳口径）；**实测节奏中位 40.0 分钟**——触发判据④只认「上一拍安静」（数的是差异账**行数**≈0.23 拍），生长拍会把它清零（反相关，N58）；语义与实测见 `docs/mechanism.md` §2.3（Q3/A2/A9）|
 | `tick_minutes` | `IG_TICK_MINUTES` | 10 | 调度间隔（分钟；安装计划任务时读它）|
 | `queue_cap` | `IG_QUEUE_CAP` | 50 | 活跃芽队列上限 |

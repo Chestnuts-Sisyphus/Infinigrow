@@ -307,3 +307,23 @@ def test_every_numeric_knob_is_listed_in_the_config_table():
         assert stated == str(default), "%s：表里写 %s，真实默认 %s" % (name, stated, default)
     for name in sorted(rows):
         assert name in _FIELDS, "表里有 `%s` 但字段表没有（凭空造的旋钮）" % name
+
+
+def test_org_trigger_measures_attempts_not_llm_calls():
+    """组织段判据的单位是**一次尝试**（机械拍也算）——四处文案必须同一口径。
+
+    为什么锁这条：那份账的文件名是 `org-llm.jsonl`，旧文案也写「距上次 LLM 段」，
+    但实测（2026-09-19，只跑机械拍的新状态根）拍 1 就往里写了一行。文案说成 LLM
+    会让人以为「手动跑一拍调试」无害，实际那一拍会占用冷却窗、把真正的 LLM 组织段
+    推迟至多 `org_cooldown_min` 分钟。旧措辞出现即红。
+    """
+    trigger = (REPO_ROOT / "src" / "infinigrow" / "engine" / "org_trigger.py").read_text(
+        encoding="utf-8")
+    assert "距上次组织段尝试不足" in trigger, "冷却闸文案又回到不准确的单位"
+    assert "LLM 段" not in trigger, "面向使用者的文案把「尝试」说成了「LLM 调用」"
+    assert "①从未跑过组织段" in trigger
+    for doc in (MECHANISM, MECHANISM_EN):
+        assert ("组织段尝试账" in doc) or ("org-attempt ledger" in doc), "正本没写单位"
+        assert ("机械拍" in doc) or ("mechanical tick" in doc), "正本没说机械拍也算一次"
+    cfg = (REPO_ROOT / "src" / "infinigrow" / "core" / "config.py").read_text(encoding="utf-8")
+    assert "机械段也算一次尝试" in cfg, "配置表那行没跟上正本口径"

@@ -89,6 +89,16 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   and only 1 of the 4 phrases still matches (2 of 4 with `SUBJECT_FILE_LIMIT=25`) — the check fails,
   which is the point: `docs/growth-subject.md` promises that changing a limit means changing document,
   code **and test** together, and until now the third leg was decorative.
+- **The org segment's cooldown window measures attempts, not LLM calls — the text now says so**
+  (`engine/org_trigger.py` ＋ `core/config.py` ＋ both `mechanism.md` originals ＋
+  `tests/test_mechanism_docs.py`). The reason string read "since the last LLM segment" and the config
+  table called the knob "LLM-segment gap", but the ledger behind both is written by **any** org
+  segment: measured here, a state root that only ever ran mechanical ticks already had an
+  `org-llm.jsonl` row at tick 1. The wording was not harmless — it implies a manual debugging tick
+  costs nothing, while in fact it consumes the window and delays the real LLM segment by up to
+  `org_cooldown_min` minutes. Behaviour is unchanged (only a mechanism change would alter it: gate the
+  write on an actual LLM call — undecided); the four places that state the unit now agree, and the
+  new case rejects the old wording on its way back.
 
 ## v2.2.25 — log rotation moves to the launcher's handle gap, where it can actually work (2026-09-18)
 
