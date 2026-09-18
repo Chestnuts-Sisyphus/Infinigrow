@@ -25,7 +25,12 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   top-level names in `.gitignore`, the same semantics as static rule R1. Not a free pass — pinned
   with both a positive and a negative case in `tests/test_privacy.py`, and documented in
   `docs/privacy.md` / `docs/zh/privacy.md`.
-
+- **The reserved `long_task` branch is now guarded** (K16, both languages). It stays unwired —
+  wiring it needs a mechanical test for "what counts as a long task", a design decision — but
+  "reserved" was costing more than a comment: the flag is the only bypass of the lead limit, so a
+  quiet assignment somewhere would turn that incident-borne constraint into a suggestion.
+  `tests/test_sprout_queue.py` now fails if any engine module assigns it, and passes when the
+  flag (read from an old ledger row) does grant the exemption.
 - **N58-① is closed: trigger ④ keeps its row reading** (settled, no behaviour change). It was the
   repository's only explicit open decision, and measuring it here settled the question rather than
   deferring it: over ticks 556–628 only 14 of 73 ticks were quiet, the longest run of consecutive

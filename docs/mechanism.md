@@ -191,7 +191,9 @@ capability used?" cannot be, because no mechanical reading exists for it):
   reappears. (A `long_task` exemption branch exists in the field set, **kept as reserved** and
   deliberately not wired: there is no writer and no mechanical test for "what counts as a long
   task", and the lead limit already prevents one sprout from hogging the slot. The field stays so
-  that old ledger rows still parse.)
+  that old ledger rows still parse. **Reserved means guarded**: `tests/test_sprout_queue.py`
+  fails if any engine module ever assigns the flag — wiring it takes a mechanical criterion
+  first, not a quiet `long_task = True` that turns the lead limit into a suggestion.)
 - **Re-asking frozen sprouts**: after `frozen_requestion_ticks` (default 300) without being
   re-lit, an object is no longer blocked by its frozen sprout — it may be asked again. The test
   uses the *newest* freeze of that object, so a backlog of old frozen sprouts cannot release a

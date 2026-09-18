@@ -249,3 +249,28 @@ def test_revive_clears_frozen_tick_and_refreshes_age():
     s1 = q.frozen[0]
     q.revive(s1, tick=9)
     assert s1.frozen_tick is None and s1.created_tick == 9 and s1.leads == 0
+
+
+def test_long_task_is_reserved_and_has_no_writer():
+    """K16：`long_task` 豁免连领上限＝**登记为预留**，引擎里不许有写入方。
+
+    为什么必须钉住：这条豁免是「连领上限」的唯一后门。没有写入方它是死的（现状是有意决定），
+    但后门一旦被人顺手接上，就等于执行会话给自己发免死金牌——违反「每根芽最多连领 3 拍」
+    那条由事故换来的约束。接线需要先定「什么算长任务」的机械判据（设计决策），
+    不许通过悄悄加一个 `long_task=True` 来既成事实。
+    """
+    import re
+    from pathlib import Path
+    src = Path(__file__).resolve().parents[1] / "src" / "infinigrow"
+    writer = re.compile(r"long_task\s*=\s*True|\[\s*['\"]long_task['\"]\s*\]\s*=")
+    offenders = [p.relative_to(src).as_posix() for p in sorted(src.rglob("*.py"))
+                 if p.name != "model.py" and writer.search(p.read_text(encoding="utf-8"))]
+    assert offenders == [], "有人给预留字段加了写入方：%s" % offenders
+
+    # 预留的行为本身是活的（旧行读得进来）：带标记才豁免，不带就照守上限
+    q = SproutQueue(cap=10, lead_limit=1)
+    plain, long_one = _sprout("s1", "A"), _sprout("s2", "B", long_task=True)
+    for s in (plain, long_one):
+        s.leads = 1
+        q.add(s)
+    assert [s.id for s in q.eligible(5)] == ["s2"]
