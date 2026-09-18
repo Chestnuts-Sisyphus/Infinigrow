@@ -6,6 +6,21 @@ The long-form reasoning behind each entry (incident, measurement, decision) live
 documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals in
 [`docs/zh/`](docs/zh/).
 
+## v2.2.24 — the log rotation fails gracefully on a busy journal, and the README names every status reading (2026-09-18)
+
+- **Log rotation no longer crashes the tick when the journal is busy** (new, 2026-09-18):
+  the scheduler holds `logs/tick.log` with an append handle; Windows (no delete-sharing)
+  made `unlink` fail with `WinError 32` on every rotation, so the tick exited `rc=1` and a
+  traceback containing the machine's absolute paths was archived every run. Rotation now
+  writes the full original into the archive first, then truncates the main file *in place*
+  when it cannot be removed — the append side keeps writing, no error, no data loss
+  (`ledger.store.truncate_file`, test-pinned with a held handle).
+- **The README quick-start `status` line carries all five readings** (S3/D1): bilingual
+  description now lists the capacity and re-ask gates, evidence compliance, executor-side
+  loss and the usage split — matching `docs/running.md` one line for one line.
+- **The mechanism document notes the busy-handle tolerance** on rotation (both languages),
+  so the failure semantics are written down where the mechanism is.
+
 ## v2.2.23 — the ledger split no longer drops ticks, and the report carries the gate readings (2026-09-18)
 
 - **The usage split now covers every call made today** (S1/A4): org-session calls

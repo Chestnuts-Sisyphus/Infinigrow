@@ -80,7 +80,7 @@ infinigrow tick --json          # the same, machine-readable
 infinigrow gardener             # the mechanical immune system (locks / liveness / rotation)
 infinigrow scan                 # static rules (paths / sync / secrets / BOM …)
 infinigrow selftest             # positive and negative case for every rule
-infinigrow status               # tick, subject, queue composition, redemption rate, alerts
+infinigrow status               # tick, subject, queue composition, capacity+re-ask gates, compliance, executor-side loss, usage split, alerts
 infinigrow rotate               # move old ledger lines to state/archive/ (move-only)
 ```
 

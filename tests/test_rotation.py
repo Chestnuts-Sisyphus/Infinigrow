@@ -183,6 +183,35 @@ def test_rotate_files_rotates_tick_log_by_bytes(tmp_path):
     assert len(list((layout.archive_dir / "files" / "logs").glob("tick.log.*"))) == 2
 
 
+def test_rotate_files_tolerates_busy_tick_log_and_truncates_in_place(tmp_path):
+    """日志被追加句柄占用（Windows WinError 32 场景）：归档件照写、主件原地截断清空、
+    不 raise；下一拍 size 已低于阈值 → 不再轮转（归档不重复复制）。"""
+    from infinigrow.ledger.rotation import rotate_files
+    settings, layout = _layout(tmp_path, "log")
+    layout.logs_dir.mkdir(parents=True, exist_ok=True)
+    log = layout.logs_dir / "tick.log"
+    payload = "x" * 5000 + "\n"
+    log.write_text(payload, encoding="utf-8")
+    arch_dir = layout.archive_dir / "files" / "logs"
+    with open(log, "a", encoding="utf-8") as _held:     # 模拟调度器追加句柄（Windows 无删除共享）
+        reports = rotate_files(layout, keep_files=200, log_max_bytes=1024,
+                               stamp="20260101-000007")
+        assert reports and reports[0]["name"] == "logs/tick.log"
+        assert reports[0]["moved"] == 1
+        archived = list(arch_dir.glob("tick.log.*"))
+        assert len(archived) == 1
+        assert archived[0].read_text(encoding="utf-8") == payload   # 数据先进保险侧
+        assert log.is_file() and log.stat().st_size == 0            # 主件已清空/另起
+        # 主件仍可写（Windows：句柄仍指向原地截断的文件；POSIX：另起的空文件）
+        log.write_text("after\n", encoding="utf-8")
+    assert log.read_text(encoding="utf-8") == "after\n"
+    # 下一拍：主件已空 → 不再轮转、不新增归档
+    reports2 = rotate_files(layout, keep_files=200, log_max_bytes=1024,
+                            stamp="20260101-000007")
+    assert reports2 == []
+    assert len(list(arch_dir.glob("tick.log.*"))) == 1
+
+
 def test_rotate_journal_moves_excess_into_subject_archive(tmp_path):
     """K6/A7：主体 journal 超上限 → 只移动进 `<主体根>/archive/journal/`（不删）。"""
     subject = tmp_path / "subject"

@@ -64,6 +64,7 @@ TITLES = {
     "2.2.21": "v2.2.21 — name-to-path joins are guarded, and the release-note tool is public",
     "2.2.22": "v2.2.22 — executor-side loss and token spend are both visible",
     "2.2.23": "v2.2.23 — the ledger split no longer drops ticks, and the report carries the gate readings",
+    "2.2.24": "v2.2.24 — the log rotation fails gracefully on a busy journal, and the README names every status reading",
 }
 
 

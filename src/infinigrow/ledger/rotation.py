@@ -46,7 +46,8 @@ from typing import Iterable, Optional
 
 from ..core.encoding import read_text
 from ..core.paths import StateLayout
-from ..ledger.store import LedgerError, move_file, require_within, write_lines, write_work_file
+from ..ledger.store import (LedgerError, move_file, require_within, truncate_file,
+                            write_lines, write_work_file)
 
 #: 保留策略：尾部 N 行 / 每 key 最新一行
 TAIL = "tail"
@@ -204,6 +205,8 @@ def rotate_files(layout: StateLayout, keep_files: int = 200,
     `logs/tick.log` 按**字节**超过阈值就整体归档、另起空文件。都**只移动不删**。
 
     归档落在 `state/archive/files/<类>/`，与 JSONL 账本归档区分开，仍可检索。
+    调度器以追加句柄持有 `tick.log`（Windows 下无 `FILE_SHARE_DELETE`）——轮转时
+    归档件照写，主件删不掉就原地截断清空（数据先在归档件里，不报错、不丢数据）。
     """
     reports = []
     safe_stamp = _safe_component(stamp or _dt.datetime.now().strftime("%Y%m%d-%H%M%S"),
@@ -232,9 +235,18 @@ def rotate_files(layout: StateLayout, keep_files: int = 200,
                 suffix += 1
                 dest = require_within(dest_dir / ("%s.%s-%d" % (LOG_NAME, safe_stamp, suffix)),
                                       layout.root)
-            move_file(log, dest, layout.root)
-            # 主日志另起空文件（append 方继续写新内容；旧内容全在归档件里）
-            write_work_file(log, "", layout.root, require_markers=())
+            write_work_file(dest, read_text(log), layout.root, require_markers=())
+            try:
+                log.unlink()
+            except OSError:
+                # 主日志正被本进程的追加句柄占用（Windows 无 FILE_SHARE_DELETE，
+                # unlink 必撞 WinError 32）：归档件已写好（数据在保险侧），主件
+                # 原地截断清空——append 方继续写新内容，不报错、不丢数据。
+                truncate_file(log, layout.root)
+            else:
+                # 无占用（例如手工 `infinigrow rotate`）：清掉后另起空文件，
+                # 下一拍的追加写落在新日志上。
+                write_work_file(log, "", layout.root, require_markers=())
             reports.append({"name": "logs/" + LOG_NAME, "moved": 1, "kept": 0,
                             "archive": "files/logs"})
     return reports

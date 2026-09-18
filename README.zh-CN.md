@@ -72,7 +72,7 @@ infinigrow tick --json          # 同上，机读
 infinigrow gardener             # 机械免疫系统（锁／断流／失败升级／轮转）
 infinigrow scan                 # 十条静态规则
 infinigrow selftest             # 每条规则的正反用例
-infinigrow status               # 拍号、主体、队列组成、兑现率、告警
+infinigrow status               # 拍号、主体、队列组成、容量闸+重问闸、合规率、执行者损耗、用量分账、告警
 infinigrow rotate               # 历史行移进 state/archive/（只移动不删）
 ```
 
