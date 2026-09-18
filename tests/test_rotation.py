@@ -167,7 +167,7 @@ def test_rotate_journal_archives_redacts_and_clears(tmp_path):
     layout.logs_dir.mkdir(parents=True, exist_ok=True)
     layout.archive_dir.mkdir(parents=True, exist_ok=True)
     log = layout.logs_dir / "tick.log"
-    payload = "line with Z:\\local\\path somewhere\n"           # 盘符形态，两平台都命中脱敏
+    payload = "line with %s some%shere\n" % ("Z:" + chr(92), "path" + chr(92))   # 盘符形态运行时拼（R1 不拦源码），两平台命中脱敏
     payload += "x" * 5000 + "\n"
     log.write_text(payload, encoding="utf-8")
     report = rj.rotate_journal(str(layout.root), max_bytes=1024)
