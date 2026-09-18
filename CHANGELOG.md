@@ -78,6 +78,17 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   recorded before it, derived from the CHANGELOG after. Tests pin both halves, the exact set of 11
   pre-boundary wordings that legitimately differ from the CHANGELOG (so nobody "aligns" a published
   Release away), and a negative case proving a hand-copied title can never win after the boundary.
+- **The observation-surface limits are now pinned where they are actually written**
+  (`tests/test_mechanism_docs.py`; the limits themselves are unchanged). The existing check asked only
+  whether `"10"` and `"20"` appear anywhere in the mechanism document — and both do, for unrelated
+  reasons (stall alert 12 ticks, org cooldown 30 minutes, queue cap 50), so raising
+  `SUBJECT_DIR_LIMIT` or `SUBJECT_FILE_LIMIT` could never redden it. The check now reads the sentences
+  that state the boundary (`docs/zh/growth-subject.md` table and rule line, `docs/growth-subject.md`
+  "Directory limit 10, file limit 20") against the constants, and carries its own negative case:
+  the same phrase with the digits swapped must not be found. Measured: simulate `SUBJECT_DIR_LIMIT=12`
+  and only 1 of the 4 phrases still matches (2 of 4 with `SUBJECT_FILE_LIMIT=25`) — the check fails,
+  which is the point: `docs/growth-subject.md` promises that changing a limit means changing document,
+  code **and test** together, and until now the third leg was decorative.
 
 ## v2.2.25 — log rotation moves to the launcher's handle gap, where it can actually work (2026-09-18)
 

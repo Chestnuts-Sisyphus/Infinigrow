@@ -151,6 +151,21 @@ def test_observation_surface_boundary_is_documented():
     zh_arch = (DOCS / "zh" / "architecture.md").read_text(encoding="utf-8")
     assert "目录对象" in zh_arch
 
+    # 上面两组只查子串：`10`／`20` 在正本里因别的判据（空转 12 拍、冷却 30 分钟、
+    # 队列 50）本来就出现，改常量也不会让它变红——所以判据要钉在**写明上限的那句话**上。
+    zh_subject = (DOCS / "zh" / "growth-subject.md").read_text(encoding="utf-8")
+    en_subject = (DOCS / "growth-subject.md").read_text(encoding="utf-8")
+    for pattern, doc, label in (
+            ("每个子目录（最多 %d 个）" % SUBJECT_DIR_LIMIT, zh_subject, "中文正本·目录上限"),
+            ("每个文件（最多 %d 个）" % SUBJECT_FILE_LIMIT, zh_subject, "中文正本·文件上限"),
+            ("目录上限 %d 个" % SUBJECT_DIR_LIMIT, zh_subject, "中文正本·目录上限句"),
+            ("Directory limit %d, file limit %d" % (SUBJECT_DIR_LIMIT, SUBJECT_FILE_LIMIT),
+             en_subject, "英文公开文档·上限句")):
+        assert pattern in doc, "%s 与代码常量不符（找的是：%s）" % (label, pattern)
+        # 反证：句式必须真的带数字，改成 99 就该找不到
+        assert pattern.replace(str(SUBJECT_DIR_LIMIT), "99").replace(
+            str(SUBJECT_FILE_LIMIT), "99") not in doc, "%s 的句式不带数字，判据失效" % label
+
 
 def test_frozen_zone_has_a_capacity_rule_documented():
     """M5：冻结区容量判据（超上限只移动最旧的进归档）必须写在正本与配置表里。"""
