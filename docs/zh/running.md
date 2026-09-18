@@ -174,11 +174,12 @@ tail state/executor.jsonl           # 执行者调用账（rc/耗时/输出长�
 python -m infinigrow org-status     # 组织会话发现的结局（待验/被证实/被推翻）
 ```
 
-**`org-check` 的退出码请读 JSON，别只读 rc**：`should_run=true → 0`，`should_run=false → 1`。
-这里的 1 **借用**了「参数/用法错误」那一位（`exit_codes.USAGE`），**不代表命令写错了**——
-拿 rc 当成败判定就会读反（CI 冷启动里那句 `|| true` 就是在绕这个坑）。
-给「不该跑」一个专属退出码是**接口变更**（要同改常量＋文档＋测试，见 `docs/versioning.md`），
-未拍板前按现状如实写明，不在文档里把它说成「成功」也不说成「用法错误」。
+**`org-check`：结论在 JSON 里，退出码只管「命令跑没跑成」**：`should_run=true → 0`，
+`should_run=false → 5`。这个 5 是 `exit_codes.NOT_THIS_TICK`——「跑成功了，答案是这一拍不该跑」，
+2026-09-19 起替掉它原先借用的 **1**（1 重新只属于「参数/用法错误」，写错参数不再躲在一个正当的
+「不」后面）。CI 冷启动那一步现在把它挪到跑拍**之前**——空状态根上答案是「该跑」，rc=0，于是
+原先那句把真正用法错误一起吞掉的 `|| true` 整个去掉了。
+**分支请读 `should_run`，别读 rc。**
 
 ---
 

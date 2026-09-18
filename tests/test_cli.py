@@ -135,13 +135,17 @@ def test_pause_resume_refused_on_non_windows(tmp_path, monkeypatch, capsys):
 
 
 def test_org_check_exit_code_and_json_agree(tmp_path, capsys):
-    """`org-check`：rc 与 JSON 的 `should_run` 必须同向；**1 是判定「不该跑」，不是用法错误**。
+    """`org-check`：rc 与 JSON 的 `should_run` 必须同向；**「不该跑」回专属码 5，不是用法错误**。
 
-    为什么锁这条：这个子命令把「本拍不该跑组织段」回成 rc=1（`exit_codes.USAGE` 位），
-    调用方（计划任务、CI）如果按 rc 判成败就会读反——CI 里那句 `|| true` 就是在绕这个坑。
-    两个方向都要钉：空状态根＝①从未跑过 → 0/true；刚记过一次＝冷却闸关掉四条 → 1/false。
+    为什么锁这条：这个子命令原先把「本拍不该跑组织段」回成 rc=1（`exit_codes.USAGE` 位），
+    调用方（计划任务、CI）按 rc 判成败就会读反，而真正的用法错误又被同一个数字盖住——
+    CI 里那句 `|| true` 就是在绕这个坑，代价是连真错一起吞。2026-09-19 起给它专属码。
+    两个方向都要钉：空状态根＝①从未跑过 → 0/true；刚记过一次＝冷却闸关掉四条 → 5/false。
+    再加一条反证：专属码不得占用用法错误位，否则这次收口等于没做。
     """
     import datetime as _dt
+
+    from infinigrow.core import exit_codes as rc
     root = tmp_path / "state"
     root.mkdir(parents=True)
     code = main(["--state-root", str(root), "org-check", "--tick", "9"])
@@ -154,5 +158,8 @@ def test_org_check_exit_code_and_json_agree(tmp_path, capsys):
         encoding="utf-8")
     code = main(["--state-root", str(root), "org-check", "--tick", "9"])
     payload = json.loads(capsys.readouterr().out)
-    assert payload["should_run"] is False and code == 1, "冷却闸内应判「不该跑」，且 rc 与之一致"
+    assert payload["should_run"] is False and code == rc.NOT_THIS_TICK, \
+        "冷却闸内应判「不该跑」，且 rc 与之一致"
     assert "冷却" in payload["reason"]
+    assert rc.NOT_THIS_TICK != rc.USAGE, "专属码又借用法错误的位：调用方仍然读反"
+    assert rc.MEANING[rc.NOT_THIS_TICK]

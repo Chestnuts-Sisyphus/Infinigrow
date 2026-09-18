@@ -57,11 +57,15 @@ jobs:
           IG_SUBJECT_ROOT: ${{ runner.temp }}/infinigrow-subject
         run: |
           python -m infinigrow dry-run
+          # org-check sits before the ticks on purpose: on an empty state root the
+          # answer is "run it" (rc=0), so no `|| true` is needed. Since v2.2.27 a
+          # "not this tick" answer has its own code (5), which the old `|| true`
+          # could not tell apart from a real usage error (1).
+          python -m infinigrow org-check --tick 9
           python -m infinigrow tick --tick 1 --probe
           python -m infinigrow tick
           python -m infinigrow tick
           python -m infinigrow gardener
-          python -m infinigrow org-check --tick 9 || true
           python -m infinigrow org-status
 
       # 产物不得含绝对路径：用仓库自带的跨平台工具（原先那段 bash heredoc

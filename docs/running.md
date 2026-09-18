@@ -140,13 +140,13 @@ tail state/executor.jsonl           # executor call ledger (rc / duration / outp
 python -m infinigrow org-status     # how the org session's findings turned out
 ```
 
-**`org-check`: read the JSON, not the exit code.** It returns `should_run=true → 0` and
-`should_run=false → 1`, and that 1 is the *usage-error* slot (`exit_codes.USAGE`) **borrowed** to
-mean "not this tick" — it does not mean the command was written wrong. Treating rc as pass/fail
-reads it backwards (the `|| true` in the CI cold-start step exists because of exactly that).
-Giving "not now" its own code is an **interface change** (constant *and* document *and* test, see
-`docs/versioning.md`); until that is decided, the behaviour is written down as it is — neither
-"success" nor "usage error".
+**`org-check`: the answer is in the JSON; the exit code only says whether the command ran.**
+It returns `should_run=true → 0` and `should_run=false → 5`. That 5 is `exit_codes.NOT_THIS_TICK`
+— "ran fine, and the answer is: not this tick" — which since 2026-09-19 replaces the borrowed
+`1` this command used to return (1 is usage errors again, so a mistyped flag can no longer hide
+behind a legitimate "no"). The CI cold-start step now calls it on an empty state root, where the
+answer is `should_run=true`/0, so the `|| true` that used to swallow real usage errors is gone.
+Branch on `should_run`, not on rc.
 
 ---
 

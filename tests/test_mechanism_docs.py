@@ -341,3 +341,29 @@ def test_security_doc_states_the_two_scan_scopes_separately():
     assert "privacy_scan.py --root ." in security and "privacy_scan.py --root archive" in security
     assert "not scanned at all" in security
     assert "~48 findings" not in security, "旧措辞回来了：它把默认扫描与显式扫描混为一谈"
+
+
+def test_org_check_exit_code_documented_in_both_languages():
+    """`org-check` 的「不该跑」码：文档写的数字必须**等于**常量，且双语同口径。
+
+    为什么锁这条（并且不许写死数字）：这一位曾经是借用位——文档、代码、CI 三处各自
+    描述同一个 1，谁改了另外两处不知道，就是 v1 的老病。判据如果写成 `assert "5" in doc`
+    那是装饰性的：常量哪天改回 1、或者文档单独漂成 6，断言都不会红。所以数字从
+    `exit_codes.NOT_THIS_TICK` 取，句式换数字必须找不到（自带反证）。
+    """
+    from infinigrow.core import exit_codes as rc
+
+    phrase = "should_run=false → %d" % rc.NOT_THIS_TICK
+    for name in ("running.md", "zh/running.md"):
+        doc = (DOCS / name).read_text(encoding="utf-8")
+        assert phrase in doc, "%s 没写「不该跑」的专属码" % name
+        assert "should_run=false → 1" not in doc, "%s 又回到借用位" % name
+    assert rc.NOT_THIS_TICK != rc.USAGE
+    cli = (REPO_ROOT / "src" / "infinigrow" / "cli.py").read_text(encoding="utf-8")
+    assert "rc.NOT_THIS_TICK" in cli, "文档改了，cli.py 还在返回借用的 USAGE"
+    ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "org-check --tick 9 || true" not in ci, \
+        "`|| true` 回来了：它把真正的用法错误（1）和「本拍不该跑」一起吞掉"
+    org_line = next(i for i, line in enumerate(ci.splitlines()) if "infinigrow org-check" in line)
+    tick_line = next(i for i, line in enumerate(ci.splitlines()) if "infinigrow tick" in line)
+    assert org_line < tick_line, "CI 里的 org-check 不在空状态根那一步，rc 就不再是 0"

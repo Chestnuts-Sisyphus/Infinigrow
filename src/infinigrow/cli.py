@@ -226,7 +226,7 @@ def main(argv=None) -> int:
         decision = should_run_org_session(layout, args.tick, gap=args.gap,
                                          cooldown_min=settings.org_cooldown_min)
         print(json.dumps(decision.as_dict(), ensure_ascii=False, indent=2))
-        return rc.OK if decision.should_run else rc.USAGE
+        return rc.OK if decision.should_run else rc.NOT_THIS_TICK
 
     if args.cmd == "org-session":
         from .engine.domain_saturation import DomainState
