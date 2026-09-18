@@ -108,8 +108,13 @@ It runs when **any** of four criteria holds (the cooldown gate has the final say
 Measured over the last 40 ticks (400–439): the reading is either ~40–43 or 0, and it reached
 ≥ 10 on **14 of those 40 ticks**. So `zero_gap = 10` **means ≈ "the previous tick was quiet"**
 (about 0.23 tick) — not "ten consecutive quiet ticks". The label was fixed in v2.2.9 to say
-rows; the *semantics* are deliberately unchanged — changing them changes the org cadence and
-its token cost, which is an open decision (N58-①).
+rows. **The semantics are now settled: the row reading stands** (N58-① closed, proven
+2026-09-19). Reading it literally as "ten consecutive quiet ticks" is not a slower cadence but
+a **nearly unreachable** one: a growth tick always writes a non-OK row and resets the streak.
+Measured here over ticks 556–628 (the 73 ticks still in the difference ledger): only
+**14 of 73 ticks were quiet (19%)**, the **longest run of consecutive quiet ticks was 1**, and
+runs of ≥ 10 occurred **0 times**. Re-opening this means changing what resets the streak —
+code, tests and both originals move together — not editing the `zero_gap` number.
 
 **Measured cadence ([proven])**: the cooldown gate allows one run per 30 minutes, and the
 measured interval is **median 40.0 min / mean 42.3 min** (`state/org-llm.jsonl`, 100 intervals,

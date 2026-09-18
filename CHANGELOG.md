@@ -26,6 +26,14 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   with both a positive and a negative case in `tests/test_privacy.py`, and documented in
   `docs/privacy.md` / `docs/zh/privacy.md`.
 
+- **N58-① is closed: trigger ④ keeps its row reading** (settled, no behaviour change). It was the
+  repository's only explicit open decision, and measuring it here settled the question rather than
+  deferring it: over ticks 556–628 only 14 of 73 ticks were quiet, the longest run of consecutive
+  quiet ticks was **1**, and a run of ≥ 10 never occurred — so the literal "ten consecutive quiet
+  ticks" reading is not a slower org cadence but an unreachable one. The verdict is recorded in
+  both originals and in `engine/org_trigger.py`, and `tests/test_mechanism_docs.py` now refuses
+  the old "open decision" wording on its way back.
+
 ## v2.2.25 — log rotation moves to the launcher's handle gap, where it can actually work (2026-09-18)
 
 - **`logs/tick.log` rotation now runs in the launcher, before any handle opens** (v2.2.25):

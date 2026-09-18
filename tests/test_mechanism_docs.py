@@ -183,3 +183,21 @@ def test_replacement_keeps_the_age_is_documented_everywhere():
     assert "does not change the question's age" in MECHANISM_EN, "英文正本缺 Q1 规则"
     assert "lead budget is not inherited" in MECHANISM_EN, "英文正本缺「连领预算不继承」"
     assert "重提不改问题的年龄" in PROMPTS, "提示词缺 Q1 规则"
+
+
+def test_quiet_streak_semantics_are_settled_not_open_anymore():
+    """N58-① 收口：判据④「行数口径」是**已定案**，三处必须同写，旧「未决项」措辞不许回来。
+
+    为什么锁这条：这个未决项挂了很久，唯一的实际风险不是数字选错，而是**有人把标签
+    当成拍数去「顺手修」**——那会让组织段近乎永不触发（实测拍 556–628：最长连续安静 1 拍）。
+    定案＝行为不变，所以同时钉住 `DEFAULT_ZERO_GAP == 10`。
+    """
+    from infinigrow.engine.org_trigger import DEFAULT_ZERO_GAP
+    assert DEFAULT_ZERO_GAP == 10, "定案是语义口径，不是调数字"
+    assert "语义定案：保持行数口径" in MECHANISM, "中文正本缺 N58-① 的裁定"
+    assert "未决项（N58-①）" not in MECHANISM, "旧措辞回来了：这条已收口"
+    assert "semantics are now settled" in MECHANISM_EN, "英文公开文档缺 N58-① 的裁定"
+    assert "open decision" not in MECHANISM_EN, "旧措辞回来了：这条已收口"
+    trigger_path = REPO_ROOT / "src" / "infinigrow" / "engine" / "org_trigger.py"
+    trigger = trigger_path.read_text(encoding="utf-8")
+    assert "语义定案：保持行数口径" in trigger, "代码 docstring 与正本漂移"
