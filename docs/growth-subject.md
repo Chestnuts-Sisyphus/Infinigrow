@@ -55,6 +55,27 @@ One tick does a **read-only, bounded, no-subprocess, no-network** observation:
   surface, so proposals about it are rejected by the object-name gate. With a large subject,
   keep the number of top-level directories small (or raise the limit deliberately — a judgement
   change, so change the constant *and* this document *and* its test together).
+  **Settled 2026-09-19: both stay at 10 / 20.** Nothing is pressing against the boundary — the
+  subject has far fewer than 10 top-level directories, the per-file window takes the 20 newest by
+  mtime while file count and total bytes use real totals outside that window — so raising a limit
+  would widen the observation surface without adding one accountable quantity.
+- **Only one of the two subtrees has a capacity rule.** The gardener rotates `journal/` at
+  `journal_keep_files` (default 200 entries), moving the overflow — never deleting — into
+  `<subject>/archive/journal/`. `app/` is **deliberately not rotated**: those files are the
+  objects the solidify edge is reconciled against — the outcome test literally reads "is the
+  evidence file there" (`evaluate_outcome`'s `evidence_key`: present means the application
+  happened). Moving one out does two things at once: a named object disappears from the subject
+  and the next tick reports it, truthfully, as *missing*, and the **directory object** `app/`
+  loses a unit of its file count. Both are differences the engine manufactured for itself (the
+  same fault as S1's "branch on completion"), not growth. Before any move is safe there has to
+  be a test for
+  "this evidence file is closed and no maturity chain refers to it"; without that test a general
+  rotation just moves the redemption evidence out of sight. **The size is a dated snapshot**
+  (measured 2026-09-19, tick 647): `app/` 145 files / 261,713 bytes (median 1,752), busiest day
+  102 new files (2026-09-18) ≈ 0.18 MB/day; `journal/` 179 entries / 544,710 bytes; 325 files in
+  the subject root. Re-read it from `infinigrow status`. The trigger to revisit: once the
+  evidence files start crowding the observation surface or the disk budget, design the
+  "movable" criterion first — do not just move a number.
 - `.git` and cache directories are skipped.
 - Content-level judgement is not here: byte sizes changed *is* a fact, and no one has to
   interpret it.

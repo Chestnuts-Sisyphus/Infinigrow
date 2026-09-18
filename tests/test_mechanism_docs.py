@@ -367,3 +367,34 @@ def test_org_check_exit_code_documented_in_both_languages():
     org_line = next(i for i, line in enumerate(ci.splitlines()) if "infinigrow org-check" in line)
     tick_line = next(i for i, line in enumerate(ci.splitlines()) if "infinigrow tick" in line)
     assert org_line < tick_line, "CI 里的 org-check 不在空状态根那一步，rc 就不再是 0"
+
+
+def test_subject_capacity_split_is_documented_and_no_stale_enumeration():
+    """`journal/` 轮转、`app/` 刻意不轮转——这条判定必须写在双语主体文档里，且旧枚举不许回流。
+
+    为什么锁这条：主体根两个子树只有 `journal/` 有容量判据（`journal_keep_files`），`app/`
+    的证据件是固化边的对账对象，搬走＝引擎自己造出「缺失」差异。这不是「先不管」，是**决定
+    不加**，所以它得有文档位置、有配置名、有反证；否则下一轮读的人只能重新推一遍。
+    同一处还钉第五轮的教训：那句把观测当现状的目录枚举当时只改了文档，`subject.py` 里
+    同一句话留到了现在——所以这次把禁令同时扫 `src/` 与 `prompts/`。
+    """
+    from infinigrow.engine.subject import SUBJECT_DIR_LIMIT, SUBJECT_FILE_LIMIT
+
+    for name in ("growth-subject.md", "zh/growth-subject.md"):
+        doc = (DOCS / name).read_text(encoding="utf-8")
+        assert "journal_keep_files" in doc, "%s 没给出轮转判据的配置名" % name
+        assert ("刻意不轮转" in doc) or ("deliberately not rotated" in doc), \
+            "%s 没写清 app/ 不轮转是决定，不是疏漏" % name
+        assert ("对账对象" in doc) or ("reconciled against" in doc), "%s 没写为什么不轮转" % name
+        assert "带日期的快照" in doc or "dated snapshot" in doc, "%s 的规模数字没标成快照" % name
+        # 「保持 10／20」这条定案由常量拼出：改上限而不改定案句式即红
+        verdict = ("保持 %d／%d" % (SUBJECT_DIR_LIMIT, SUBJECT_FILE_LIMIT) if name.startswith("zh")
+                   else "both stay at %d / %d" % (SUBJECT_DIR_LIMIT, SUBJECT_FILE_LIMIT))
+        assert verdict in doc, "%s 没写下限的定案（或定案句式被改写）" % name
+        assert verdict.replace(str(SUBJECT_DIR_LIMIT), "99") not in doc, \
+            "%s 的定案句式对任何数字都成立＝装饰性判据" % name
+    stale = "journal／archive"
+    for folder in ("src", "prompts"):
+        for p in (REPO_ROOT / folder).rglob("*.py" if folder == "src" else "*.md"):
+            assert stale not in p.read_text(encoding="utf-8"), \
+                "库外现状又写成了代码里的事实：%s" % p.relative_to(REPO_ROOT).as_posix()
