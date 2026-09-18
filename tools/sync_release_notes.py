@@ -78,6 +78,9 @@ TITLES = {
     "2.2.24": "v2.2.24 — the log rotation fails gracefully on a busy journal, and the README names every status reading",
     "2.2.25": "v2.2.25 — log rotation moves to the launcher's handle gap, where it can actually work",
     "2.2.26": "v2.2.26 — the documents say what the code, the tree and the Release page actually do",
+    # 分界线以后这一列只是**兜底镜像**（`plan()` 靠它枚举版本）：真正应用的标题
+    # 由 `changelog_title()` 从 CHANGELOG 小节标题原文推导，**带着日期**。
+    "2.2.27": "v2.2.27 — the five open judgements are closed, and one correction from last round was wrong",
 }
 
 

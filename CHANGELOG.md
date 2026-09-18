@@ -6,6 +6,53 @@ The long-form reasoning behind each entry (incident, measurement, decision) live
 documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals in
 [`docs/zh/`](docs/zh/).
 
+## v2.2.27 — the five open judgements are closed, and one correction from last round was wrong (2026-09-19)
+
+- **`org-check` got its own exit code** (`core/exit_codes.py` ＋ `cli.py` ＋ both `running.md`
+  files ＋ `tests/test_cli.py` ＋ `.github/workflows/ci.yml`). "Not this tick" used to answer `1`,
+  which is the usage-error slot — a caller branching on rc read the answer backwards, and a
+  genuinely mistyped command hid behind a legitimate "no" (`|| true` in CI swallowed both).
+  It is now `NOT_THIS_TICK = 5`, `1` means usage errors again, and the CI cold-start step calls
+  the command on an empty state root where the answer is `should_run=true`/0, so the workaround
+  is gone rather than widened. **This is an interface change**; anything that keyed on rc=1 for
+  "not now" should key on 5, or better, on the JSON field. Behaviour of the decision itself is
+  unchanged.
+- **The reserved `long_task` exemption is retired** (S9 in `docs/superseded.md`, both languages
+  ＋ `engine/model.py`·`sprout_queue.py`·`tick.py`·`org_session.py` ＋
+  `tests/test_sprout_queue.py`). Last round guarded it as "reserved, unwired, not deleted";
+  measuring it here showed what that was worth: at tick 647 the ledgers hold 4,370 sprout rows,
+  every one carrying the key, **none set to true** — the branch had never been used, yet a row
+  that did carry it would still have released a sprout past the lead limit. The limit came out of
+  the v1 "186 of 221 queued sprouts were one family" incident, so a bypass that no writer ever
+  needed was not worth its reach. Old rows still parse (`from_record` ignores unknown keys) but
+  the flag buys nothing; the new case fails if the name returns to `src/` or `prompts/`, if the
+  S9 row disappears from either table, or if a marked legacy row is treated as exempt.
+- **Two capacity questions were answered by measuring, not by adjusting** (`docs/growth-subject.md`
+  and its Chinese original ＋ `tests/test_mechanism_docs.py`). `app/` holds the solidify edge's
+  evidence files and has no rotation rule while `journal/` rotates at `journal_keep_files`: that
+  asymmetry is now written down as a decision, with the reason (moving an evidence file out makes
+  a named object read as *missing* and drops `app/`'s directory-object count — differences the
+  engine made for itself, not growth) and with the measurement that bounds it (145 files,
+  261,713 bytes, 102 added on the busiest day). The observation limits stay at **10 directories /
+  20 files**: nothing presses either boundary, and `subject_files`' per-file window is deliberately
+  narrower than the counts, which use real totals. The verdict sentence is asserted against the
+  constants themselves, so raising a limit without changing the criterion goes red. The stale
+  directory enumeration that round five fixed in the documents was still sitting in
+  `engine/subject.py`'s own comment; it is gone and the ban now scans `src/` and `prompts/` too.
+- **Last round's correction of the org-segment unit was itself wrong, and is corrected here**
+  (`engine/org_trigger.py` ＋ `core/config.py` ＋ both `mechanism.md` originals ＋
+  `tests/test_org_trigger.py`). v2.2.26 stated that a state root running only mechanical ticks
+  already writes an `org-llm.jsonl` row at tick 1. It does not: `run_tick` enters the org segment
+  only when a runner exists, and measured with `IG_EXECUTOR=""` over three ticks the file is never
+  created and `org-check` still reports "never attempted". The run that produced the claim had
+  inherited `IG_EXECUTOR` from the environment — it was an executor-backed debug tick, which *does*
+  consume the cooldown window, so the operational warning stands with a narrower condition. Rows
+  come from three paths after the segment starts: missing prompt (never touches the executor),
+  failed executor call, completed run. **Settled: the unit stays "attempt".** Narrowing it to
+  "the LLM call succeeded" would leave a broken executor being retried every tick, since ①②③④ all
+  pass again when nothing was recorded. The regression is now pinned by behaviour, not prose: a
+  case runs two executor-less ticks and asserts the ledger does not exist.
+
 ## v2.2.26 — the documents say what the code, the tree and the Release page actually do (2026-09-18)
 
 - **The published size claim was stale** (README, both languages): "~4,400 lines of Python plus
