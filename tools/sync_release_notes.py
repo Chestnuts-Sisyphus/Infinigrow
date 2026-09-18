@@ -66,6 +66,7 @@ TITLES = {
     "2.2.23": "v2.2.23 — the ledger split no longer drops ticks, and the report carries the gate readings",
     "2.2.24": "v2.2.24 — the log rotation fails gracefully on a busy journal, and the README names every status reading",
     "2.2.25": "v2.2.25 — log rotation moves to the launcher's handle gap, where it can actually work",
+    "2.2.26": "v2.2.26 — the README's size numbers match the tree, and the ledger states what it can prove",
 }
 
 

@@ -6,6 +6,26 @@ The long-form reasoning behind each entry (incident, measurement, decision) live
 documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals in
 [`docs/zh/`](docs/zh/).
 
+## v2.2.26 — the README's size numbers match the tree, and the ledger states what it can prove (2026-09-18)
+
+- **The published size claim was stale** (README, both languages): "~4,400 lines of Python plus
+  ~2,600 lines of tests" measured 7,083 / 5,617 on this machine — the engine grew ~60% past its own
+  description. Corrected to the measured figures, rounded the same way the sentence rounds.
+- **The mechanism document now says how far a long run carries a redemption-rate study**
+  (both languages, §5). Written from a live reading rather than an expectation: the on-read buckets
+  are object domain × predicted edge × actual edge, so **maturity step is not one of them** — joined
+  against the maturity ledger it degenerates here (every checkable sample sits at the capped step,
+  steps 1–3 have **no samples**, which is *not computable*, not 0). The capability-library sprout
+  origin is likewise still no-samples. And of the misses, none is a mis-chosen edge, so this data
+  answers "did the announced action happen", not "was the wrong edge picked" — 0 cases cannot be
+  read as 1.00.
+- **The privacy scanner's scope is now the publish boundary** (`tools/privacy_scan.py`): it skipped
+  a hard-coded directory list, so every local-only folder (handover notes, machine config) needed a
+  code edit and forgetting one pitted the local scan against the release gate. It now honours the
+  top-level names in `.gitignore`, the same semantics as static rule R1. Not a free pass — pinned
+  with both a positive and a negative case in `tests/test_privacy.py`, and documented in
+  `docs/privacy.md` / `docs/zh/privacy.md`.
+
 ## v2.2.25 — log rotation moves to the launcher's handle gap, where it can actually work (2026-09-18)
 
 - **`logs/tick.log` rotation now runs in the launcher, before any handle opens** (v2.2.25):
