@@ -6,6 +6,7 @@
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from tools.extract_changelog_section import MIN_CHARS, extract
@@ -92,3 +93,76 @@ def test_sync_release_notes_dry_run_never_calls_gh(tmp_path, monkeypatch, capsys
     out = capsys.readouterr().out
     assert rc == 0 and _FakeSub.called == []             # 一次 gh 都没调
     assert "v2.2.20" in out and "title:" in out
+
+
+# ------------------------------------------- 标题只有一个来源：分界线两侧读不同的那一份
+# 分界线（实测 2026-09-18，28 条 Release 逐条 `gh release view --json name` 比对）：
+#   v2.2.15 及以前  线上标题 == 手写记录（不带日期）
+#   v2.2.16 起      线上标题 == CHANGELOG 小节标题**原文**（带尾部日期），发布工作流写上去的
+#: 分界线以前，措辞与今天的 CHANGELOG 不同的一批——**有意的发布记录，不是待修漂移**。
+#: 把表里的值「对齐」成 CHANGELOG 措辞，`--apply` 就会改掉这 11 条已发布 Release 的标题。
+RECORDED_TITLE_DIVERGENCE = ["2.2.2", "2.2.3", "2.2.4", "2.2.6", "2.2.7", "2.2.8",
+                             "2.2.9", "2.2.10", "2.2.11", "2.2.12", "2.2.13"]
+
+
+def _key(v: str):
+    return tuple(int(x) for x in v.split("."))
+
+
+def test_before_the_boundary_the_applied_title_is_the_recorded_one():
+    """分界线以前：应用的是手写记录；措辞与 CHANGELOG 不同的那批必须还是那批。"""
+    from tools.sync_release_notes import (TITLES, TITLES_UNTIL, changelog_title,
+                                          title_for)
+
+    def _strip_date(t):
+        return re.sub(r"\s*\(\d{4}-\d{2}-\d{2}\)\s*$", "", t)
+
+    pre = [v for v in TITLES if _key(v) <= _key(TITLES_UNTIL)]
+    assert pre, "标题表整段落在分界线之后，分界判据已失效"
+    for ver in pre:
+        assert title_for(ver) == TITLES[ver], "分界线以前不该改从 CHANGELOG 读"
+    diverging = sorted((v for v in pre if TITLES[v] != _strip_date(changelog_title(v))),
+                       key=_key)
+    assert diverging == sorted(RECORDED_TITLE_DIVERGENCE, key=_key), (
+        "线上已发布标题与 CHANGELOG 小节标题的措辞差异集合变了——"
+        "要么有人手改了表（会改写已发布 Release），要么 CHANGELOG 旧节被重写")
+
+
+def test_after_the_boundary_the_applied_title_keeps_its_date():
+    """分界线以后：应用的是 CHANGELOG 小节标题原文，**日期不能被手抄副本抹掉**。"""
+    from tools.sync_release_notes import TITLES, TITLES_UNTIL, changelog_title, title_for
+
+    def _strip_date(t):
+        return re.sub(r"\s*\(\d{4}-\d{2}-\d{2}\)\s*$", "", t)
+
+    post = [v for v in TITLES if _key(v) > _key(TITLES_UNTIL)]
+    assert len(post) >= 10, "分界线以后的版本太少，这条判据还没被真实数据喂过"
+    for ver in post:
+        title = title_for(ver)
+        assert title == changelog_title(ver)
+        assert re.search(r"\(\d{4}-\d{2}-\d{2}\)$", title), "推导出的标题应当带日期"
+        # 表里那份是镜像：措辞必须跟正本一致，只是没有日期（有日期那份才是线上写的）
+        assert TITLES[ver] == _strip_date(title), (
+            "v%s 的表内副本与 CHANGELOG 小节标题措辞不符——正本改了就要同步镜像" % ver)
+
+
+def test_a_hand_copied_title_never_wins_after_the_boundary(tmp_path):
+    """反例：表里塞一条不带日期的新副本，`--apply` 用的仍是 CHANGELOG 那一份（带日期）。"""
+    from tools.sync_release_notes import title_for
+
+    (tmp_path / "CHANGELOG.md").write_text(
+        "## v2.2.97 — a derived heading (2026-09-19)\n\n- body line\n", encoding="utf-8")
+    assert title_for("2.2.97", root=tmp_path) == "v2.2.97 — a derived heading (2026-09-19)"
+    assert title_for("2.2.97", root=tmp_path) != "v2.2.97 — a derived heading"
+    # 分界线以前反过来：CHANGELOG 说什么都不算，读的是记录
+    assert title_for("2.2.13", root=tmp_path) != ""
+
+
+def test_dry_run_prints_what_would_actually_be_applied(capsys):
+    """打印的标题必须就是会写上线的标题——否则 dry run 骗人。"""
+    import tools.sync_release_notes as sync
+    from tools.sync_release_notes import title_for
+
+    assert sync.main([]) == 0
+    out = capsys.readouterr().out
+    assert "title: %s" % title_for("2.2.25") in out

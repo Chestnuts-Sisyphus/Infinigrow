@@ -13,9 +13,14 @@ Where the content comes from (all in-repo, all reviewable):
 - body: `docs/release-notes-vX.md` when present (the rewritten English notes), otherwise the
   version's section in `CHANGELOG.md`;
 - title: the per-version one-liners recorded below — a **decision record**, not a guess.
-  New versions (v2.2.14 onward) already get their titles from `CHANGELOG.md` via the
-  tag→release workflow, so they are listed here for completeness of the check, not because
-  they need rewriting.
+  The record only reaches **v2.2.15**. From v2.2.16 on, the published title *is* the
+  `CHANGELOG.md` section heading verbatim (including its trailing `(YYYY-MM-DD)`), because that
+  is what the tag→release workflow feeds `gh release create --title`. So for those versions the
+  title comes from the CHANGELOG, not from the table: `title_for()` derives it. Measured against
+  the live Releases page on 2026-09-18 (28 releases), the two groups behave exactly like this —
+  v2.0.0…v2.2.15 published == table, v2.2.16…v2.2.25 published == heading with the date.
+  Copying the dated ones into the table (as was done up to v2.2.25) is a second source, and
+  applying that copy would **strip the date off ten published titles**. Hence the boundary below.
 
 Usage:
 
@@ -35,8 +40,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+#: 手写标题只覆盖到这一版（含）。之后的版本，线上标题＝CHANGELOG 小节标题原文（带日期），
+#: 由 `title_for()` 推导——不要把新版本再抄进下面的表：抄进来的副本一律不带日期，
+#: `--apply` 会把线上标题的日期抹掉。表里 v2.2.16 之后的条目是**历史遗留的第二份拷贝**，
+#: 保留只为让「覆盖到当前版本」这条检查继续成立，它们不再参与写标题。
+TITLES_UNTIL = "2.2.15"
+
 #: Recorded one-line titles per version (decision record; see module docstring).
-#: v2.2.14+ follow `CHANGELOG.md` verbatim (the release workflow derives them from there).
+#: v2.2.16 起线上标题由发布工作流从 `CHANGELOG.md` 推导（见上方边界），表内条目只是拷贝。
 TITLES = {
     "2.0.0": "v2.0.0 — the rewrite",
     "2.1.0": "v2.1.0 — the runtime line",
@@ -66,7 +77,7 @@ TITLES = {
     "2.2.23": "v2.2.23 — the ledger split no longer drops ticks, and the report carries the gate readings",
     "2.2.24": "v2.2.24 — the log rotation fails gracefully on a busy journal, and the README names every status reading",
     "2.2.25": "v2.2.25 — log rotation moves to the launcher's handle gap, where it can actually work",
-    "2.2.26": "v2.2.26 — the README's size numbers match the tree, and the ledger states what it can prove",
+    "2.2.26": "v2.2.26 — the documents say what the code, the tree and the Release page actually do",
 }
 
 
@@ -82,21 +93,49 @@ def body_for(ver: str, root: Path = ROOT) -> str:
     return m.group(1).strip() if m else ""
 
 
+def changelog_title(ver: str, root: Path = ROOT) -> str:
+    """CHANGELOG 里这一版的小节标题**原文**（含尾部 `(YYYY-MM-DD)`）——线上用的就是它。"""
+    changelog = (root / "CHANGELOG.md").read_text(encoding="utf-8")
+    m = re.search(r"^## (v%s .*)$" % re.escape(ver), changelog, re.M)
+    return m.group(1).strip() if m else ""
+
+
+def title_for(ver: str, root: Path = ROOT) -> str:
+    """The title `--apply` would set — and the only title the dry run may print.
+
+    边界之前（含 `TITLES_UNTIL`）用手写记录：那份就是线上现在的样子，实测于 2026-09-18。
+    边界之后从 CHANGELOG 推导（带日期）：那里的手写副本是**少了日期**的第二份拷贝，
+    拿它去 edit 会把线上标题改窄。
+    """
+
+    def _key(v: str):
+        return tuple(int(x) for x in v.split("."))
+
+    if _key(ver) <= _key(TITLES_UNTIL):
+        return TITLES.get(ver, "")
+    return changelog_title(ver, root) or TITLES.get(ver, "")
+
+
 def plan(root: Path = ROOT):
     """Yield `(version, title, body)` for every entry with a non-empty body."""
-    for ver, title in TITLES.items():
+    for ver in TITLES:
+        title = title_for(ver, root)
         body = body_for(ver, root)
-        if body:
+        if body and title:
             yield ver, title, body
 
 
 def main(argv=None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     apply_ = "--apply" in args
-    for ver, title in TITLES.items():
+    for ver in TITLES:
         body = body_for(ver)
         if not body:
             print("!! empty body for v%s (skipped — never publish an empty shell)" % ver)
+            continue
+        title = title_for(ver)
+        if not title:
+            print("!! empty title for v%s (skipped — CHANGELOG 里没有这一节)" % ver)
             continue
         print("== v%s ==\ntitle: %s\nbody %d chars, first line: %s"
               % (ver, title, len(body), body.splitlines()[0][:70]))

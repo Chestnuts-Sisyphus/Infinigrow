@@ -6,7 +6,7 @@ The long-form reasoning behind each entry (incident, measurement, decision) live
 documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals in
 [`docs/zh/`](docs/zh/).
 
-## v2.2.26 — the README's size numbers match the tree, and the ledger states what it can prove (2026-09-18)
+## v2.2.26 — the documents say what the code, the tree and the Release page actually do (2026-09-18)
 
 - **The published size claim was stale** (README, both languages): "~4,400 lines of Python plus
   ~2,600 lines of tests" measured 7,083 / 5,617 on this machine — the engine grew ~60% past its own
@@ -67,6 +67,17 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   at all before; it now has both directions pinned (empty ledger → `should_run=true`/0, just-ran →
   `should_run=false`/1, rc and JSON forced to agree). Behaviour is unchanged: a dedicated code is
   an interface change, undecided.
+- **Release titles have one source on each side of a measured boundary** (`tools/sync_release_notes.py`
+  ＋ `CONTRIBUTING.md` ＋ `tests/test_release_tooling.py`). The tool kept a hand-copied title for every
+  version and `--apply` writes whatever that table says — but the table was copied from an older
+  reading of the CHANGELOG. Comparing all 28 live Releases (`gh release view --json name`, 2026-09-18):
+  through v2.2.15 the published title is the recorded string, from v2.2.16 it is the `CHANGELOG.md`
+  heading **verbatim, date included** (that is what the workflow feeds `gh release create`). So the
+  copies were a second source, and applying them would have stripped the date off ten published
+  titles and reworded eleven more. `title_for()` now reads the boundary (`TITLES_UNTIL = 2.2.15`):
+  recorded before it, derived from the CHANGELOG after. Tests pin both halves, the exact set of 11
+  pre-boundary wordings that legitimately differ from the CHANGELOG (so nobody "aligns" a published
+  Release away), and a negative case proving a hand-copied title can never win after the boundary.
 
 ## v2.2.25 — log rotation moves to the launcher's handle gap, where it can actually work (2026-09-18)
 

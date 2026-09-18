@@ -67,6 +67,14 @@ Besides the checks above, `tools/` carries the release and repository plumbing:
 - `sync_release_notes.py` — batch-realigns **historical** Release titles and bodies with the
   repository sources (`docs/release-notes-vX.md` first, else the `CHANGELOG.md` section); it is a
   dry run by default and only touches GitHub with `--apply`.
+  Its title table is **bounded at v2.2.15**: up to there, the recorded string *is* the published
+  title, and a wording difference from today's `CHANGELOG.md` heading is a publish-time record, not
+  drift to "align" (aligning it rewrites already-published Releases). From v2.2.16 the published
+  title is the `CHANGELOG.md` section heading verbatim, trailing `(YYYY-MM-DD)` included, because
+  that is what the tag→release workflow feeds `gh release create`; `title_for()` derives it from
+  the CHANGELOG. Adding a table row for a new version only tells the tool the version exists —
+  the copied string is never what gets applied, and a hand-copy of a dated title would otherwise
+  strip the date off the live page.
 
 ## Style
 
