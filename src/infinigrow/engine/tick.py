@@ -1117,10 +1117,9 @@ def _run_tick_locked(cfg: Settings, layout: StateLayout, tick: int,
     spawnable = [d for d in diffs if d.key not in act_caused
                  and (evidence_key is None or d.key != evidence_key)]
 
-    # 已耗尽的芽（连领满上限且非长任务，永不再被领）＝域占用的「无人认领」信号：
+    # 已耗尽的芽（连领满上限，永不再被领）＝域占用的「无人认领」信号：
     # 域饱和闸据此释放僵尸占用（N41 死锁修复 K1——存在性维度不再靠「产出新量」解冻）。
-    exhausted_ids = {s.id for s in queue.sprouts
-                     if not s.long_task and s.leads >= queue.lead_limit}
+    exhausted_ids = {s.id for s in queue.sprouts if s.leads >= queue.lead_limit}
     gate = domains.gate(spawnable, tick, exhausted_sprout_ids=exhausted_ids)
     absorbed_keys = {(d.obj, d.dimension, d.actual) for d in gate.absorbed}
     for d in diffs:

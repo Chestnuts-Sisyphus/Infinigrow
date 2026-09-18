@@ -188,12 +188,6 @@ class Sprout:
     #: 「冻结满 N 拍」说的是**挂起时长**，拿出生拍当锚会把它算成冻了很久（判据失真）。
     #: 旧行没有这个字段（读作 None）→ 判据回退到 `created_tick`（不猜、不假装它刚冻结）。
     frozen_tick: Optional[int] = None
-    #: `long_task`＝**预留字段（K16：登记为预留，不接线、不删）**：长任务芽豁免连领上限。
-    #: 当前**没有任何写入方**（永远是 False），也不该有：连领上限（3 拍）已能防霸占，
-    #: 且芽会随「对象不同即新量」不断新立，不存在「一根芽必须连领超过 3 拍」的现实需求。
-    #: 要接线得先有「什么算长任务」的机械判据——目前没有；没有需求就接线＝给机制加
-    #: 没人用的分支。保留字段是为了兼容旧行（`from_record` 读得进来）。
-    long_task: bool = False
 
     @property
     def key(self) -> tuple[str, str]:
@@ -206,13 +200,14 @@ class Sprout:
             "created_tick": self.created_tick,
             "predicted_edge": self.predicted_edge.value if self.predicted_edge else None,
             "maturity_step": self.maturity_step, "leads": self.leads,
-            "last_lead_tick": self.last_lead_tick, "long_task": self.long_task,
+            "last_lead_tick": self.last_lead_tick,
             "expected_value": self.expected_value,
             "frozen_tick": self.frozen_tick,
         }
 
     @classmethod
     def from_record(cls, rec: dict) -> "Sprout":
+        """从账本一行还原。**多余键忽略**：已退役字段的残留（如 S9 的 `long_task`）不报错。"""
         edge = rec.get("predicted_edge")
         return cls(
             id=rec["id"], obj=rec["obj"], dimension=rec["dimension"],
@@ -221,7 +216,6 @@ class Sprout:
             predicted_edge=Edge(edge) if edge else None,
             maturity_step=rec.get("maturity_step"), leads=rec.get("leads", 0),
             last_lead_tick=rec.get("last_lead_tick"),
-            long_task=rec.get("long_task", False),
             expected_value=rec.get("expected_value"),
             frozen_tick=rec.get("frozen_tick"),
         )

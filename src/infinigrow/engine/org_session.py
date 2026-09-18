@@ -469,8 +469,7 @@ def run_org_session(*, settings: Settings, layout: StateLayout, tick: int,
 
     # 域饱和闸 → 立芽（生芽权在组织会话；执行会话依旧不能自产芽）
     if queue is not None and diffs:
-        exhausted_ids = {s.id for s in queue.sprouts
-                         if not s.long_task and s.leads >= queue.lead_limit}
+        exhausted_ids = {s.id for s in queue.sprouts if s.leads >= queue.lead_limit}
         gate = domains.gate(diffs, tick, exhausted_sprout_ids=exhausted_ids)
         run.absorbed = ["%s|%s" % domain_key(d.obj, d.dimension) for d in gate.absorbed]
         for sprout in sprout_sources.from_diffs(gate.kept, tick,

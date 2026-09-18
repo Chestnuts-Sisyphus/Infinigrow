@@ -4,9 +4,9 @@ from infinigrow.engine.model import Diff, DiffKind, Sprout, SproutOrigin
 from infinigrow.engine.sprout_queue import SproutQueue
 
 
-def _sprout(sid, obj, dim="大小", tick=1, long_task=False):
+def _sprout(sid, obj, dim="大小", tick=1):
     return Sprout(id=sid, obj=obj, dimension=dim, pointer="p", origin=SproutOrigin.DIFF,
-                  created_tick=tick, long_task=long_task)
+                  created_tick=tick)
 
 
 def test_same_object_dimension_replaced_not_stacked():
@@ -87,15 +87,18 @@ def test_cap_freezes_oldest():
     assert len(q.frozen) == 2                            # 冻结≠删除
 
 
-def test_lead_limit_and_long_task_exemption():
+def test_lead_limit_has_no_exemption():
+    """连领满上限就不可领，**没有任何标记能豁免**（S9 退役）。"""
     q = SproutQueue(cap=10, lead_limit=3)
     s = _sprout("s1", "A")
     q.add(s)
     for _ in range(3):
         q.mark_lead(s, 1)
     assert q.eligible(2) == []                           # 连领 3 拍 → 本拍不可领
-    q.add(_sprout("s2", "B", long_task=True))
-    assert [x.id for x in q.eligible(2)] == ["s2"]       # 长任务豁免
+    # 旧账本行带着已退役的标记也一样不豁免：键被读进来忽略，不给通行证
+    legacy = Sprout.from_record({**s.as_record(), "id": "s2", "obj": "B", "long_task": True})
+    q.add(legacy)
+    assert q.eligible(2) == []
 
 
 def test_cold_start_is_reproducible_then_lexicographic():
@@ -251,26 +254,40 @@ def test_revive_clears_frozen_tick_and_refreshes_age():
     assert s1.frozen_tick is None and s1.created_tick == 9 and s1.leads == 0
 
 
-def test_long_task_is_reserved_and_has_no_writer():
-    """K16：`long_task` 豁免连领上限＝**登记为预留**，引擎里不许有写入方。
+def test_long_task_is_retired_and_must_not_return():
+    """S9：`long_task` 豁免已**退役**，这个名字不许回到机制位置（回流守卫）。
 
-    为什么必须钉住：这条豁免是「连领上限」的唯一后门。没有写入方它是死的（现状是有意决定），
-    但后门一旦被人顺手接上，就等于执行会话给自己发免死金牌——违反「每根芽最多连领 3 拍」
-    那条由事故换来的约束。接线需要先定「什么算长任务」的机械判据（设计决策），
-    不许通过悄悄加一个 `long_task=True` 来既成事实。
+    为什么必须钉住：这条豁免是「连领上限」唯一的后门设计，而那条上限是 v1「186/221 根同族
+    霸占、引擎原地打转」事故换来的。原先的处理是「登记为预留＋不许有写入方」，实测（拍 647）
+    4,370 行芽账全带这个键、0 行为 true——预留分支从来没用过，却仍然在读旧行时放行。
+    退役后要求三件事同时成立：代码/提示词里查不到这个名字、退役登记在双语表里各占一行、
+    机制正本写明上限没有后门。少任何一件都算「悄悄活着」。
     """
     import re
     from pathlib import Path
-    src = Path(__file__).resolve().parents[1] / "src" / "infinigrow"
-    writer = re.compile(r"long_task\s*=\s*True|\[\s*['\"]long_task['\"]\s*\]\s*=")
-    offenders = [p.relative_to(src).as_posix() for p in sorted(src.rglob("*.py"))
-                 if p.name != "model.py" and writer.search(p.read_text(encoding="utf-8"))]
-    assert offenders == [], "有人给预留字段加了写入方：%s" % offenders
+    root = Path(__file__).resolve().parents[1]
+    #: 挡的是**用法**（属性访问 / 字段声明或赋值 / 字典键），不是名字本身：
+    #: `docs/superseded.md` 的流程第 2 步允许把它作为历史说明留在注释里。
+    usage = re.compile(r"\.long_task\b|long_task\s*[:=]|\[\s*['\"]long_task['\"]\s*\]")
+    offenders = [p.relative_to(root).as_posix()
+                 for p in list((root / "src" / "infinigrow").rglob("*.py"))
+                 + list((root / "prompts").rglob("*.md"))
+                 if usage.search(p.read_text(encoding="utf-8"))]
+    assert offenders == [], "退役件回流到机制位置：%s" % offenders
 
-    # 预留的行为本身是活的（旧行读得进来）：带标记才豁免，不带就照守上限
-    q = SproutQueue(cap=10, lead_limit=1)
-    plain, long_one = _sprout("s1", "A"), _sprout("s2", "B", long_task=True)
-    for s in (plain, long_one):
-        s.leads = 1
-        q.add(s)
-    assert [s.id for s in q.eligible(5)] == ["s2"]
+    for name in ("superseded.md", "zh/superseded.md"):
+        table = (root / "docs" / name).read_text(encoding="utf-8")
+        assert "| S9 |" in table, "退役登记缺 S9 一行：%s" % name
+        assert "long_task" in table.split("| S9 |")[1].split("\n")[0], "S9 行没写被退役的是啥"
+    for name in ("mechanism.md", "zh/mechanism.md"):
+        doc = (root / "docs" / name).read_text(encoding="utf-8")
+        assert ("没有任何后门" in doc) or ("has no back door" in doc), \
+            "%s 没把「上限无后门」写进机制位置" % name
+
+    assert not hasattr(Sprout(id="s", obj="o", dimension="d", pointer="p",
+                              origin=SproutOrigin.DIFF, created_tick=1), "long_task"), \
+        "数据类还留着这个字段＝分支还在"
+    # 旧行仍可解析（多余键忽略），这是退役不许破坏历史账本的那一半
+    assert Sprout.from_record({"id": "s", "obj": "o", "dimension": "d", "pointer": "p",
+                               "origin": "差异对账", "created_tick": 1,
+                               "long_task": True}).leads == 0

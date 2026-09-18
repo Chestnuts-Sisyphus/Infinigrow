@@ -164,10 +164,10 @@ class SproutQueue:
 
     # ---------------------------------------------------------------- 取题
     def eligible(self, tick: int) -> list[Sprout]:
-        """可领的芽：连领未超限，或标记长任务。"""
+        """可领的芽：连领未超限。**没有豁免**（`long_task` 后门已退役，见 `docs/superseded.md` S9）。"""
         out = []
         for s in self.sprouts:
-            if s.long_task or s.leads < self.lead_limit:
+            if s.leads < self.lead_limit:
                 out.append(s)
         return out
 

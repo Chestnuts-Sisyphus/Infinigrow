@@ -198,12 +198,16 @@ capability used?" cannot be, because no mechanical reading exists for it):
 - Active queue cap 50; beyond that the oldest move to the **frozen zone** (the queue is mutable,
   the ledgers are not).
 - One sprout may be led at most 3 times. A frozen sprout can be **re-lit** when its difference
-  reappears. (A `long_task` exemption branch exists in the field set, **kept as reserved** and
-  deliberately not wired: there is no writer and no mechanical test for "what counts as a long
-  task", and the lead limit already prevents one sprout from hogging the slot. The field stays so
-  that old ledger rows still parse. **Reserved means guarded**: `tests/test_sprout_queue.py`
-  fails if any engine module ever assigns the flag — wiring it takes a mechanical criterion
-  first, not a quiet `long_task = True` that turns the lead limit into a suggestion.)
+  reappears. **The lead limit has no back door**: the `long_task` exemption that used to be
+  registered as reserved (K16) was **retired on 2026-09-19** (see `docs/superseded.md` S9). It
+  never had a writer — measured at tick 647: 48 active plus 4,322 frozen rows, every one carrying
+  the key, **none set to true** — and a branch that grants a pass merely by reading an old row is
+  how a limit bought with an incident quietly turns back into a suggestion. The leftover
+  `long_task` key in old ledger rows does not raise (`Sprout.from_record` ignores unknown keys)
+  but has **no effect**; `tests/test_sprout_queue.py` holds both halves — the name may not appear
+  in the source, and a marked old row may not buy an exemption. Restoring it goes through the
+  retirement procedure in `docs/superseded.md`, starting with a mechanical test for "what counts
+  as a long task".
 - **Re-asking frozen sprouts**: after `frozen_requestion_ticks` (default 300) without being
   re-lit, an object is no longer blocked by its frozen sprout — it may be asked again. The test
   uses the *newest* freeze of that object, so a backlog of old frozen sprouts cannot release a
