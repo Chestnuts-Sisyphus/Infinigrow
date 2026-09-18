@@ -37,8 +37,10 @@ were actually confirmed — without asking anyone's opinion.
   the prediction list, reconciliation, sprout creation, queue discipline, ledgers, heartbeat,
   locking.
 - **A lab notebook for prediction accuracy.** Differences, outcomes and the maturity chain are
-  append-only JSONL; the redemption rate is computed on read and bucketed by object domain × edge
-  type × maturity step. The data format for a long-run "how often is it right?" study already exists.
+  append-only JSONL; the redemption rate is computed on read and bucketed by object domain ×
+  predicted edge × actual edge (maturity step is *not* one of the axes —
+  [`docs/mechanism.md`](docs/mechanism.md) §5 says what a long run can and cannot answer). The
+  data format for a long-run "how often is it right?" study already exists.
 - **A set of constraints worth copying.** If you are writing your own agent loop, these four
   carry over directly: *the acting session may not manufacture its own tasks*, *no difference, no
   sprout*, *one sprout per object × dimension*, *the maturity chain advances at most +1 per tick*.

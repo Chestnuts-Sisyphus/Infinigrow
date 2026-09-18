@@ -201,3 +201,24 @@ def test_quiet_streak_semantics_are_settled_not_open_anymore():
     trigger_path = REPO_ROOT / "src" / "infinigrow" / "engine" / "org_trigger.py"
     trigger = trigger_path.read_text(encoding="utf-8")
     assert "语义定案：保持行数口径" in trigger, "代码 docstring 与正本漂移"
+
+
+def test_bucket_axes_claimed_in_readme_and_prompt_match_the_code():
+    """兑现率桶的轴：代码是唯一事实源，公开文档与提示词不许宣称第三轴是成熟步。
+
+    为什么锁这条：README（中英）与 `prompts/org-session.md` 一度都写着
+    「对象域 × 边类型 × 成熟链步」，而 `reconcile._bucket` 算的是
+    （对象域, 预测边, 实际边）——提示词照错轴要求会话「引哪一桶」，
+    等于让它去引一个机械上算不出来的桶。判据是机械的：旧措辞出现即红。
+    """
+    from infinigrow.engine.reconcile import _bucket
+    assert _bucket({"obj": "主体/journal/x.md", "predicted_edge": "固化",
+                    "actual_edge": "固化"}) == ("主体/journal", "固化", "固化")
+    wrong = ("edge type × maturity step", "边类型 × 成熟链步", "边类型 × 成熟步")
+    for rel, must_have in (("README.md", "predicted edge × actual edge"),
+                           ("README.zh-CN.md", "对象域 × 预测边 × 实际边"),
+                           ("prompts/org-session.md", "对象域 × 预测边 × 实际边")):
+        text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        assert must_have in text, "%s 缺正确的桶轴" % rel
+        for phrase in wrong:
+            assert phrase not in text, "%s 又宣称成熟步是桶的轴：%s" % (rel, phrase)

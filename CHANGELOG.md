@@ -31,6 +31,12 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   quiet assignment somewhere would turn that incident-borne constraint into a suggestion.
   `tests/test_sprout_queue.py` now fails if any engine module assigns it, and passes when the
   flag (read from an old ledger row) does grant the exemption.
+- **The bucket axes in the README and the org prompt now match the code** (README both languages
+  ＋ `prompts/org-session.md`). All three claimed "object domain × edge type × maturity step",
+  while `reconcile._bucket` computes (object domain, predicted edge, actual edge) — so the org
+  session was told to cite a bucket that cannot be computed, and the public README promised an axis
+  the ledgers do not carry. `tests/test_mechanism_docs.py` pins the correct phrase and fails if the
+  old wording returns.
 - **N58-① is closed: trigger ④ keeps its row reading** (settled, no behaviour change). It was the
   repository's only explicit open decision, and measuring it here settled the question rather than
   deferring it: over ticks 556–628 only 14 of 73 ticks were quiet, the longest run of consecutive
