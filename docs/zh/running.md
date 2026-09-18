@@ -174,6 +174,12 @@ tail state/executor.jsonl           # 执行者调用账（rc/耗时/输出长�
 python -m infinigrow org-status     # 组织会话发现的结局（待验/被证实/被推翻）
 ```
 
+**`org-check` 的退出码请读 JSON，别只读 rc**：`should_run=true → 0`，`should_run=false → 1`。
+这里的 1 **借用**了「参数/用法错误」那一位（`exit_codes.USAGE`），**不代表命令写错了**——
+拿 rc 当成败判定就会读反（CI 冷启动里那句 `|| true` 就是在绕这个坑）。
+给「不该跑」一个专属退出码是**接口变更**（要同改常量＋文档＋测试，见 `docs/versioning.md`），
+未拍板前按现状如实写明，不在文档里把它说成「成功」也不说成「用法错误」。
+
 ---
 
 ## 三、成本与用量（接上执行者之后才有意义）

@@ -132,3 +132,27 @@ def test_pause_resume_refused_on_non_windows(tmp_path, monkeypatch, capsys):
     code = main(["--state-root", str(tmp_path), "resume"])
     out = capsys.readouterr().out
     assert code == 4 and "仅 Windows" in out
+
+
+def test_org_check_exit_code_and_json_agree(tmp_path, capsys):
+    """`org-check`：rc 与 JSON 的 `should_run` 必须同向；**1 是判定「不该跑」，不是用法错误**。
+
+    为什么锁这条：这个子命令把「本拍不该跑组织段」回成 rc=1（`exit_codes.USAGE` 位），
+    调用方（计划任务、CI）如果按 rc 判成败就会读反——CI 里那句 `|| true` 就是在绕这个坑。
+    两个方向都要钉：空状态根＝①从未跑过 → 0/true；刚记过一次＝冷却闸关掉四条 → 1/false。
+    """
+    import datetime as _dt
+    root = tmp_path / "state"
+    root.mkdir(parents=True)
+    code = main(["--state-root", str(root), "org-check", "--tick", "9"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["should_run"] is True and code == 0, "空账本应判「该跑」（条件①）"
+
+    stamp = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    (root / "org-llm.jsonl").write_text(
+        json.dumps({"tick": 9, "time": stamp, "note": "test"}, ensure_ascii=False) + "\n",
+        encoding="utf-8")
+    code = main(["--state-root", str(root), "org-check", "--tick", "9"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["should_run"] is False and code == 1, "冷却闸内应判「不该跑」，且 rc 与之一致"
+    assert "冷却" in payload["reason"]

@@ -8,6 +8,11 @@
 约定：**0 成功**；1 参数/用法错误；2 规则或自检未过；3 落后于最新发布或升级后自检未过；
 4 严格模式下拿不到最新版（或环境不满足）；124/127 沿用 shell 惯例（超时/找不到命令）。
 
+全库唯一一处**借用**位不是字面语义的地方：`org-check` 用 1 表示「本拍不该跑组织段」（不是用法
+错误）。调用方请读它 JSON 里的 `should_run`，别拿 rc 判成败（`docs/running.md` §5 与
+`tests/test_cli.py::test_org_check_exit_code_and_json_agree` 同写这一条）。给它一个专属码是
+**接口变更**，未拍板前保持现状。
+
 新增退出码＝先在这里加常量，再去用它——`cli.py` 里出现裸整数（≥2）会被 R7 判 FAIL。
 """
 from __future__ import annotations

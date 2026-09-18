@@ -60,6 +60,13 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   document, which made `IG_FROZEN_REVIEW_EVERY` undiscoverable. The new case fails if any integer
   setting is missing from that table, or if a stated default or env-var name disagrees with code:
   a missing row raises no error, it just becomes a switch nobody knows about.
+- **`org-check`'s exit code is now written down, and now has a test** (both `running.md` files ＋
+  `core/exit_codes.py` ＋ `tests/test_cli.py`). It answers "not this tick" with rc=1 — the
+  *usage-error* slot, borrowed — so a caller that treats rc as pass/fail reads it exactly
+  backwards (the `|| true` in the CI cold-start step is that workaround). The command had no test
+  at all before; it now has both directions pinned (empty ledger → `should_run=true`/0, just-ran →
+  `should_run=false`/1, rc and JSON forced to agree). Behaviour is unchanged: a dedicated code is
+  an interface change, undecided.
 
 ## v2.2.25 — log rotation moves to the launcher's handle gap, where it can actually work (2026-09-18)
 
