@@ -14,6 +14,9 @@
     具体人名、机器路径、他项目名、密钥文件名。格式一行一条：`<正则>` 或
     `<正则>\t<标签>`，`#` 开头为注释。
 
+**扫描范围＝发布边界**：`.gitignore` 里列出的顶层名不进公共仓库，因而不参与扫描
+（与静态规则 R1 同一套语义）；除此之外一律扫——包括未跟踪但会被提交的文件。
+
 **本脚本零写盘**（项目约定：脚本只做只读扫描，结果走 stdout，需要落盘由调用方重定向）。
 路径安全：`--root` 与 `--deny` 先 realpath 规范化，并拒绝含 `..` 上跳段的原始输入。
 
@@ -82,6 +85,29 @@ SKIP_SUFFIX = {".png", ".jpg", ".jpeg", ".gif", ".ico", ".pdf", ".zip", ".gz",
 SKIP_FILES = {"privacy-deny.txt"}
 
 
+def ignored_top_level(root):
+    """`.gitignore` 里的**顶层名**＝发布边界（与静态规则 R1 的 `ignored_names` 同一套语义）。
+
+    为什么不靠 `SKIP_DIRS` 硬编码：那份名单管的是缓存/二进制这类工具态；
+    而「本地专有、不进公共仓库」的目录（交接材料、本机配置……）每新增一个就得回来补一行，
+    漏补就把本地扫描判红——可发布边界本来就写在 `.gitignore` 里，两处各说一遍必然漂移。
+    这里只认**顶层**条目：与 R1 一样按 `路径第一段` 匹配，深层文件仍由它所在的一级目录决定。
+    """
+    names = set(SKIP_FILES)
+    ignore_file = os.path.join(os.path.realpath(root), ".gitignore")
+    if os.path.isfile(ignore_file):
+        try:
+            with open(ignore_file, encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    entry = line.strip()
+                    if not entry or entry.startswith("#") or entry.startswith("*"):
+                        continue
+                    names.add(entry.strip("/").split("/")[0])
+        except OSError:
+            pass                                  # 读不到就退回硬编码名单，不放行任何内容
+    return names
+
+
 def normalize(path):
     """规范化路径；拒绝含 `..` 上跳段的原始输入（防越权读）。"""
     path = os.fspath(path)
@@ -148,9 +174,16 @@ def scan_file(path, rules, root, rel):
 
 def walk(root, extra_skip=()):
     skip_dirs = SKIP_DIRS | set(extra_skip)
+    ignored = ignored_top_level(root)
+    root_real = os.path.realpath(root)
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if d not in skip_dirs]
+        dirnames[:] = [d for d in dirnames
+                       if d not in skip_dirs
+                       and not (os.path.realpath(dirpath) == root_real and d in ignored)]
         for name in filenames:
+            # 只有**顶层**文件才受 .gitignore 影响（深层文件的路径以顶层目录名起头，已在上面截掉）
+            if os.path.realpath(dirpath) == root_real and name in ignored:
+                continue
             if os.path.splitext(name)[1].lower() in SKIP_SUFFIX:
                 continue
             full = os.path.join(dirpath, name)

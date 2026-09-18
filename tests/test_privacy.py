@@ -49,6 +49,50 @@ def test_repo_is_free_of_project_deny_hits():
     assert hits == [], "项目层禁列命中：%s" % hits[:10]
 
 
+#: 触发通用层规则的本机路径样本。**运行时拼装**：源码里不许出现字面绝对路径，
+#: 否则这条测试样本本身会被 R1 与隐私闸扫出来（同 `tests/test_rotation.py` 的脱敏样本口径）。
+_ABS_PATH_LINE = "config lives at " + "D" + ":/" + "local" + "/" + "notes.txt" + "\n"
+
+
+def _make_tree(tmp_path, ignore_lines):
+    """造一棵小树：一个被 .gitignore 列出的目录、一个被列出的顶层文件、一个正常目录。"""
+    (tmp_path / ".gitignore").write_text("".join(ignore_lines), encoding="utf-8")
+    (tmp_path / "localonly").mkdir()
+    (tmp_path / "localonly" / "note.md").write_text(_ABS_PATH_LINE, encoding="utf-8")
+    (tmp_path / "localfile.md").write_text(_ABS_PATH_LINE, encoding="utf-8")
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "code.md").write_text(_ABS_PATH_LINE, encoding="utf-8")
+    return tmp_path
+
+
+def test_gitignored_top_level_names_are_out_of_scope(tmp_path):
+    """**正例**：`.gitignore` 的顶层名＝发布边界，不进公共仓库的东西不参与扫描。
+
+    为什么锁这条：本地专有材料（交接文档、本机配置）里的路径不可能泄漏给任何人，
+    但旧口径只认硬编码 `SKIP_DIRS`——每新增一个这类目录就得回来补一行，
+    漏补就让本地 `privacy_scan` 与 CI 闸互相矛盾。
+    """
+    scan = _load_scanner()
+    root = _make_tree(tmp_path, ["localonly/\n", "localfile.md\n"])
+    rels = {rel for _, rel in scan.walk(root)}
+    assert not any(r.startswith("localonly/") for r in rels), rels
+    assert "localfile.md" not in rels, rels
+    assert "src/code.md" in rels, rels
+
+
+def test_unignored_paths_are_still_reported(tmp_path):
+    """**反例**：没被 `.gitignore` 列出的内容照报——忽略名单不是免检通道。"""
+    scan = _load_scanner()
+    root = _make_tree(tmp_path, ["localonly/\n"])       # 只忽略目录，顶层文件与 src 不忽略
+    hits = []
+    for full, rel in scan.walk(root):
+        hits.extend(scan.scan_file(full, list(scan.GENERIC_RULES), root, rel))
+    reported = {h["file"] for h in hits}
+    assert "localfile.md" in reported, hits
+    assert "src/code.md" in reported, hits
+    assert not any(r.startswith("localonly/") for r in reported), hits
+
+
 def test_scanner_rejects_parent_traversal(tmp_path):
     """扫描器自身的路径安全：含 .. 上跳的输入必须被拒。"""
     scan = _load_scanner()

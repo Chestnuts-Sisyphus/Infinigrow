@@ -27,6 +27,14 @@
 The scanner's rules are **shape expressions, not a banned-word list** — putting the banned words
 themselves into a public repository is exactly what the rule exists to prevent.
 
+**The scan scope is the publish boundary**: top-level names listed in `.gitignore` never reach the
+public repository, so they are not scanned (the same semantics as static rule **R1**); everything
+else is, including untracked files that a commit would carry in. This alignment closes a
+recurring fault: local-only directories (handover notes, machine config) used to depend on a
+hard-coded skip list inside the tool, so every new one needed a code edit — and forgetting one
+pitted the local scan against the publish gate. The ignore list is not a free pass: the rule has
+both a positive and a negative case in `tests/test_privacy.py`.
+
 ## Before publishing
 
 ```bash
