@@ -191,9 +191,7 @@ def main(argv=None) -> int:
                                        else settings.rotate_keep_tail))
         file_reports = rotate_files(layout,
                                     keep_files=(args.keep_files if args.keep_files is not None
-                                                else settings.rotate_keep_files),
-                                    log_max_bytes=(args.max_bytes if args.max_bytes is not None
-                                                   else settings.rotate_max_bytes))
+                                                else settings.rotate_keep_files))
         if not reports and not file_reports:
             print("无账本/留痕超阈值：不动（账本阈值 %d 字节，保留尾部 %d 行；"
                   "留痕/报告保留最近 %d 份）"

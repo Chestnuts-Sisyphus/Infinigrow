@@ -134,22 +134,6 @@ def write_work_file(path: Path, text: str, root: Path,
         raise LedgerError("工作文件写入失败：%s（%s）" % (path, exc)) from exc
 
 
-def truncate_file(path: Path, root: Path) -> None:
-    """**原地**清空工作文件（不换 inode、不删文件）。
-
-    与 `write_work_file` 的差别只在落盘方式：`os.replace` 需要目标可替换，而 Windows 下
-    被追加句柄占用（无 `FILE_SHARE_DELETE`）的文件连 `unlink` 都会撞 `WinError 32`——
-    日志轮转正撞在这上面（归档件已写好，主件却清不掉，每拍报错一次）。只有原地截断
-    能做这件事；句柄的追加方（`O_APPEND`）不受影响，下一次写仍落在文件尾。调用方必须
-    **先**把内容写进归档件——数据先保险，再清主件。
-    """
-    guarded = require_within(path, root)
-    try:
-        guarded.write_text("", encoding="utf-8", newline="\n")
-    except OSError as exc:
-        raise LedgerError("工作文件清空失败：%s（%s）" % (guarded, exc)) from exc
-
-
 def ledger_stats(path: Path) -> dict:
     """账本体检：行数、坏行数、字节数（供园丁与测试复用）。"""
     records = read_jsonl(path)

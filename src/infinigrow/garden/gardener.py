@@ -148,9 +148,9 @@ def run_gardener(settings: Optional[Settings] = None,
             report.notes.append("账本轮转：无账本超阈值（%d 字节）"
                                 % cfg.rotate_max_bytes)
 
-    # 5b) 文件型产物轮转（traces/reconcile 按份数、tick.log 按字节；也只移动不删）
-    report.rotated_files = rotate_files(layout, keep_files=cfg.rotate_keep_files,
-                                        log_max_bytes=cfg.rotate_max_bytes)
+    # 5b) 文件型产物轮转（traces/reconcile 按份数；tick.log 归启动器 rotate_journal，
+    #     句柄空隙执行——见 tools/rotate_journal.py；也只移动不删）
+    report.rotated_files = rotate_files(layout, keep_files=cfg.rotate_keep_files)
     if report.rotated_files:
         report.notes.append("留痕/报告轮转：%s"
                             % "、".join("%s→%s(移 %d 份)"

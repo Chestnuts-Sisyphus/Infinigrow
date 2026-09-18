@@ -22,9 +22,10 @@ v1 的实测：园丁日志 3.5MB、STATE 629KB，读一次要全量扫——「
 会随轮转一起消失，成熟链就会悄悄倒退——那比账本变大严重得多。
 
 **文件型产物**（`rotate_files`，T2/A3）：`traces/`（每拍一份留痕）、`reconcile/`
-（每拍一份报告）、`logs/tick.log`（单文件日志）。前两者按**份数**留最近 N 份；
-日志按**字节**超过阈值就整体归档、另起空文件。同样只移动不删，
+（每拍一份报告）按**份数**留最近 N 份。同样只移动不删，
 归档落在 `state/archive/files/<类>/`，`infinigrow rotate --search` 可检索。
+`logs/tick.log`（单文件日志）的轮转在**启动器**（`tools/rotate_journal.py`，两拍之间
+的句柄空隙执行、归档前脱敏）——调度器以追加句柄持有它贯穿进程，园丁内轮转必失败。
 
 **次序**：先把要移走的行/文件写进归档件，再缩主件。反过来的话，会出现
 「主件已缩、归档还没写」的窗口，那一刻断电＝真丢。
@@ -46,8 +47,7 @@ from typing import Iterable, Optional
 
 from ..core.encoding import read_text
 from ..core.paths import StateLayout
-from ..ledger.store import (LedgerError, move_file, require_within, truncate_file,
-                            write_lines, write_work_file)
+from ..ledger.store import LedgerError, move_file, require_within, write_lines, write_work_file
 
 #: 保留策略：尾部 N 行 / 每 key 最新一行
 TAIL = "tail"
@@ -66,8 +66,6 @@ FILE_POLICY = (
     ("traces", "files/traces"),        # 执行者留痕（每拍一份 markdown）
     ("reconcile", "files/reconcile"),  # 对账报告（每拍一份 markdown）
 )
-
-LOG_NAME = "tick.log"                  # 调度/看护日志（单文件，按字节整体归档）
 
 ARCHIVE_HEADER = "# 轮转归档（只移动不删）：%s｜移动 %d 行｜主账本保留 %d 行｜%s\n"
 
@@ -199,18 +197,15 @@ def rotate_all(layout: StateLayout, max_bytes: int = 1048576,
 
 
 def rotate_files(layout: StateLayout, keep_files: int = 200,
-                 log_max_bytes: int = 1048576,
                  stamp: Optional[str] = None) -> list[dict]:
-    """轮转**文件型**产物（T2/A3）：traces/、reconcile/ 按**份数**留最近 N 份；
-    `logs/tick.log` 按**字节**超过阈值就整体归档、另起空文件。都**只移动不删**。
+    """轮转**文件型**产物（T2/A3）：traces/、reconcile/ 按**份数**留最近 N 份。
+    都**只移动不删**，归档落在 `state/archive/files/<类>/`，与 JSONL 账本归档区分开。
 
-    归档落在 `state/archive/files/<类>/`，与 JSONL 账本归档区分开，仍可检索。
-    调度器以追加句柄持有 `tick.log`（Windows 下无 `FILE_SHARE_DELETE`）——轮转时
-    归档件照写，主件删不掉就原地截断清空（数据先在归档件里，不报错、不丢数据）。
+    注意：`logs/tick.log` **不在**这里轮转——调度器（`tools/run_tick.bat`）以追加句柄
+    持有它贯穿整个进程（Windows 无删除/写共享，进程内删不清），轮转职责在
+    `tools/rotate_journal.py`（两拍之间的句柄空隙，见该模块 docstring）。
     """
     reports = []
-    safe_stamp = _safe_component(stamp or _dt.datetime.now().strftime("%Y%m%d-%H%M%S"),
-                                 fallback="stamp")
     for kind, archive_rel in FILE_POLICY:
         src_dir = getattr(layout, kind + "_dir")
         if not src_dir.is_dir():
@@ -224,31 +219,6 @@ def rotate_files(layout: StateLayout, keep_files: int = 200,
             move_file(p, require_within(dest_dir / p.name, layout.root), layout.root)
         reports.append({"name": kind, "moved": len(moved), "kept": len(files) - len(moved),
                         "archive": archive_rel})
-    if log_max_bytes > 0:
-        log = layout.logs_dir / LOG_NAME
-        if log.is_file() and log.stat().st_size >= log_max_bytes:
-            dest_dir = layout.archive_dir / "files" / "logs"
-            dest = require_within(dest_dir / ("%s.%s" % (LOG_NAME, safe_stamp)),
-                                  layout.root)
-            suffix = 1
-            while dest.exists():        # 同秒重跑：换后缀，不覆盖已有归档
-                suffix += 1
-                dest = require_within(dest_dir / ("%s.%s-%d" % (LOG_NAME, safe_stamp, suffix)),
-                                      layout.root)
-            write_work_file(dest, read_text(log), layout.root, require_markers=())
-            try:
-                log.unlink()
-            except OSError:
-                # 主日志正被本进程的追加句柄占用（Windows 无 FILE_SHARE_DELETE，
-                # unlink 必撞 WinError 32）：归档件已写好（数据在保险侧），主件
-                # 原地截断清空——append 方继续写新内容，不报错、不丢数据。
-                truncate_file(log, layout.root)
-            else:
-                # 无占用（例如手工 `infinigrow rotate`）：清掉后另起空文件，
-                # 下一拍的追加写落在新日志上。
-                write_work_file(log, "", layout.root, require_markers=())
-            reports.append({"name": "logs/" + LOG_NAME, "moved": 1, "kept": 0,
-                            "archive": "files/logs"})
     return reports
 
 

@@ -6,7 +6,28 @@ The long-form reasoning behind each entry (incident, measurement, decision) live
 documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals in
 [`docs/zh/`](docs/zh/).
 
+## v2.2.25 — log rotation moves to the launcher's handle gap, where it can actually work (2026-09-18)
+
+- **`logs/tick.log` rotation now runs in the launcher, before any handle opens** (v2.2.25):
+  the v2.2.24 in-process approach turned out to be impossible — the scheduler's append
+  handle shares *neither* delete *nor* write (Windows), so both `unlink` and an in-place
+  truncate failed with `PermissionError` on the live machine, keeping `rc=1` and a
+  path-carrying traceback in the log. `tools/run_tick.bat` now calls
+  `tools/rotate_journal.py` at the very start, in the handle gap between runs: over the
+  threshold it archives the full original — **redacted** of local paths, since archived
+  logs are portable artifacts — and clears the main file for this run's appends.
+  Move-only, data lands in the archive first. The gardener no longer rotates the journal
+  (`rotate_files` drops the log section; `ledger.store.truncate_file` is removed as an
+  unusable primitive). Test-pinned end to end.
+- **The mechanism document states where rotation happens and why** (both languages).
+
 ## v2.2.24 — the log rotation fails gracefully on a busy journal, and the README names every status reading (2026-09-18)
+
+> **Superseded by v2.2.25**: the in-place truncate below is *not* achievable while the
+> scheduler holds the journal (Windows shares neither delete nor write); rotation lives in
+> the launcher from v2.2.25 on. The README/status-line work in this release stands.
+
+- **Log rotation no longer crashes the tick when the journal is busy** (new, 2026-09-18):
 
 - **Log rotation no longer crashes the tick when the journal is busy** (new, 2026-09-18):
   the scheduler holds `logs/tick.log` with an append handle; Windows (no delete-sharing)

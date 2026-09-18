@@ -31,6 +31,15 @@ set "LOG=%IG_STATE_ROOT%\logs\tick.log"
 rem src/ layout: make the package importable for child processes
 set "PYTHONPATH=%REPO%\src"
 
+rem --- journal rotation runs HERE, before ANY handle opens tick.log this run ---
+rem The scheduler holds tick.log with a shared handle for the whole tick process
+rem (Windows: no delete/write sharing), so the engine can never archive or clear
+rem it in process. Between runs no handle exists; this is the only window where
+rem a real archive + clear works. The archived copy is redacted of local paths.
+if exist "%LOG%" (
+    "%PY%" "%REPO%\tools\rotate_journal.py" "%IG_STATE_ROOT%" >nul 2>&1
+)
+
 echo [%DATE% %TIME%] tick start (repo=%REPO%)
 echo [%DATE% %TIME%] ==== tick start ==== >> "%LOG%"
 

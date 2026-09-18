@@ -147,8 +147,7 @@ def test_rotate_files_moves_excess_traces_and_reconciles(tmp_path):
     for i in range(105):
         (layout.reconcile_dir / ("reconcile-%05d.md" % i)).write_text(
             "# report %d\n" % i, encoding="utf-8")
-    reports = rotate_files(layout, keep_files=100, log_max_bytes=0,
-                           stamp="20260101-000004")
+    reports = rotate_files(layout, keep_files=100, stamp="20260101-000004")
     by_name = {r["name"]: r for r in reports}
     assert by_name["traces"]["moved"] == 5 and by_name["traces"]["kept"] == 100
     assert by_name["reconcile"]["moved"] == 5 and by_name["reconcile"]["kept"] == 100
@@ -160,57 +159,32 @@ def test_rotate_files_moves_excess_traces_and_reconciles(tmp_path):
     assert (layout.archive_dir / "files" / "reconcile" / "reconcile-00000.md").is_file()
 
 
-def test_rotate_files_rotates_tick_log_by_bytes(tmp_path):
-    """`logs/tick.log` 按**字节**轮转：超阈值 → 整体进归档，主日志另起空文件（不删）。"""
-    from infinigrow.ledger.rotation import rotate_files
+def test_rotate_journal_archives_redacts_and_clears(tmp_path):
+    """`tools/rotate_journal.py`（启动器在句柄空隙调用）：超阈值 → 归档件**脱敏**、
+    主件清空；低于阈值 → noop；归档不覆盖（同秒换后缀）。"""
+    import tools.rotate_journal as rj
     settings, layout = _layout(tmp_path, "log")
     layout.logs_dir.mkdir(parents=True, exist_ok=True)
+    layout.archive_dir.mkdir(parents=True, exist_ok=True)
     log = layout.logs_dir / "tick.log"
-    payload = "x" * 5000 + "\n"
+    payload = "line with %s somewhere\n" % str(tmp_path)
+    payload += "x" * 5000 + "\n"
     log.write_text(payload, encoding="utf-8")
-    reports = rotate_files(layout, keep_files=200, log_max_bytes=1024,
-                           stamp="20260101-000005")
-    assert reports and reports[0]["name"] == "logs/tick.log"
-    assert reports[0]["moved"] == 1
-    assert log.is_file() and log.stat().st_size <= 1            # 主日志另起（空）
+    report = rj.rotate_journal(str(layout.root), max_bytes=1024)
+    assert report and report["name"] == "logs/tick.log"
+    assert report["moved"] == 1 and report["redacted"] >= 1
+    assert log.is_file() and log.stat().st_size <= 1            # 主件另起（空）
     archived = list((layout.archive_dir / "files" / "logs").glob("tick.log.*"))
-    assert len(archived) == 1 and archived[0].read_text(encoding="utf-8") == payload
-    # 同秒重跑不覆盖：第二次轮转换后缀
+    assert len(archived) == 1
+    text = archived[0].read_text(encoding="utf-8")
+    assert "<redacted>" in text and "x" * 5000 in text           # 路径已脱敏、内容在
+    assert "line with" in text.split("<redacted>")[0]
+    # 低于阈值 → noop
+    assert rj.rotate_journal(str(layout.root), max_bytes=1024) is None
+    # 同秒重跑不覆盖：再次超阈值 → 换后缀
     log.write_text(payload, encoding="utf-8")
-    reports2 = rotate_files(layout, keep_files=200, log_max_bytes=1024,
-                            stamp="20260101-000005")
-    assert reports2 and reports2[0]["moved"] == 1
+    rj.rotate_journal(str(layout.root), max_bytes=1024)
     assert len(list((layout.archive_dir / "files" / "logs").glob("tick.log.*"))) == 2
-
-
-def test_rotate_files_tolerates_busy_tick_log_and_truncates_in_place(tmp_path):
-    """日志被追加句柄占用（Windows WinError 32 场景）：归档件照写、主件原地截断清空、
-    不 raise；下一拍 size 已低于阈值 → 不再轮转（归档不重复复制）。"""
-    from infinigrow.ledger.rotation import rotate_files
-    settings, layout = _layout(tmp_path, "log")
-    layout.logs_dir.mkdir(parents=True, exist_ok=True)
-    log = layout.logs_dir / "tick.log"
-    payload = "x" * 5000 + "\n"
-    log.write_text(payload, encoding="utf-8")
-    arch_dir = layout.archive_dir / "files" / "logs"
-    with open(log, "a", encoding="utf-8") as _held:     # 模拟调度器追加句柄（Windows 无删除共享）
-        reports = rotate_files(layout, keep_files=200, log_max_bytes=1024,
-                               stamp="20260101-000007")
-        assert reports and reports[0]["name"] == "logs/tick.log"
-        assert reports[0]["moved"] == 1
-        archived = list(arch_dir.glob("tick.log.*"))
-        assert len(archived) == 1
-        assert archived[0].read_text(encoding="utf-8") == payload   # 数据先进保险侧
-        # 主件已清空/另起（POSIX 无句柄限制时 unlink 后重建，空壳带一个换行）
-        assert log.is_file() and log.stat().st_size <= 1
-        # 主件仍可写（Windows：句柄仍指向原地截断的文件；POSIX：另起的空文件）
-        log.write_text("after\n", encoding="utf-8")
-    assert log.read_text(encoding="utf-8") == "after\n"
-    # 下一拍：主件已空 → 不再轮转、不新增归档
-    reports2 = rotate_files(layout, keep_files=200, log_max_bytes=1024,
-                            stamp="20260101-000007")
-    assert reports2 == []
-    assert len(list(arch_dir.glob("tick.log.*"))) == 1
 
 
 def test_rotate_journal_moves_excess_into_subject_archive(tmp_path):

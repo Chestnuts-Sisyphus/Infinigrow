@@ -291,10 +291,13 @@ that tick's prompt, and reconciles the file's **existence**:
 tail N lines; state-shaped ledgers (maturity, library) keep the **latest line per key**, so an
 object that has not been touched in a while cannot silently regress. Archives are searchable
 with `infinigrow rotate --search <term>`.
-**Log rotation tolerates a busy handle**: the scheduler holds `logs/tick.log` with an append
-handle (Windows has no delete-sharing, so `unlink` hits `WinError 32`). Rotation writes the full
-original into the archive first (data lands on the safe side), then **truncates the main file in
-place** when it cannot be removed — the append side keeps writing, no error, no data loss.
+**Log rotation lives in the launcher**: the scheduler (`tools/run_tick.bat`) holds
+`logs/tick.log` with an append handle for the whole tick process (the handle shares neither
+delete nor write on Windows, so an in-process clear is impossible). `tools/rotate_journal.py`
+runs it in the **handle gap between runs** (before any handle opens): over the threshold it
+writes the full original into the archive — **redacted** of local paths, since archived logs
+are portable artifacts — then clears the main file for this run's appends. Move-only, data
+lands on the safe side before the main file is touched.
 
 ---
 
