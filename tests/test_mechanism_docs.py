@@ -236,3 +236,35 @@ def test_subject_state_claims_in_the_design_of_record_are_dated_snapshots():
     assert "journal／archive" not in text, "主体目录枚举又写回旧的那一份"
     assert "带日期的快照" in text, "库外现状必须标注为快照（附实测日期），否则会长成假事实"
     assert "目录上限 10 个" in text, "判据本身不许被顺手改掉（改判据＝改文档＋代码＋测试）"
+
+
+def _count_py_lines(folder):
+    """行数语义与 `wc -l` 一致：数换行符，不数 splitlines 的尾巴。"""
+    total = 0
+    for path in (REPO_ROOT / folder).rglob("*.py"):
+        total += path.read_bytes().count(b"\n")
+    return total
+
+
+def test_readme_size_figures_match_the_tree():
+    """README（双语）写的规模数字必须与树对上，且两版互相对上。
+
+    为什么锁这条：这一版 README 的规模数字刚错过一次（宣称 ~4,400／~2,600，
+    实测 7,083／5,617，低估约 60%）。**改掉数字不等于改掉漏洞**——之所以能烂，
+    是因为没有任何机械判据盯着它。容差取 100 行＝该句「四舍五入到百位」的写法本身。
+    """
+    import re
+    src = _count_py_lines("src")
+    tests = _count_py_lines("tests")
+    patterns = {"README.md": r"[~≈]?([\d,]+) lines of Python plus [~≈]?([\d,]+) lines of tests",
+                "README.zh-CN.md": r"[~≈]?([\d,]+) 行 Python ＋ [~≈]?([\d,]+) 行测试"}
+    claimed = {}
+    for rel, pattern in patterns.items():
+        text = (REPO_ROOT / rel).read_text(encoding="utf-8")
+        match = re.search(pattern, text)
+        assert match, "%s 找不到规模数字那句（措辞变了要同步改这条判据）" % rel
+        pair = tuple(int(g.replace(",", "")) for g in match.groups())
+        claimed[rel] = pair
+        assert abs(pair[0] - src) <= 100, "%s 的 Python 行数 %s 与实测 %s 对不上" % (rel, pair[0], src)
+        assert abs(pair[1] - tests) <= 100, "%s 的测试行数 %s 与实测 %s 对不上" % (rel, pair[1], tests)
+    assert claimed["README.md"] == claimed["README.zh-CN.md"], "双语规模数字各说一遍"

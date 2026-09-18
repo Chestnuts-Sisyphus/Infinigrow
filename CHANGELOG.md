@@ -11,6 +11,8 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
 - **The published size claim was stale** (README, both languages): "~4,400 lines of Python plus
   ~2,600 lines of tests" measured 7,083 / 5,617 on this machine — the engine grew ~60% past its own
   description. Corrected to the measured figures, rounded the same way the sentence rounds.
+  `tests/test_mechanism_docs.py` now counts the tree itself and fails if either README drifts more
+  than the rounding band — the figure was only able to rot because nothing was checking it.
 - **The mechanism document now says how far a long run carries a redemption-rate study**
   (both languages, §5). Written from a live reading rather than an expectation: the on-read buckets
   are object domain × predicted edge × actual edge, so **maturity step is not one of them** — joined

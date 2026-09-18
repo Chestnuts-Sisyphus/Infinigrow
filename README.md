@@ -189,7 +189,7 @@ in the release notes and in the [superseded table](docs/superseded.md).
 Honest limitations:
 
 - **A mechanical tick does no cognition.** It proves the mechanism turns; it does not grow anything.
-- **The engine is deliberately small** (~7,100 lines of Python plus ~5,600 lines of tests) and has
+- **The engine is deliberately small** (~7,100 lines of Python plus ~5,800 lines of tests) and has
   **zero runtime dependencies**. Deployment concerns — schedulers, proxying, provider rotation,
   sandboxing — are yours; [`SECURITY.md`](SECURITY.md) is the starting point.
 - **The executor interface is a plain callable / command.** No vendor SDK is included.
