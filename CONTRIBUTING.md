@@ -17,8 +17,17 @@ python tools/check_no_abs_paths.py state     # state artifacts must not contain 
 ```
 
 Run these before opening a pull request. CI runs the same set on **two platforms** (ubuntu and
-windows, Python 3.11 and 3.12) plus a **cold start** (three ticks in an empty state root, asserting
-no absolute path in any artifact) and a syntax parse of the Windows launcher files.
+windows, Python 3.11, 3.12 and 3.13) plus a **cold start** (three ticks in an empty state root, asserting
+no absolute path in any artifact), a pass over the **read side of the CLI** (`status`,
+`redemption --json`, `rotate`, `rotate --search`, `version --check` on that same temp state root) and
+a syntax parse of the Windows launcher files.
+
+`tools/split_monolith.py` is a **parked** tool: it is a v1-era analysis-only splitter (prints the
+ownership table or a slice manifest to stdout, writes nothing) and its `--src` input — the v1 monolith
+— does not exist in this repository. CI therefore covers only its `--help` syntax (see
+`tests/test_stdio_encoding.py`), and a behavioural case is deliberately **not** written: building one
+would mean committing a fake monolith as fixture, which tests the fixture rather than the tool. If a
+real v1 monolith ever shows up, the case to add is `--table` over it.
 
 ## Changing the mechanism (a premise-level change)
 

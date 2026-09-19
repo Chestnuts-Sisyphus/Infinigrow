@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v5
 
@@ -77,6 +77,23 @@ jobs:
       # 报出一堆与产物无关的命中（红色的理由完全指错地方）。
       - name: Cold start — 产物不得含绝对路径
         run: python tools/check_no_abs_paths.py "${{ runner.temp }}/infinigrow-state"
+
+      # Read surface of the CLI: status / redemption --json / rotate / rotate --search /
+      # version --check. Before v2.2.28 no CI ever ran any of them — they are how a user
+      # reads the engine, and the docs publish `rotate --search` as the entry point for
+      # "archived is still findable". Reusing the cold-start state root above means the
+      # ledgers already have rows, so these run against content, not an empty dir.
+      # The hit/miss directions of --search are pinned by tests/test_cli_surface.py.
+      - name: CLI read surface
+        env:
+          IG_STATE_ROOT: ${{ runner.temp }}/infinigrow-state
+          IG_SUBJECT_ROOT: ${{ runner.temp }}/infinigrow-subject
+        run: |
+          python -m infinigrow status
+          python -m infinigrow redemption --json
+          python -m infinigrow rotate
+          python -m infinigrow rotate --search outcomes
+          python -m infinigrow version --check
 
       # 一键件与计划任务脚本也要在 CI 里被解析一遍（windows runner 上有 PowerShell）
       - name: 一键件语法（批处理/PowerShell 解析）

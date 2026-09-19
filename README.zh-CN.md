@@ -3,7 +3,7 @@
 [![ci](https://github.com/Chestnuts-Sisyphus/Infinigrow/actions/workflows/ci.yml/badge.svg)](https://github.com/Chestnuts-Sisyphus/Infinigrow/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/Chestnuts-Sisyphus/Infinigrow?color=8B5CF6)](https://github.com/Chestnuts-Sisyphus/Infinigrow/releases)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](pyproject.toml)
+[![python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
 [![runtime deps](https://img.shields.io/badge/runtime%20deps-0-brightgreen.svg)](pyproject.toml)
 
 **一个靠「预测 → 对账 → 把差异变成芽」来生长的引擎。**
@@ -152,8 +152,10 @@ python tools/check_prompt_code_sync.py   # 双向同源校验
 python tools/privacy_scan.py --root .    # 发布前：路径／凭据／邮箱
 ```
 
-CI 在 Linux 与 Windows、Python 3.11 与 3.12 上都跑这些，外加一次**冷启动**：空状态根跑三拍、
-零 token、零凭据，并断言产物里不出现任何绝对路径。
+CI 在 Linux 与 Windows、Python 3.11、3.12 与 3.13 上都跑这些，外加一次**冷启动**：空状态根跑三拍、
+零 token、零凭据，并断言产物里不出现任何绝对路径。CLI 的**读数面**（`status`、`redemption --json`、
+`rotate --search`、`version --check`）也在同一份临时状态根上跑一遍——文档写成「公开读数」的命令，
+不许在没人跑的地方慢慢烂掉。
 
 ## 永远用最新版引擎
 
@@ -173,7 +175,7 @@ infinigrow version --check        # 只查：本地版 vs 最新发布（落后�
 不掩饰的限制：
 
 - **机械拍不做认知**：它只能证明机制在转，不会长出东西。
-- **引擎刻意小**（≈7,200 行 Python ＋ ≈6,600 行测试），**运行时依赖 0 个**；
+- **引擎刻意小**（≈7,300 行 Python ＋ ≈6,700 行测试），**运行时依赖 0 个**；
   调度、代理、多通道轮转、沙箱这些部署面属于使用者，起点是 [`SECURITY.md`](SECURITY.md)。
 - **执行者接口就是一个普通可调用/命令**：不带任何厂商 SDK。
 - **机制语言是中文**（代码、提示词、账本字段）；英文文档里附了双语术语表。

@@ -8,6 +8,27 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
 
 ## v2.2.28 — attribution reads the executor's exit code, and two published verdicts are corrected (2026-09-19)
 
+- **The read side of the CLI entered CI, and so did Python 3.13** (`.github/workflows/ci.yml` ＋
+  `tests/test_cli_surface.py` ＋ both READMEs ＋ `CONTRIBUTING.md`). Until now CI exercised only the
+  write path (`dry-run`/`tick`/`gardener`/`org-status`); `status`, `redemption --json`, `rotate`,
+  `rotate --search` and `version --check` had never run on any CI, even though the docs publish them
+  as the reading surface — and `rotate --search`, the documented answer to "moved but still
+  findable", had **zero** cases. The new step reuses the cold-start temp state root (`${{ runner.temp }}`)
+  so it runs against ledgers that have content, on both ubuntu and windows; `tests/test_cli_surface.py`
+  pins the hit and miss directions of `--search` (hit must report `file:line`, miss must report 0 and
+  not crash), the exit-code contract of `version --check` offline (behind → 3, equal → 0), clean
+  stderr on the success path, and that the Python versions the docs list are exactly the CI matrix.
+  **3.13 joins the matrix on measurement, not hope**: this machine's interpreter is 3.13.7 and the
+  whole gate battery (pytest / ruff / scan R1–R10 / selftest / prompt-sync / privacy / abs-path) is
+  green on it. End-to-end on a copy of the live state root (the live one untouched): `rotate
+  --max-bytes 4000` moved 1,290 + 3,462 + 1,233 lines into `archive/`, then `rotate --search`
+  reported 20 hits in the archived files (rc=0) and 0 hits for an absent needle (rc=0); the config
+  source line printed `defaults、caller` with `IG_EXECUTOR`/`IG_EXECUTOR_TIMEOUT_S` cleared.
+- **`tools/split_monolith.py` is registered as parked rather than newly tested** (`CONTRIBUTING.md`).
+  It is analysis-only and its `--src` input — the v1 monolith — is not in this repository, so a
+  behavioural case would mean committing a fabricated monolith and testing the fixture; CI keeps
+  covering its `--help` syntax, and the note records what to add (`--table`) if a real input appears.
+
 - **Failure attribution gained a second executor-side test** (`engine/reconcile.py`
   `executor_tick_failures` ＋ `cli.py` `redemption` ＋ both `mechanism.md` files ＋
   `tests/test_redemption_report.py`). The "dropped on the executor side" bucket used to recognise

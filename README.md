@@ -3,7 +3,7 @@
 [![ci](https://github.com/Chestnuts-Sisyphus/Infinigrow/actions/workflows/ci.yml/badge.svg)](https://github.com/Chestnuts-Sisyphus/Infinigrow/actions/workflows/ci.yml)
 [![release](https://img.shields.io/github/v/release/Chestnuts-Sisyphus/Infinigrow?color=8B5CF6)](https://github.com/Chestnuts-Sisyphus/Infinigrow/releases)
 [![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](pyproject.toml)
+[![python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
 [![runtime deps](https://img.shields.io/badge/runtime%20deps-0-brightgreen.svg)](pyproject.toml)
 
 **An engine that grows by predicting, reconciling, and turning differences into sprouts.**
@@ -164,9 +164,11 @@ python tools/check_prompt_code_sync.py   # bidirectional prompt↔code check
 python tools/privacy_scan.py --root .    # paths / credentials / emails before publishing
 ```
 
-CI runs all of that on Linux and Windows, for Python 3.11 and 3.12, plus a **cold start**: three
+CI runs all of that on Linux and Windows, for Python 3.11, 3.12 and 3.13, plus a **cold start**: three
 ticks in an empty state root, zero tokens, zero credentials, asserting no absolute path appears in
-any artifact.
+any artifact. The read side of the CLI (`status`, `redemption --json`, `rotate --search`,
+`version --check`) runs on that same throwaway state root, so the commands the docs publish as
+readings cannot rot unnoticed.
 
 ## Running the latest engine
 
@@ -189,7 +191,7 @@ in the release notes and in the [superseded table](docs/superseded.md).
 Honest limitations:
 
 - **A mechanical tick does no cognition.** It proves the mechanism turns; it does not grow anything.
-- **The engine is deliberately small** (~7,200 lines of Python plus ~6,600 lines of tests) and has
+- **The engine is deliberately small** (~7,300 lines of Python plus ~6,700 lines of tests) and has
   **zero runtime dependencies**. Deployment concerns — schedulers, proxying, provider rotation,
   sandboxing — are yours; [`SECURITY.md`](SECURITY.md) is the starting point.
 - **The executor interface is a plain callable / command.** No vendor SDK is included.
