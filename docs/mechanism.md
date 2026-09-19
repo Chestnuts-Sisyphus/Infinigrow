@@ -179,8 +179,10 @@ queue filled with the acting session's own re-statements of what it had just don
 generation of this engine had 186 of 221 queued sprouts near-identical and ground to a halt).
 
 **The inputs of ③ must be real readings.** `last_used_tick` is updated when an entry is
-**mentioned in the executor's trace output**, and the "used this tick" gate reads those traces
-(not a free-text note stored elsewhere — that mistake made the gate a no-op).
+**mentioned in the executor's trace output**, and the "used this tick" gate reads
+the last 5 executor traces (`TRACE_GATE_FILES`) — not a free-text note stored elsewhere
+(that mistake made the gate a no-op). Changing that count moves the constant, both originals
+and the tests together.
 
 **A reminder must be able to end** (the difference/cap sources can be resolved; "is this
 capability used?" cannot be, because no mechanical reading exists for it):
@@ -225,7 +227,9 @@ capability used?" cannot be, because no mechanical reading exists for it):
   Different job from the rule above: re-lighting pulls a sprout back (criterion: ticks, blind to
   the object), while re-asking permits a *new* sprout for the same object (criterion: the age of
   that object's newest freeze). The cadence ran in code before anyone wrote it down, which left
-  `IG_FROZEN_REVIEW_EVERY` undiscoverable.
+  `IG_FROZEN_REVIEW_EVERY` undiscoverable. The sweep caps itself: at most 3 sprouts are re-lit
+  per sweep (`max_relight`) — one wide match cannot flood the 50-slot active queue, the rest
+  wait for the next round.
 - The frozen zone has a **capacity rule** of its own: past `frozen_cap` (default 5000) the
   oldest lines are *moved* to `state/archive/` (move-only, same discipline as ledger rotation).
 - **Capacity rotation cannot outrun the re-ask window** (measured 2026-09-19 at tick 713, on a

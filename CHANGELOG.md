@@ -35,6 +35,23 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   both directions on ubuntu and windows — deny given → the three rules report hits and exit 1;
   payload removed → zero hits and exit 0 — and the sentinel is itself checked to contribute no
   generic-layer hits, so shipping it cannot dirty the repo-wide gate.
+- **Configuration defaults now have one source, and three numeric gates became readable**
+  (`src/infinigrow/core/config.py` ＋ `tests/test_config_single_source.py` ＋ both `mechanism.md`
+  ＋ `prompts/org-session.md` ＋ both READMEs). `Settings` used to spell its 24 defaults out twice —
+  once in `_FIELDS`, once in the class body — so editing one silently separated the runtime default
+  from the table humans read (and the table is the published wording). The class body now derives
+  from the table, and the test proves the derivation rather than restating it: it fails if a literal
+  default reappears. The other half of the gap was invisible thresholds: `DEFAULT_ZERO_GAP` (10
+  rows), `TRACE_GATE_FILES` (the "used this tick" gate read "the last few traces" — a number that
+  existed only in code) and `review_frozen(max_relight=…)` (never mentioned anywhere outside the
+  source, including `prompts/`, although it is the queue the session competes for). Each now carries
+  its own number in both originals, in `prompts/org-session.md`, and in a case that interpolates the
+  constant — change the constant without the docs and it goes red, in either language. Behaviour
+  cases cover four knobs rather than their parsing: cooldown minutes flip the same ledger from
+  "cooling" to "gap backfill", `tick_minutes` reaches the scheduler as seconds and rejects
+  non-positive values loudly, `executor_timeout_s` really kills a slow executor, and
+  `rotate_keep_files` decides how many traces stay while the excess moves (never deletes).
+  **No threshold value changed** (`docs/versioning.md`: this is provenance, not mechanism).
 - **`tools/split_monolith.py` is registered as parked rather than newly tested** (`CONTRIBUTING.md`).
   It is analysis-only and its `--src` input — the v1 monolith — is not in this repository, so a
   behavioural case would mean committing a fabricated monolith and testing the fixture; CI keeps

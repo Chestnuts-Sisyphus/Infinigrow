@@ -79,34 +79,45 @@ _FIELDS = {
 DEFAULT_CONFIG_NAMES = ("infinigrow.toml", "infinigrow.json")
 
 
+def _default(name: str):
+    """取某字段的**唯一**默认值来源（`_FIELDS`）。
+
+    以前这里把 24 个默认值在 `_FIELDS` 与 `Settings` 里各抄一遍：改一处不改另一处，
+    运行时默认与「表上写的默认」就悄悄分家——而表是给人的口径，错表比错默认更难发现。
+    """
+    return _FIELDS[name][1]
+
+
 @dataclass
 class Settings:
     """解析后的配置（全部字段都有默认值 → 空仓直接可跑）。"""
 
-    state_root: str = ""
-    subject_root: str = ""
-    prompts_dir: str = ""
-    key_dir: str = ""
-    proxy_url: str = ""
-    executor: str = ""
-    executor_timeout_s: int = 120
-    llm_command: str = ""
-    llm_model: str = ""
-    org_gap_ticks: int = 5
-    org_cooldown_min: int = 30
-    tick_minutes: int = 10
-    queue_cap: int = 50
-    lead_limit: int = 3
-    cold_start_ticks: int = 50
-    frozen_review_every: int = 20
-    frozen_requestion_ticks: int = 300
-    frozen_cap: int = 5000
-    frozen_keep_tail: int = 4000
-    rotate_keep_tail: int = 2000
-    rotate_max_bytes: int = 1048576
-    rotate_keep_files: int = 200
-    journal_keep_files: int = 200
-    stall_alert_ticks: int = 12
+    state_root: str = _default("state_root")
+    subject_root: str = _default("subject_root")
+    prompts_dir: str = _default("prompts_dir")
+    key_dir: str = _default("key_dir")
+    proxy_url: str = _default("proxy_url")
+    executor: str = _default("executor")
+    executor_timeout_s: int = _default("executor_timeout_s")
+    llm_command: str = _default("llm_command")
+    llm_model: str = _default("llm_model")
+    org_gap_ticks: int = _default("org_gap_ticks")
+    org_cooldown_min: int = _default("org_cooldown_min")
+    tick_minutes: int = _default("tick_minutes")
+    queue_cap: int = _default("queue_cap")
+    lead_limit: int = _default("lead_limit")
+    cold_start_ticks: int = _default("cold_start_ticks")
+    frozen_review_every: int = _default("frozen_review_every")
+    frozen_requestion_ticks: int = _default("frozen_requestion_ticks")
+    frozen_cap: int = _default("frozen_cap")
+    frozen_keep_tail: int = _default("frozen_keep_tail")
+    rotate_keep_tail: int = _default("rotate_keep_tail")
+    rotate_max_bytes: int = _default("rotate_max_bytes")
+    rotate_keep_files: int = _default("rotate_keep_files")
+    journal_keep_files: int = _default("journal_keep_files")
+    stall_alert_ticks: int = _default("stall_alert_ticks")
+    # repo_root 是唯一的例外：表里的默认＝**本机**安装位置，直接当 dataclass 默认会把
+    # 绝对路径烙进类定义（搬不走）。留空串，由 __post_init__ 在实例化时回填。
     repo_root: str = ""
     sources: list = field(default_factory=list)   # 记录每个字段来自哪里（可审计）
 
