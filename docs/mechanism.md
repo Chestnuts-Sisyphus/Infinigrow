@@ -61,8 +61,8 @@ The mechanical observation surface is **read-only, bounded, no subprocesses, no 
 | Observed | Dimension | Evidence pointer |
 |---|---|---|
 | the subject root | existence, file count | `subject root` |
-| each sub-directory (up to 10) | file count | `subject dir:<path>` |
-| each file (up to 20) | existence + byte size | `subject:<path>` |
+| each sub-directory (up to `SUBJECT_DIR_LIMIT` = 10, N48-5/M6) | file count | `subject dir:<path>` |
+| each file (up to `SUBJECT_FILE_LIMIT` = 20) | existence + byte size | `subject:<path>` |
 
 - Files are taken by **most recent mtime first** and directories by **name order** — the surface
   is bounded on purpose (a tick must not be unbounded work). File count and total bytes are
@@ -178,14 +178,16 @@ Sources ② and ③ were added deliberately: with ① alone, once the difference
 queue filled with the acting session's own re-statements of what it had just done (a previous
 generation of this engine had 186 of 221 queued sprouts near-identical and ground to a halt).
 
-**The inputs of ③ must be real readings.** `last_used_tick` is updated when an entry is
-**mentioned in the executor's trace output**, and the "used this tick" gate reads
-the last 5 executor traces (`TRACE_GATE_FILES`) — not a free-text note stored elsewhere
-(that mistake made the gate a no-op). Changing that count moves the constant, both originals
-and the tests together.
+**The inputs of ③ must be real readings (the N48-1/N48-2 fix).** `last_used_tick` has a real
+writer — an entry is marked used when its name is **mentioned in the executor's trace output**
+(no more "written once at creation, true forever after"), and the "used this tick" gate reads
+the last 5 executor traces (`TRACE_GATE_FILES`) — not a free-text note stored elsewhere. That
+mistake made the gate a no-op: the note it read measured 19 characters in total. Changing the
+count moves the constant, both originals and the tests together.
 
-**A reminder must be able to end** (the difference/cap sources can be resolved; "is this
-capability used?" cannot be, because no mechanical reading exists for it):
+**A reminder must be able to end** (N48-3; landed in the same batch as the de-duplication fix —
+fixing only de-duplication would cut this channel's power. The difference/cap sources can be
+resolved; "is this capability used?" cannot be, because no mechanical reading exists for it):
 
 | Exit | Test | Action |
 |---|---|---|
@@ -230,8 +232,9 @@ capability used?" cannot be, because no mechanical reading exists for it):
   `IG_FROZEN_REVIEW_EVERY` undiscoverable. The sweep caps itself: at most 3 sprouts are re-lit
   per sweep (`max_relight`) — one wide match cannot flood the 50-slot active queue, the rest
   wait for the next round.
-- The frozen zone has a **capacity rule** of its own: past `frozen_cap` (default 5000) the
-  oldest lines are *moved* to `state/archive/` (move-only, same discipline as ledger rotation).
+- The frozen zone has a **capacity rule** of its own (M5/N48-4): past `frozen_cap` (default
+  5000) the oldest lines are *moved* to `state/archive/files/frozen/` (keeping the last
+  `frozen_keep_tail` = 4000; move-only, same discipline as ledger rotation).
 - **Capacity rotation cannot outrun the re-ask window** (measured 2026-09-19 at tick 713, on a
   copy of the state root): 4,373 lines, 627 short of `frozen_cap`, arriving at 0.66 lines/tick
   over the last 50 ticks and 1.50 over the last 100 (this machine runs ~10 minutes per tick) →

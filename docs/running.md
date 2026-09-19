@@ -13,11 +13,36 @@ Nothing here needs credentials unless *your* executor does.
 
 ### 1. The contract
 
-The prompt goes in on **stdin**, the answer comes out on **stdout**. One call is one chance to
-act. Credentials are **not** the engine's business: put them in your own environment or in the
-executor script — the engine never stores, moves or echoes them.
+```
+    python -m infinigrow tick --executor "your command  args..."
+                    │
+                    ├─ stdin  ← the prompt (the mechanism prompt + this tick's question + the B-guess)
+                    └─ stdout → your answer (stored verbatim under state/traces/, plus an optional usage line)
+```
+
+- **No executor means a mechanical tick**: zero tokens, zero credentials, no network, no
+  subprocess. That is the default posture, and the one CI and an empty repository run in.
+- One call is one chance to act. The same channel serves two purposes, told apart by the
+  environment variable `IG_PASS_KIND`:
+  - `tick`: the difference this tick has to resolve (the question);
+  - `org-session`: the semantic pass (find differences, write the planned predictions, register sprouts).
+- **Spawning does not go through a shell**: the command string is split into argv (honouring
+  quotes) and executed directly — `shell=True` would hand the freedom of string concatenation back
+  to the caller, and on Windows it would also expand `%VAR%`. Quote paths with a drive letter, or
+  write them with forward slashes.
+
+Credentials are **not** the engine's business: put them in your own environment or in the executor
+script — the engine never stores, moves or echoes them.
 
 ### 2. Wiring it up
+
+| Way | Command |
+|---|---|
+| one-off (CLI) | `infinigrow tick --executor "your-command"` |
+| config file | `executor = "your-command"` (in `infinigrow.toml`) |
+| environment | `IG_EXECUTOR="your-command"` (handiest inside a scheduled task or guard script) |
+| force a mechanical tick | `--no-executor` (ignores whatever the config set) |
+| timeout | `--executor-timeout 300` or `IG_EXECUTOR_TIMEOUT_S` (default 120 seconds) |
 
 ```bash
 infinigrow tick --executor "your-command --flags"     # or set IG_EXECUTOR
@@ -25,6 +50,19 @@ infinigrow tick --executor "your-command --flags"     # or set IG_EXECUTOR
 
 No executor means a **mechanical tick**: zero tokens, zero credentials, no network, no
 subprocess. That is what CI runs and what you use to see the mechanism turn without paying for it.
+
+**Timeout × the scheduler's time limit (K12/A17 — do not burn the whole window)**: the per-call
+executor timeout (`IG_EXECUTOR_TIMEOUT_S`, 600 seconds on this machine) and the scheduled task's
+total limit (30 minutes) are **not the same thing**. One tick may fire a `tick` call and an
+`org-session` call, each with its own timeout. If both run to the end (600 + 600 = 1200 seconds
+≈ 20 minutes) you are still inside the 30-minute limit, but only 10 minutes are left — and the
+same tick still has reconciliation, bookkeeping and the gardener to run, after which Windows Task
+Scheduler **kills the process** at the limit. So: executor timeout × calls per tick must be
+**clearly smaller** than the scheduling limit (rule of thumb: leave at least 1/3 of the window as
+headroom). A hung call occupying the window, a task killed by the scheduler and a ledger left
+mid-tick are all far more expensive than one failed call — prefer a shorter per-call timeout
+(lower `IG_EXECUTOR_TIMEOUT_S`) to dragging the whole tick until it is killed. (Nothing here
+changes your environment variables; it only states the relation and the advice.)
 
 ### 3. Environment variables the engine gives the executor
 

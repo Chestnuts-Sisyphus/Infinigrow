@@ -28,7 +28,12 @@ ZH = DOCS / "zh"
 
 #: 逐对校验的文档（英文公开面 ↔ 中文正本）
 PAIRS = ("mechanism.md", "architecture.md", "growth-subject.md", "running.md",
-         "privacy.md", "versioning.md", "upgrading.md", "superseded.md")
+         "privacy.md", "versioning.md", "upgrading.md", "superseded.md", "markers.md")
+
+#: **正文级**判据的阈值：中文某节 ≥ 这么多行才比（短节的译文行数天然波动，比了是噪声）
+MIN_ZH_LINES = 8
+#: 英文同位节至少要保住中文行数的这个比例（1:1 翻译的表与段不会低于它；**整段没译**才会）
+MIN_RATIO = 0.5
 
 #: **声明式例外**：Release 说明只有英文（公开面按语言边界只做英文，见 H8/Q13）。
 #: 例外必须写在这里——新增文档忘了写镜像会直接失败，不许悄悄绕过。
@@ -143,3 +148,145 @@ def test_the_checker_itself_catches_drift(tmp_path):
     e = "# T\n\n```bash\ninfinigrow scan     # 引擎状态\n```\n"
     assert commands_in_blocks(c) == commands_in_blocks(d)
     assert commands_in_blocks(c) != commands_in_blocks(e)
+
+
+# ------------------------------------------------------- M6：正文级同源（不只比标题）
+def section_bodies(text: str) -> list[int]:
+    """每个 `##`/`###`/`####` 节**正文**的非空行数（标题与空行不算）。"""
+    out, cur, seen = [], None, False
+    for line in text.splitlines():
+        if re.match(r"^#{2,4}\s+\S", line):
+            if seen:
+                out.append(cur)
+            cur, seen = 0, True
+        elif seen and line.strip():
+            cur += 1
+    if seen:
+        out.append(cur)
+    return out
+
+
+def body_deficits(zh_text: str, en_text: str) -> list[tuple]:
+    """中文某节 ≥ `MIN_ZH_LINES` 行、英文同位节却 < `MIN_RATIO` 比例 → 记一条缺口。"""
+    zh, en = section_bodies(zh_text), section_bodies(en_text)
+    out = []
+    for i, n in enumerate(zh):
+        got = en[i] if i < len(en) else 0
+        if n >= MIN_ZH_LINES and got < n * MIN_RATIO:
+            out.append((i + 1, n, got))
+    return out
+
+
+#: 两册都必须**逐字含**的锚点（编号与常量名不翻译，翻了就查不到）
+SHARED_ANCHORS = {
+    "mechanism.md": ("N48-1", "N48-2", "N48-3", "N48-4", "N48-5",
+                     "SUBJECT_DIR_LIMIT", "SUBJECT_FILE_LIMIT", "TRACE_GATE_FILES"),
+    "running.md": ("K12", "A17", "IG_EXECUTOR_TIMEOUT_S"),
+}
+
+#: 各说各话的锚点：中文原话 ↔ 英文必须含的对应说法
+PAIRED_ANCHORS = {
+    "mechanism.md": (("19 个字符", "19 characters"),),
+    "running.md": (("留 ≥1/3 余量", "leave at least 1/3 of the window"),),
+}
+
+
+def test_english_docs_carry_every_zh_section_body():
+    """英文册不许「有标题没正文」：逐节按位置比行数（Q7 的正文级升级）。"""
+    problems = []
+    for name in PAIRS:
+        if name == "markers.md":
+            continue                      # 登记表本身是同一张表，不比「翻译量」
+        d = body_deficits(_read(ZH / name), _read(DOCS / name))
+        if d:
+            problems.append("%s：%s" % (name, d))
+    assert not problems, ("英文册系统性缺段（节号／中文行数／英文行数）：\n  "
+                          + "\n  ".join(problems))
+
+
+def test_anchors_that_carry_numbers_or_ids_are_bilingual():
+    """编号与带数字的判据句必须**两册都在**（只在中文＝英文读者复核不了）。"""
+    missing = []
+    for name, anchors in SHARED_ANCHORS.items():
+        en = _read(DOCS / name)
+        for a in anchors:
+            if a not in en:
+                missing.append("%s：英文册缺锚点 %s" % (name, a))
+    for name, pairs in PAIRED_ANCHORS.items():
+        en, zh = _read(DOCS / name), _read(ZH / name)
+        for zh_needle, en_needle in pairs:
+            if zh_needle not in zh:
+                missing.append("%s：中文册原话被改写，判据需同步（%s）" % (name, zh_needle))
+            if en_needle not in en:
+                missing.append("%s：英文册缺对应说法 %s" % (name, en_needle))
+    assert not missing, "\n  ".join(missing)
+
+
+# ------------------------------------------------------- M6：编号登记表
+MARKER_RX = re.compile(r"(?<![A-Za-z0-9])([KANTGOSHMQBCRU]\d{1,2}(?:-\d)?)(?![A-Za-z0-9])")
+
+
+def marker_rows(text: str) -> dict:
+    """登记表行：`| 编号 | 命题 | 执法落点 | 状态 |` → {编号: (命题, 落点, 状态)}。"""
+    out = {}
+    for line in text.splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) == 4 and MARKER_RX.fullmatch(cells[0]):
+            out[cells[0]] = tuple(cells[1:])
+    return out
+
+
+def referenced_markers() -> set:
+    """docs（中英两册，登记表自身除外）里**被引用**的编号。"""
+    out = set()
+    for p in list(DOCS.glob("*.md")) + list(ZH.glob("*.md")):
+        if p.name == "markers.md":
+            continue
+        out.update(MARKER_RX.findall(p.read_text(encoding="utf-8")))
+    return out
+
+
+def test_every_marker_referenced_in_docs_is_registered():
+    """引用即登记：docs 里出现的每个编号都要在登记表内（两册都要）。"""
+    referenced = referenced_markers()
+    assert len(referenced) >= 60, "清点本身退化了（只找到 %d 个编号）" % len(referenced)
+    for name in ("markers.md", "zh/markers.md"):
+        rows = marker_rows(_read(DOCS / name))
+        absent = sorted(referenced - set(rows))
+        assert not absent, "%s 未登记被引用的编号：%s" % (name, absent)
+
+
+def test_registry_rows_point_at_something_real():
+    """每行必须有**执法落点**；登记表不许留死行（引用的编号在仓内已不存在）。"""
+    live = set()
+    for base in (DOCS, ZH, REPO / "src", REPO / "tests", REPO / "prompts"):
+        for p in list(base.rglob("*.md")) + list(base.rglob("*.py")):
+            live.update(MARKER_RX.findall(p.read_text(encoding="utf-8", errors="replace")))
+    for name in ("markers.md", "zh/markers.md"):
+        rows = marker_rows(_read(DOCS / name))
+        assert len(rows) >= 60, "登记表缩水了（%d 行）" % len(rows)
+        for mid, (claim, where, status) in rows.items():
+            assert claim and where and status, "%s：四个格不许留空（%s）" % (mid, (claim, where, status))
+            if mid not in live:
+                assert "孤儿" in status, \
+                    "%s：仓内已无引用，状态必须如实写「孤儿」（不许伪装成生效）" % mid
+            if "生效" in status:
+                assert ("." in where) or ("/" in where), \
+                    "%s：状态说生效，落点必须是可打开的文件或测试" % mid
+
+
+def test_the_body_parity_check_itself_bites(tmp_path):
+    """**判据自检**：把英文册某节砍成一行，缺口检查必须报出来（否则闸是摆设）。"""
+    zh = "# T\n\n## 1. 一\n\n" + "\n".join("行 %d" % i for i in range(12)) + "\n"
+    ok = "# T\n\n## 1. One\n\n" + "\n".join("line %d" % i for i in range(8)) + "\n"
+    thin = "# T\n\n## 1. One\n\nonly one line\n"
+    a, b, c = tmp_path / "a.md", tmp_path / "b.md", tmp_path / "c.md"
+    a.write_text(zh, encoding="utf-8")
+    b.write_text(ok, encoding="utf-8")
+    c.write_text(thin, encoding="utf-8")
+    assert body_deficits(_read(a), _read(b)) == []
+    assert body_deficits(_read(a), _read(c)) == [(1, 12, 1)]
+    # 登记表自检：删掉一行 → 引用检查必须报缺（用真实 docs 的编号名做样本）
+    rows = marker_rows(_read(DOCS / "zh" / "markers.md"))
+    sample = sorted(rows)[0]
+    assert sample in referenced_markers() or "孤儿" in rows[sample][2]

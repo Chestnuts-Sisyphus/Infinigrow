@@ -35,6 +35,25 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   both directions on ubuntu and windows — deny given → the three rules report hits and exit 1;
   payload removed → zero hits and exit 0 — and the sentinel is itself checked to contribute no
   generic-layer hits, so shipping it cannot dirty the repo-wide gate.
+- **Bilingual parity moved from headings to body text, and the marker numbering got a registry**
+  (`tests/test_docs_bilingual.py` ＋ `docs/markers.md` ＋ `docs/zh/markers.md` ＋
+  `tools/check_markers.py` ＋ the four English sections that were empty). The old check compared
+  only the **heading skeleton**, so a section could exist in English and be almost hollow: measured
+  today, `growth-subject.md` §4 was 18 Chinese lines against 3 English ones, §7 11 against 5, and
+  `running.md` §1/§2 13 against 3 and 16 against 5 — which is exactly how the N48 series, the
+  "19 characters" measurement, `SUBJECT_DIR_LIMIT` and the K12/A17 timeout relation ended up
+  readable in one language only. The new checks are positional and mechanical: every section with
+  ≥8 Chinese lines must have at least half that body in English, and number-carrying anchors must
+  appear in **both** books (measured, not copied: the brief's "mechanism.md is 240 lines short /
+  tick.md 189" no longer holds — the English mechanism book is 398 lines against 377, and there is
+  no `docs/tick.md` at all, so those two figures are corrected here rather than repeated). The
+  registry answers a second gap: ids like `K15` or `N48-2` were cited but never defined anywhere.
+  Every id referenced in `docs/` now has a row (id | proposition | where it is enforced | status),
+  with three rulings stated honestly: **K15** is registered as *undecided* (the ordering key is not
+  touched), **G7** as *one id, two meanings* (the capability-library ETA and rotation), and
+  **H8**/**O5** as *orphans* — H8 duplicates Q13/A10 and O5 has zero references repo-wide, so
+  neither may be cited as if it were an in-force decision. `tools/check_markers.py` prints the same
+  diff the tests enforce. No limit constant moved.
 - **Configuration defaults now have one source, and three numeric gates became readable**
   (`src/infinigrow/core/config.py` ＋ `tests/test_config_single_source.py` ＋ both `mechanism.md`
   ＋ `prompts/org-session.md` ＋ both READMEs). `Settings` used to spell its 24 defaults out twice —

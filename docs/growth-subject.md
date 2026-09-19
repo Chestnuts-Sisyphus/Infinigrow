@@ -95,9 +95,33 @@ One tick does a **read-only, bounded, no-subprocess, no-network** observation:
 
 ## 4. How "it changed" is judged
 
-Reconciliation aligns `(object, dimension)` pairs and compares expected with actual. Nothing is
-compared that was not predicted, and nothing is predicted that is not observed (the symmetry
-rule) — asymmetry manufactures phantom differences in both directions.
+Reconciliation is mechanical: the B-guess written **before** the act (expectations) is aligned
+with the W-answer read **after** it (actuals) on `(object, dimension)` pairs — equal is "right",
+unequal is "wrong". Nothing is compared that was not predicted, and nothing is predicted that is
+not observed (the symmetry rule) — asymmetry manufactures phantom differences in both directions.
+Subject objects are always named:
+
+```
+subject/<relative path>      (e.g. subject/notes.md, subject/sub/a.md)
+```
+
+The prefix is not decoration. It keeps subject objects and the engine's own state objects
+(`tick_status.json` and friends) from ever colliding in one reconciliation space, and it lets the
+domain-saturation test read same-directory objects as one domain (`subject/` is one domain,
+`subject/sub/` is another). So "did the subject change" becomes a checkable fact:
+
+- predicted `subject/notes.md bytes = 100`, read 120 → a difference (wrong-prediction) → sprout;
+- predicted "the number of files at the subject root is unchanged", one more appeared → a
+  difference → sprout;
+- everything matches → zero differences, zero sprouts (nothing in this tick was corrected by
+  reality).
+
+**Note**: the default B-guess is "stays the same" (`predict_subject_unchanged`) — that is the
+honest expectation when nothing is known, not conservatism. To predict what the subject will look
+like after the work, the **semantic session** writes planned values, which override the defaults
+(`subject.merge_predictions`), and the outcome ledger judges the planned values. Without that
+layer, any tick where something really happened would be booked as "wrong-prediction": that would
+say "nothing was predicted", not "the work was done badly".
 
 ## 5. Naming: the one rule that is fixed
 
@@ -126,9 +150,15 @@ get a sprout).
 ## 7. Reproducible checks
 
 ```bash
-infinigrow dry-run                     # resolved config, subject root, executor; writes nothing
-infinigrow tick --probe                # one tick; observations carry the subject prefix
-python -m pytest tests/test_subject.py # paths, symmetry, directory objects, supplemental reads
+# the resolved config, where the subject is, and that it exists — writes nothing
+infinigrow dry-run
+# one tick, printed: observations carry the 主体/ prefix and the subject dimensions
+infinigrow tick --probe
+# the snapshot on disk: directory names and relative names only, never an absolute path
+cat state/subject.json
+# tests: the subject path defaults outside the repo, is never the state root, and a mechanical
+# tick really reads it
+python -m pytest tests/test_subject.py
 ```
 
 ## 8. Changing the subject
