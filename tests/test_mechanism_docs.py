@@ -124,15 +124,23 @@ def test_journal_naming_rule_is_synced_across_three_sources():
             "%s 没写明这条判据在哪执法" % name
         assert ("不替执行者改文件名" in doc) or ("never renames" in doc), \
             "%s 没写明写盘侧不执法（提示词约定＋测试守护）" % name
-    # 三处文本都必须含同一句规则说明（防一边改了另一边忘改）
+    # 三处文本必须含**同一句规则原文**，而那句原文就是代码里的常量（G5 变异审计的改法：
+    # 原先断言的是抄在测试里的字面量，把提示词那半句改坏整套仍绿——装饰性判据）
+    from infinigrow.engine.subject import JOURNAL_NAME_SPEC, valid_subject_object
+    ok, why = valid_subject_object("主体/journal/随手起名.md", set(), for_proposal=True)
+    assert not ok, "对象名闸不再拦不合规格的 journal 提议了"
+    assert JOURNAL_NAME_SPEC in why, "闸的拒绝理由没引用同一句规格常量"
     texts = {
         "tick.md": (REPO_ROOT / "prompts" / "tick.md").read_text(encoding="utf-8"),
         "org-session.md": (REPO_ROOT / "prompts" / "org-session.md").read_text(encoding="utf-8"),
         "zh/growth-subject.md": (DOCS / "zh" / "growth-subject.md").read_text(encoding="utf-8"),
     }
     for name, text in texts.items():
-        assert "<创建拍号4位>-<创建日期YYYYMMDD>.md" in text, "%s 缺命名规则" % name
+        assert JOURNAL_NAME_SPEC in text, "%s 缺命名规则（须与 subject.JOURNAL_NAME_SPEC 同字）" % name
         assert "YYYYMMDD" in text, "%s 缺日期段说明" % name
+    org = texts["org-session.md"]
+    assert "对象名机械闸" in org and "当场拒收" in org, \
+        "org-session.md 没写明这条提议由谁**当场**执法——那句话就只是装饰"
     english = (DOCS / "growth-subject.md").read_text(encoding="utf-8")
     assert "YYYYMMDD" in english, "英文公开文档缺命名规则"
 
@@ -503,3 +511,33 @@ def test_ledger_format_version_rule_is_qualified_and_backed_by_the_reader():
     s = Sprout.from_record(legacy)
     assert not hasattr(s, "long_task"), "读侧把退役键捡回来了：兼容变更不再是修订号"
     assert "long_task" not in s.as_record(), "写侧又开始序列化退役键"
+
+
+def test_frozen_capacity_rotation_cannot_outrun_the_requestion_window():
+    """G5 附带核对：容量轮转留的尾巴必须**远长于**重问窗——双语正本那句结论的机械根据。
+
+    正本（两种语言）写着「不存在一行还没被重问就被移出冻结区」。这句要成立，靠的是
+    `frozen_keep_tail`（轮转后仍留在冻结区的尾部行数）除以**最坏到达速率**所得的拍数覆盖，
+    必须大于 `frozen_requestion_ticks`。这里取 2 行/拍作最坏速率（本机 2026-09-19 拍 713
+    副本实测：近 50 拍 0.66 行/拍、近 100 拍 1.50 行/拍，2 是往上再留一档的保守界），
+    并要求覆盖到窗口的**两倍**以上。
+
+    反证内置：谁把 `frozen_keep_tail` 调小、或把 `frozen_requestion_ticks` 调大到跌破这条线，
+    正本那句「跑不到前面」当场失去依据 → 本测试 FAIL（不是改文档数字就能过关）。
+    """
+    from infinigrow.core.config import Settings
+
+    s = Settings()
+    worst_rows_per_tick = 2.0
+    covered_ticks = s.frozen_keep_tail / worst_rows_per_tick
+    assert covered_ticks >= 2 * s.frozen_requestion_ticks, (
+        "留尾只覆盖 %.0f 拍，重问窗 %d 拍——容量轮转会跑到重问窗前面，"
+        "双语正本那句结论作废（要改判据不许只改文档）"
+        % (covered_ticks, s.frozen_requestion_ticks))
+    assert s.frozen_keep_tail < s.frozen_cap, "留尾不低于上限＝轮转永远腾不出空间"
+    for doc, who in ((MECHANISM, "zh"), (MECHANISM_EN, "en")):
+        tail = s.frozen_keep_tail
+        assert ("{:,}".format(tail) in doc) or (str(tail) in doc), "%s 正本没写留尾行数" % who
+        assert str(s.frozen_requestion_ticks) in doc, "%s 正本没写重问窗拍数" % who
+    assert "跑不到重问窗前面" in MECHANISM, "zh 正本丢了这条结论"
+    assert "cannot outrun the re-ask window" in MECHANISM_EN, "英文公开文档丢了同一条结论"

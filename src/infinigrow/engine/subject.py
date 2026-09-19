@@ -50,6 +50,12 @@ MISSING = "缺失"
 #: 由 `tests/test_mechanism_docs.py` 锁定同源（改一处＝三处一起改）。
 JOURNAL_NAME_RX = re.compile(r"^\d{4}-\d{8}\.md$")
 
+#: 命名规格的**同一句原文**（G5 变异审计补的锚）：对象名闸的拒绝理由、执行者提示词
+#: （`prompts/tick.md`）、组织会话提示词（`prompts/org-session.md`）与主体文档都必须引用
+#: **这个串本身**——`tests/test_mechanism_docs.py` 拿它去比对，改一边就红。
+#: 之前只有「文档里出现这句话」的散字符串断言，把提示词那半句改坏也不会红＝装饰性判据。
+JOURNAL_NAME_SPEC = "<创建拍号4位>-<创建日期YYYYMMDD>.md"
+
 #: 主体的日志目录名（命名判据只管**这个目录的直接子文件**，见上方边界说明）
 JOURNAL_DIR = "journal"
 
@@ -319,8 +325,8 @@ def valid_subject_object(obj: str, allowed_objs: set[str],
         # 现实（执行者只会按自己的创建拍命名），白烧一拍；这里拒掉，理由点名约定本身。
         if (not is_dir and len(segments) == 2 and segments[0] == JOURNAL_DIR
                 and not valid_journal_name(segments[1])):
-            return False, ("journal 文件名必须叫 <创建拍号4位>-<创建日期YYYYMMDD>.md，"
-                           "收到 %r（K7/A8）" % segments[1])
+            return False, ("journal 文件名必须叫 %s，"
+                           "收到 %r（K7/A8）" % (JOURNAL_NAME_SPEC, segments[1]))
         return True, ("主体内合法新目录（可提议往它里面长一格）" if is_dir
                       else "主体内合法新相对路径（可提议创建）")
     return False, "不在可对账清单（findings 必须引用现实可查的对象）"

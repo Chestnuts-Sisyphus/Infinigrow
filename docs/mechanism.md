@@ -228,6 +228,13 @@ capability used?" cannot be, because no mechanical reading exists for it):
   `IG_FROZEN_REVIEW_EVERY` undiscoverable.
 - The frozen zone has a **capacity rule** of its own: past `frozen_cap` (default 5000) the
   oldest lines are *moved* to `state/archive/` (move-only, same discipline as ledger rotation).
+- **Capacity rotation cannot outrun the re-ask window** (measured 2026-09-19 at tick 713, on a
+  copy of the state root): 4,373 lines, 627 short of `frozen_cap`, arriving at 0.66 lines/tick
+  over the last 50 ticks and 1.50 over the last 100 (this machine runs ~10 minutes per tick) →
+  the cap is 418–950 ticks away. A rotation still keeps `frozen_keep_tail` = 4,000 lines, i.e.
+  **≥2,600 ticks** of history, while the 300-tick window needs only ~200–450 lines. So no line
+  can be moved out before it becomes re-askable — whatever gets archived has long since passed
+  the window (92.8% of the zone already has).
 
 **Domain saturation**: one unfinished sprout per "object domain × accountable quantity".
 
@@ -355,6 +362,15 @@ it only makes "which point was lost, and why" a mechanically readable fact.
 - Coverage is uneven across sprout origins: the solidify / read / act / principle edges all have
   samples, while every historical `lib*` row (179 of them) predates the trace-mention fix — that
   origin is still **no samples**.
+  - **Re-measurement ETA for that gap** (G7, snapshot at tick 713, 2026-09-19): 28 pending
+    questions, **all** of them blocked (28 by the re-ask cooldown, 17 also short of the idle
+    threshold); earliest re-askable tick is **892** (the blocking entry froze at tick 592, 179
+    ticks away) and this machine runs ~10 minutes per tick → due around the evening of
+    **2026-09-20**. What gets measured then is not "did one sprout appear" but whether the whole
+    chain **pending → sprout → pickup → closed/consumed** actually flows; re-run the two readings
+    `infinigrow status` (library channel verdict / re-ask gate) plus the `lib*` bucket of
+    `infinigrow redemption --json`. Until that tick passes this origin stays **no samples** —
+    neither 0 nor 1.00 may be reported for it.
 - The shape of the misses: 4 failures = 3 dropped on the executor side + 1 proposal went stale +
   **0 genuinely not done**, and **no row** has a predicted edge different from the actual edge.
   So this data answers "did the announced action really happen", not "was the wrong edge chosen" —

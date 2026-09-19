@@ -108,6 +108,31 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   the read side rather than the prose: `Sprout.from_record` tolerating a retired key and
   `as_record()` no longer writing it are asserted in the same test, so if the reader ever turns
   strict, the "compatible ＝ Patch" sentence loses its support and that test goes red.
+- **A mutation audit of the criteria, and the one that turned out decorative**
+  (`engine/subject.py` ＋ `tests/test_mechanism_docs.py` ＋ both `mechanism.md` originals ＋
+  README size figures). 23 pinned constants and sentences were each flipped to a wrong value in a
+  clean clone of HEAD (PYTHONPATH pointing inside the clone, so the working tree and the live tick
+  were never at risk) and the suite re-run. 22 went red. The survivor was the org-session prompt's
+  journal-naming clause: the guard compared a string literal *copying* the rule instead of the
+  rule itself, so marring that half-sentence kept the suite green — a decorative criterion. It was
+  rewritten to point at its real landing place: `subject.JOURNAL_NAME_SPEC` is now the single
+  constant the gate quotes in its refusal message, and the test asserts the refusal carries it and
+  that `org-session.md` names the enforcement ("对象名机械闸" / "当场拒收"), so mutating either
+  half now fails. Two findings recorded as measurement, not as fixes: the three quota defaults
+  (`journal_keep_files`, `frozen_cap`, `frozen_keep_tail`) did **not** survive a full-suite run —
+  they are caught by `test_every_numeric_knob_is_listed`; a narrow selector in round one had
+  reported them as decorative, which is the mistake of testing one view and calling it coverage.
+  Separately, the frozen-zone capacity was checked against the 300-tick re-ask window on a copy of
+  the state root (tick 713: 4,373 rows, 627 short of the cap, arriving 0.66–1.50 rows/tick →
+  418–950 ticks away, while a rotation keeps 4,000 rows ≥ 2,600 ticks of history): rotation cannot
+  outrun the window, written into both `mechanism.md` originals and pinned by arithmetic against
+  the constants, not against the prose.
+- **The `lib*` no-samples gap got a dated ETA** (both `mechanism.md` originals). At tick 713 the
+  state root reports 28 pending questions, all blocked (28 re-ask cooldown, 17 also short of the
+  idle threshold), earliest re-askable tick **892** — ~10 minutes per tick measured here, so due
+  the evening of 2026-09-20. What will be measured then is whether the whole
+  pending → sprout → pickup → closed/consumed chain flows, with the two named readings to re-run;
+  until then that origin stays reported as **no samples**, not as 0 or 1.00.
 
 ## v2.2.26 — the documents say what the code, the tree and the Release page actually do (2026-09-18)
 
