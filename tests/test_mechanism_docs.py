@@ -14,7 +14,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from infinigrow.engine.model import (EDGE_DIRECTION, EDGE_GROWTH_TEST, Edge, MATURITY_CAP,
-                                     MATURITY_CHAIN, SPROUTING_KINDS, DiffKind, SproutOrigin)
+                                     MATURITY_CHAIN, SPROUTING_KINDS, DiffKind, Sprout,
+                                     SproutOrigin)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DOCS = REPO_ROOT / "docs"
@@ -474,3 +475,31 @@ def test_evidence_miss_buckets_are_documented_and_refuted_claim_stays_refuted():
         encoding="utf-8")
     assert "TRACE_OUTPUT_HEADING" in src and "trace_write_paths" in src, \
         "判据函数或它读的那一段标题没了（正本还在引用它）"
+
+
+def test_ledger_format_version_rule_is_qualified_and_backed_by_the_reader():
+    """G4：主版本只罚**不兼容**的账本格式变更；兼容的那类是修订号——双语同源＋代码反证。
+
+    为什么要锁「不兼容」这个限定词：两份 `versioning.md` 原本把「账本格式变更」一律列成
+    主版本，而 S9 删 `long_task` 序列化键是按修订号（2.2.27）发布的——政策与既成事实打架。
+    定案口径：同一份账本在新旧代码下读出**不同判决**、或旧代码读新行会失败，才算主版本；
+    掉一个没人写的键／加一个可空键而旧行照读，算修订号。
+
+    反证（防这句变成装饰）：兼容性的机械根据在**读侧**——`Sprout.from_record` 忽略多余键、
+    `as_record()` 不再写退役键。哪天读侧改成严格校验（未知键即报错），「兼容格式变更＝修订号」
+    这句立刻失去依据，本测试当场 FAIL。
+    """
+    zh = (DOCS / "zh/versioning.md").read_text(encoding="utf-8")
+    en = (DOCS / "versioning.md").read_text(encoding="utf-8")
+    assert "不兼容" in zh, "zh 正本的主版本口径丢了「不兼容」限定（G4 定案）"
+    assert "incompatible" in en.lower(), "英文公开文档丢了同一条限定"
+    for doc, who in ((zh, "zh"), (en, "en")):
+        assert ("账本格式" in doc) or ("ledger format" in doc.lower()), "%s 正本不再提账本格式" % who
+        assert "S9" in doc and "long_task" in doc, "%s 正本没写先例（S9 删键按修订号走）" % who
+    # 机械根据：旧行带退役键照读、新行不写它
+    legacy = {"id": "s1", "obj": "主体/x", "dimension": "存在性", "pointer": "p",
+              "origin": SproutOrigin.DIFF.value, "created_tick": 1,
+              "long_task": True, "who_knows": 3}
+    s = Sprout.from_record(legacy)
+    assert not hasattr(s, "long_task"), "读侧把退役键捡回来了：兼容变更不再是修订号"
+    assert "long_task" not in s.as_record(), "写侧又开始序列化退役键"

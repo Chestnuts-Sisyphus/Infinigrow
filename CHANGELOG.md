@@ -98,6 +98,16 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   objects untouched, already-observable objects unaffected. The **writing** side stays a prompt
   convention plus a test guard — the engine does not rename what the executor produced, because
   rewriting reality to fit the expectation is the failure mode this whole mechanism exists to avoid.
+- **The version policy now says *incompatible* where it used to say "ledger format"**
+  (`docs/versioning.md` ＋ Chinese original ＋ `tests/test_mechanism_docs.py`). The rule listed any
+  ledger-format change as Major, while S9 deleted a serialized key and shipped it as a Patch
+  (`2.2.27`) — policy and fact disagreed, and the tag had to settle which one wins. Settled: Major
+  is for a change where the same ledger reads a different verdict under old vs new code, or old
+  code fails on a new row; dropping a key nobody wrote, or adding a nullable one, stays a Patch.
+  No version is reclassified here (`2.2.27` keeps its number), and the criterion is pinned against
+  the read side rather than the prose: `Sprout.from_record` tolerating a retired key and
+  `as_record()` no longer writing it are asserted in the same test, so if the reader ever turns
+  strict, the "compatible ＝ Patch" sentence loses its support and that test goes red.
 
 ## v2.2.26 — the documents say what the code, the tree and the Release page actually do (2026-09-18)
 

@@ -24,10 +24,18 @@ coming back).
 ## Version numbers
 
 - **Major** (`x.0.0`): the test layer changes — semantics of edges, maturity chain, difference
-  kinds, sprout sources or ledger formats. That is a change of premises: `docs/mechanism.md`,
-  the code and the prompts change together, and the sync check rejects a one-sided edit.
+  kinds, sprout sources, or an **incompatible** change of ledger format (the same ledger reads a
+  different verdict under old vs new code, or old code fails to read a new row). That is a change
+  of premises: `docs/mechanism.md`, the code and the prompts change together, and the sync check
+  rejects a one-sided edit.
 - **Minor** (`2.x.0`): new capability, unchanged tests (a new rule, a new accounting view).
-- **Patch** (`2.0.x`): fixes, documentation, tests.
+- **Patch** (`2.0.x`): fixes, documentation, tests — and a **compatible** change of ledger
+  format: drop a key, add a nullable one, as long as old rows still read, a missing key reads as
+  `None`, and unknown keys are ignored. Precedent: S9 deleted the serialized `long_task` key under
+  `2.2.27` (measured at tick 647: 4,370 ledger rows carried the key, 0 set to true, and
+  `Sprout.from_record` ignores leftovers, so no ledger was rewritten) — it changed no verdict, so
+  it was not Major. The criterion sits on the read side: `as_record()` stops writing a retired key
+  and `from_record` tolerates the residue.
 
 v2 starts at `2.0.0`; there are no `1.x` releases after v1 was sealed. The single source of the
 version is `__version__` in `src/infinigrow/__init__.py` together with `version` in
