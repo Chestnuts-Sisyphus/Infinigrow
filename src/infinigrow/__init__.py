@@ -44,7 +44,7 @@ from .garden.gardener import GardenerReport, run_gardener
 from .rules.static_scan import scan
 from .scheduler.triggers import should_run_org_session
 
-__version__ = "2.2.27"
+__version__ = "2.2.28"
 __codename__ = "Infinigrow"
 
 __all__ = [

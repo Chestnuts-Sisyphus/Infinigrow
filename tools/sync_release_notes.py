@@ -81,6 +81,7 @@ TITLES = {
     # 分界线以后这一列只是**兜底镜像**（`plan()` 靠它枚举版本）：真正应用的标题
     # 由 `changelog_title()` 从 CHANGELOG 小节标题原文推导，**带着日期**。
     "2.2.27": "v2.2.27 — the five open judgements are closed, and one correction from last round was wrong",
+    "2.2.28": "v2.2.28 — attribution reads the executor's exit code, and two published verdicts are corrected",
 }
 
 
