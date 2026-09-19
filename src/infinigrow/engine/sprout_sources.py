@@ -120,6 +120,10 @@ APP_EVIDENCE_DIR = "app"
 #: 固化边的**维度名**（cap 芽的 dimension）——判别的另一个锚（芽源之外）。
 APP_EDGE_DIMENSION = "应用面"
 
+#: 证据件**缺失归因**的三类桶名（G2）。文档（双语 `mechanism.md`）与 `status`／报告同一套名字，
+#: 由 `tests/test_mechanism_docs.py` 钉住：改桶名而不同步文案，测试即红。
+EVIDENCE_MISS_BUCKETS = ("自述已写未落地", "命名漂移", "未自述写入")
+
 
 def app_evidence_path(obj: str, tick: int) -> str:
     """证据件相对路径的**纯函数**：`app/<拍号4位>-<对象名>.md`（对象名按 Q2 约定清洗）。
@@ -159,17 +163,31 @@ def app_evidence_relpath(sprout: Sprout, tick: int) -> str:
     return app_evidence_path(str(sprout.obj or ""), tick)
 
 
-def app_evidence_compliance(rows: Sequence[dict], subject_root, tick_from: int = 0) -> dict:
+def app_evidence_compliance(rows: Sequence[dict], subject_root, tick_from: int = 0,
+                            traces_dir=None) -> dict:
     """**证据件合规率**（R8/A9）：窗口内 cap 领做行里，真有证据件的比例。
 
     此前只能人肉数 `app/` 目录（且对不上账本行）；这条读数把「应有证据件的行」与
     「证据件真实存在」在**同一个路径函数**（`app_evidence_path`）上对账：
     存在＝这一手应用真的落地了（与 Q2 的证据边同一口径；只按存在性判，不看内容——
     内容质量归语义层）。缺失样例最多列 5 份，报告可复核。
+
+    **缺失归因（G2）**：给了 `traces_dir` 就按该拍留痕的**自述动作**把缺失分成三类——
+    「自述已写未落地」（自述写了约定路径、文件却不在）／「命名漂移」（自述写到别的名字，
+    连拍号差 1 也算，必须被抓住而不是混进「没做」）／「未自述写入」（没给目录、没留痕、
+    或那一拍根本没自述写 `app/`）。来历是活体取证：拍 676 与 679 的题面逐字给了约定路径、
+    留痕里执行者也自述写了**同一个路径**、rc=0，主体里却没有这份文件——那既不是命名问题
+    也不是「没做」，而是动作没落地。没有这一类读数时，「命名错配把假打脸送进分母」只能靠
+    人肉读留痕，而上一次就是这么读错的。归因**只解释缺失，不改分子分母**（兑现率算法不动）。
     """
+    from .reconcile import trace_write_paths
+
     base = Path(subject_root)
     total = present = 0
     missing: list[str] = []
+    attr: dict[str, int] = {}
+    drift: list[str] = []
+    prefix = APP_EVIDENCE_DIR + "/"
     for rec in rows:
         if not str(rec.get("sprout_id") or "").startswith("cap"):
             continue
@@ -183,10 +201,26 @@ def app_evidence_compliance(rows: Sequence[dict], subject_root, tick_from: int =
         total += 1
         if (base / rel).is_file():
             present += 1
+            continue
+        missing.append(rel)
+        if traces_dir is None:
+            continue
+        if not attr:
+            attr = {name: 0 for name in EVIDENCE_MISS_BUCKETS}
+        declared = trace_write_paths(traces_dir, t)
+        if rel in declared:
+            attr["自述已写未落地"] += 1
+            continue
+        other = [d for d in declared if d.startswith(prefix)]
+        if other:
+            attr["命名漂移"] += 1
+            if len(drift) < 5:
+                drift.append("应有 %s ← 自述写 %s" % (rel, other[0]))
         else:
-            missing.append(rel)
+            attr["未自述写入"] += 1
     return {"窗口起拍": tick_from, "cap 领做": total, "证据件存在": present,
-            "合规率": (present / total) if total else None, "缺失样例": missing[:5]}
+            "合规率": (present / total) if total else None, "缺失样例": missing[:5],
+            "缺失归因": attr, "命名漂移样例": drift}
 
 
 def frozen_requestion_eta(entries, frozen_rows: Sequence[dict], active_objs: Iterable[str],

@@ -434,3 +434,28 @@ def test_rotated_archive_out_of_surface_is_documented_in_all_five_places():
     assert "是错的" in rot, "rotate_journal 没标注那句被实测推翻的旧说法"
     assert "轮转把最旧的移走不会影响" not in rot, "旧的陈述句式回来了：轮转会影响可见性"
     assert "SUBJECT_ARCHIVE_DIR" in rot, "轮转侧没指向观测面的执法常量"
+
+
+def test_evidence_miss_buckets_are_documented_and_refuted_claim_stays_refuted():
+    """缺失归因三类桶名（G2）双语同源；那句被证伪的「命名错配」说法不许回流。
+
+    为什么锁这条：桶名是 `status`／对账报告／双语正本共用的**读数名**，改一侧不改另一侧
+    就是漂移。同一节还写下了一次**证伪**（近 30 次 cap 领做里命名漂移 0），所以正本必须
+    把它标成被推翻的猜测，不能被后人在没有证据的情况下改回「命名错配导致假打脸」。
+    """
+    from infinigrow.engine.sprout_sources import EVIDENCE_MISS_BUCKETS
+
+    assert len(EVIDENCE_MISS_BUCKETS) == 3
+    zh = (DOCS / "zh/mechanism.md").read_text(encoding="utf-8")
+    en = (DOCS / "mechanism.md").read_text(encoding="utf-8")
+    for name in EVIDENCE_MISS_BUCKETS:
+        assert name in zh, "zh 正本缺桶名「%s」" % name
+        assert name in en, "英文正本缺桶名「%s」（读数名两边同字）" % name
+    for doc, who in ((zh, "zh"), (en, "en")):
+        assert "trace_write_paths" in doc, "%s 正本没指向只读输出段的判据函数" % who
+        assert ("证伪" in doc) or ("推翻" in doc) or ("refuted" in doc), \
+            "%s 正本没写明那次猜测被证伪" % who
+    src = (REPO_ROOT / "src" / "infinigrow" / "engine" / "reconcile.py").read_text(
+        encoding="utf-8")
+    assert "TRACE_OUTPUT_HEADING" in src and "trace_write_paths" in src, \
+        "判据函数或它读的那一段标题没了（正本还在引用它）"

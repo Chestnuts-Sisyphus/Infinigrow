@@ -488,9 +488,16 @@ def _cmd_status(settings) -> int:
     subject_path = settings.subject_path()
     if subject_path.is_dir():
         comp = app_evidence_compliance(read_jsonl(layout.outcome_ledger),
-                                       subject_path, tick_now - 30)
+                                       subject_path, tick_now - 30,
+                                       traces_dir=layout.traces_dir)
         if comp["cap 领做"]:
-            suffix = ("（缺失：%s）" % "、".join(comp["缺失样例"])) if comp["缺失样例"] else ""
+            parts = []
+            if comp["缺失样例"]:
+                parts.append("缺失：%s" % "、".join(comp["缺失样例"]))
+            if comp["缺失归因"]:
+                parts.append("归因：%s" % "／".join("%s %d" % (k, v)
+                                                    for k, v in comp["缺失归因"].items()))
+            suffix = ("（%s）" % "；".join(parts)) if parts else ""
             print("  证据件合规率（近 30 拍 cap 领做）：%d/%d = %.2f%s"
                   % (comp["证据件存在"], comp["cap 领做"], comp["合规率"], suffix))
 

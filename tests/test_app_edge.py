@@ -166,3 +166,75 @@ def test_status_shows_the_windowed_cap_edge_reading(tmp_path, capsys):
     assert rc_ == 0
     assert "固化边（应用面，未接证据边的行）：2 条累计" in out     # 两条不可对账的旧行
     assert "最近 30 拍 cap 领做 2 次，可对账 1（不可对账 1）" in out
+
+
+# --------------------------------------------------------- G2：缺失证据件的机械归因
+
+def _trace(traces_dir, tick, declared, prompt_paths=()):
+    """按 `executor.write_trace` 的版式造一份留痕：提示词段＋输出段（含 actions JSON）。"""
+    traces_dir.mkdir(parents=True, exist_ok=True)
+    prompt = "\n".join("约定路径（逐字照用）：%s" % p for p in prompt_paths) or "（题面）"
+    output = json.dumps({"say": "本拍动作", "actions": [
+        {"op": "write_file", "path": p, "content": "x"} for p in declared]},
+        ensure_ascii=False)
+    body = ["# 留痕 · tick · 拍 %d" % tick, "", "## 提示词（原样）", "", "```text", prompt,
+            "```", "", "## 输出（原样）", "", "```text", output, "```"]
+    (traces_dir / ("tick-%05d.md" % tick)).write_text("\n".join(body), encoding="utf-8")
+
+
+def _cap_row(tick=500, obj="主体/journal/0100-20260919.md"):
+    return {"sprout_id": "cap0500-001-x", "tick": tick, "obj": obj, "sample": True,
+            "verifiable": True, "redeemed": False, "predicted_edge": "固化",
+            "actual_edge": "固化"}
+
+
+def test_trace_write_paths_reads_the_output_not_the_prompt(tmp_path):
+    """自述路径只认**输出段**：题面里引擎自己逐字写过那个路径，扫全文＝把引擎的话当自述。"""
+    from infinigrow.engine.reconcile import trace_write_paths
+    traces = tmp_path / "traces"
+    _trace(traces, 500, declared=[], prompt_paths=["app/0500-journal_0100-20260919.md"])
+    assert trace_write_paths(traces, 500) == []                 # 只有题面提过 → 没自述
+    _trace(traces, 501, declared=["app/0501-journal_0100-20260919.md"])
+    assert trace_write_paths(traces, 501) == ["app/0501-journal_0100-20260919.md"]
+    assert trace_write_paths(traces, 999) == []                 # 缺留痕 → 不猜
+    assert trace_write_paths(None, 500) == []                   # 没给目录 → 不猜
+
+
+def test_missing_evidence_is_attributed_by_what_the_executor_declared(tmp_path):
+    """三类归因：**自述已写未落地**／**命名漂移**／**未自述写入**（拍号差 1 归第二类）。
+
+    为什么要有这三类（活体取证，拍 676 与拍 679）：题面逐字给了约定路径、留痕输出里
+    执行者也自述写了**同一个路径**、rc=0，可主体里就是没有这份文件——这种打脸既不是
+    「命名对不上」也不是「没做」，而是**动作没落地**。此前它和真正的「没做」共用一个桶，
+    于是「命名错配把假打脸送进分母」这种判断只能靠人肉读留痕（且上次读错了）。
+    """
+    from infinigrow.engine.sprout_sources import app_evidence_compliance
+    subject = tmp_path / "subject"
+    (subject / "app").mkdir(parents=True)
+    traces = tmp_path / "traces"
+    # 500：自述写了约定路径，但文件不在 → 自述已写未落地
+    _trace(traces, 500, declared=["app/0500-journal_0100-20260919.md"])
+    # 501：自述写到**另一个名字**（拍号差 1）→ 命名漂移，必须被抓住
+    _trace(traces, 501, declared=["app/0502-journal_0100-20260919.md"])
+    rows = [_cap_row(500), _cap_row(501), _cap_row(502)]        # 502：没有留痕
+    comp = app_evidence_compliance(rows, subject, tick_from=500, traces_dir=traces)
+    assert comp["cap 领做"] == 3 and comp["证据件存在"] == 0
+    attr = comp["缺失归因"]
+    assert attr["自述已写未落地"] == 1 and attr["命名漂移"] == 1 and attr["未自述写入"] == 1
+    assert any("0501-" in s and "0502-" in s for s in comp["命名漂移样例"]), comp["命名漂移样例"]
+    # 不给留痕目录 → 不猜归因（旧调用方口径不变）
+    plain = app_evidence_compliance(rows, subject, tick_from=500)
+    assert plain["cap 领做"] == 3 and plain["缺失归因"] == {}
+
+
+def test_written_evidence_is_never_counted_as_missing(tmp_path):
+    """反证：文件真在 → 不进缺失、也不进任何归因桶（归因只解释缺失，不重算分子）。"""
+    from infinigrow.engine.sprout_sources import app_evidence_compliance
+    subject = tmp_path / "subject"
+    (subject / "app").mkdir(parents=True)
+    (subject / "app" / "0500-journal_0100-20260919.md").write_text("证据", encoding="utf-8")
+    traces = tmp_path / "traces"
+    _trace(traces, 500, declared=["app/0500-journal_0100-20260919.md"])
+    comp = app_evidence_compliance([_cap_row(500)], subject, tick_from=500, traces_dir=traces)
+    assert comp["证据件存在"] == 1 and comp["合规率"] == 1.0
+    assert comp["缺失归因"] == {} and comp["命名漂移样例"] == []

@@ -297,6 +297,24 @@ that tick's prompt, and reconciles the file's **existence**:
 - a tick that leaves no evidence file is judged "readable but absent" — **not done**, not
   "unreadable".
 
+**A missing evidence file gets attributed, not lumped together (settled 2026-09-19).** The
+compliance line in `infinigrow status` and in the reconciliation report carries a **missing-file
+attribution** with three buckets — 自述已写未落地 (*declared but never landed*: that tick's trace
+output says the executor wrote *exactly* the agreed path, and the file is not there), 命名漂移
+(*naming drift*: it declared a *different* name — a tick off by one counts, and must be caught),
+and 未自述写入 (*never declared*: no trace, or no `app/` write claimed at all). The judgement reads
+only the trace's **output section** (`reconcile.trace_write_paths`): the agreed path is already
+written verbatim into the prompt by the engine, so scanning the whole file would let the engine
+testify for itself. **This measurement refuted a suspicion**: that a naming mismatch was feeding
+false failures into the denominator (predicted `app/0676-…`, present `0677-app_0637-…`). It does
+not hold — every one of the 174 files in the subject's `app/` is reproducible from some cap row's
+(object, tick) through the same path function (**0 orphans**), and over the last 30 / 40 / 60 cap
+leads the attribution reads "declared-but-absent 2 / **naming drift 0** / never declared 0". The
+two rows (ticks 676, 679) declared the *same* path as their prompt, returned rc=0, and still
+produced no file: an action that did not land (executor-side loss, a different line of work).
+Attribution **changes neither numerator nor denominator** — the redemption algorithm is untouched;
+it only makes "which point was lost, and why" a mechanically readable fact.
+
 **The read edge and the availability edge are now accountable too, through a "trace mention"**
 (R1/A1, A2):
 

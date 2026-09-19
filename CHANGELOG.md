@@ -69,6 +69,23 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   ordinary content. Re-running the same curve: archived slots 0 of 20 across 14 rounds, window head
   back to the newest journal entry. **The observation and capacity limits themselves are unchanged**
   (10 directories / 20 files / 200 entries).
+- **A missing evidence file is now attributed, and last round's naming theory is refuted**
+  (`engine/reconcile.py`·`engine/sprout_sources.py` ＋ `cli.py`·`engine/tick.py` ＋
+  `docs/mechanism.md` and its Chinese original ＋ `tests/test_app_edge.py`·`tests/test_mechanism_docs.py`).
+  The theory on the table was "the predicted name and the written name disagree, so false failures
+  enter the denominator" (predicted `app/0676-…`, present `0677-app_0637-…`). Reading it row by row
+  here says it does not hold: all 174 files in the subject's `app/` are reproducible from some cap
+  row's (object, tick) through the engine's own path function — **0 orphans** — and the two flagged
+  rows (ticks 676, 679) declared in their traces *exactly* the path the engine had written verbatim
+  into the prompt, returned rc=0, and still produced no file anywhere on disk. `0677-app_0637-…` is
+  another tick's own evidence file, mis-paired with this one. What was actually missing was a
+  reading that separates the causes, so `status` and the reconciliation report now carry one:
+  自述已写未落地 (declared the agreed path, file absent) / 命名漂移 (declared a different name —
+  a tick off by one is caught here, not hidden) / 未自述写入 (no trace, or no `app/` write claimed).
+  It reads only the trace's output section: the prompt already quotes the path, and scanning the
+  whole file would have the engine testify for itself. Measured over the last 30 / 40 / 60 cap
+  leads: 2 / 0 / 0 across the three buckets. **The redemption algorithm, its numerator and its
+  denominator are untouched** — this only says which point was lost and why.
 
 ## v2.2.26 — the documents say what the code, the tree and the Release page actually do (2026-09-18)
 

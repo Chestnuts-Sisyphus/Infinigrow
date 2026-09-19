@@ -759,10 +759,17 @@ def _redemption_lines(layout: StateLayout,
     if subject_root is not None and Path(subject_root).is_dir():
         from .sprout_sources import app_evidence_compliance
         comp = app_evidence_compliance(read_jsonl(layout.outcome_ledger),
-                                       Path(subject_root), tick_now - 30)
+                                       Path(subject_root), tick_now - 30,
+                                       traces_dir=layout.traces_dir)
         if comp["cap 领做"]:
             rate = comp["合规率"]
-            suffix = ("（缺失：%s）" % "、".join(comp["缺失样例"])) if comp["缺失样例"] else ""
+            parts = []
+            if comp["缺失样例"]:
+                parts.append("缺失：%s" % "、".join(comp["缺失样例"]))
+            if comp["缺失归因"]:
+                parts.append("归因：%s" % "／".join("%s %d" % (k, v)
+                                                    for k, v in comp["缺失归因"].items()))
+            suffix = ("（%s）" % "；".join(parts)) if parts else ""
             lines.append("- 证据件合规率（近 30 拍 cap 领做）：%d/%d = %.2f%s"
                          % (comp["证据件存在"], comp["cap 领做"], rate, suffix))
     # R2/N69：执行者侧损耗（与打脸归因同一字面标记；修复未授权，先让损耗长期可见）。

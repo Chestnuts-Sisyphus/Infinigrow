@@ -16,6 +16,8 @@
 """
 from __future__ import annotations
 
+import re
+
 from pathlib import Path
 from typing import Iterable, Optional, Sequence
 
@@ -218,6 +220,33 @@ STALE_LEAD_TICKS = 30
 #: 引擎这一拍如实记打脸——那一条打脸的**真实原因**既不是「提议过期」也不是「没做」，
 #: 而是**动作没落地**。按「提议过期」算它，就是把执行者侧的解析故障记成提议的账。
 EXECUTOR_UNPARSED_MARKS = ("留痕说明：", "不是 JSON")
+
+#: 留痕里「执行者输出」那一段的标题（`executor.write_trace` 的固定版式）
+TRACE_OUTPUT_HEADING = "## 输出（原样）"
+
+#: 自述动作的机械形态：适配器解析出的 `{"op": ..., "path": ...}`
+_TRACE_ACTION_RX = re.compile(r'"op"\s*:\s*"[^"]*"\s*,\s*"path"\s*:\s*"([^"]+)"')
+
+
+def trace_write_paths(traces_dir, tick) -> list[str]:
+    """本拍留痕**输出段**里执行者自述的写入路径（缺留痕/没给目录 → 空表，不猜）。
+
+    为什么只读输出段：约定路径本来就被引擎**逐字写进题面**，扫全文会把引擎自己的话
+    当成执行者的自述——那等于用同一个字符串给自己作证，归因就失去意义。
+    留痕是工作文件（同拍重跑覆盖），所以它说的就是**最后那一次**动作。
+    """
+    if traces_dir is None:
+        return []
+    path = Path(str(traces_dir)) / ("tick-%05d.md" % int(tick))
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return []
+    start = text.find(TRACE_OUTPUT_HEADING)
+    if start < 0:
+        return []
+    return [m.group(1).replace("\\", "/").lstrip("./")
+            for m in _TRACE_ACTION_RX.finditer(text[start:])]
 
 
 def sprout_prefix(sprout_id) -> str:
