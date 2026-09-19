@@ -117,8 +117,12 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   rule itself, so marring that half-sentence kept the suite green — a decorative criterion. It was
   rewritten to point at its real landing place: `subject.JOURNAL_NAME_SPEC` is now the single
   constant the gate quotes in its refusal message, and the test asserts the refusal carries it and
-  that `org-session.md` names the enforcement ("对象名机械闸" / "当场拒收"), so mutating either
-  half now fails. Two findings recorded as measurement, not as fixes: the three quota defaults
+  that `org-session.md` names the enforcement ("对象名机械闸" / "当场拒收"). Re-audited on the fixed
+  HEAD: dropping "当场拒收" from the prompt fails 1 test, stopping the gate from quoting the
+  constant fails 3, breaking the constant itself fails 3. One mutation still passes by design —
+  swapping the sentence's connective words for synonyms — because what is pinned is the spec string,
+  the gate's citation of it, and the named enforcer, not that sentence's phrasing.
+  Two findings recorded as measurement, not as fixes: the three quota defaults
   (`journal_keep_files`, `frozen_cap`, `frozen_keep_tail`) did **not** survive a full-suite run —
   they are caught by `test_every_numeric_knob_is_listed`; a narrow selector in round one had
   reported them as decorative, which is the mistake of testing one view and calling it coverage.
