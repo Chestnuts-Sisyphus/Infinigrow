@@ -277,3 +277,37 @@ def test_gardener_rotates_subject_journal(tmp_path):
     kept = list(journal.glob("*.md"))
     assert len(kept) == 10
     assert any("journal 轮转" in n for n in report.notes)
+
+
+def test_rotated_journal_entries_leave_the_growth_surface(tmp_path):
+    """G1 端到端：轮转**之后**归档件不再进生长面（副本实测的夹具版）。
+
+    改前实测（临时目录里的主体副本，`IG_JOURNAL_KEEP_FILES=200`）：跨过上限后每次轮转
+    使观测面 20 格里归档件 +1（轮 12/13/14＝1/2/3 格），窗口首格恒为归档件、主体文件数
+    单调不降（363→377）——搬走的内容还占着生长面的名额，轮转等于没搬。
+    """
+    from infinigrow.engine import subject as subject_mod
+    settings, layout = _layout(tmp_path)
+    subject = settings.subject_path()
+    journal = subject / "journal"
+    journal.mkdir(parents=True, exist_ok=True)
+    for i in range(15):
+        (journal / ("%04d-20260915.md" % i)).write_text("x", encoding="utf-8")
+    before = subject_mod.subject_count(subject)
+    assert before == 15
+
+    from infinigrow.core.config import load_settings as _ls
+    from infinigrow.garden.gardener import run_gardener
+    s2 = _ls(env={}, state_root=str(tmp_path / "state"), repo_root=str(REPO_ROOT),
+             subject_root=str(subject), journal_keep_files=10)
+    run_gardener(settings=s2, write_alert=False)
+
+    names = [f.name for f in subject_mod.subject_files(subject)]
+    assert len(names) == 10 and all(n.startswith("journal/") for n in names), names
+    assert [d.name for d in subject_mod.subject_dirs(subject)] == ["journal"]
+    assert subject_mod.subject_count(subject) == 10          # 轮转看得见：面缩了
+    # 只移动不删：归档件还在盘上，只是不再是可对账对象
+    archived = list((subject / "archive" / "journal").glob("*"))
+    assert len(archived) == 5
+    allowed = {o.obj for o in subject_mod.observe_subject(subject)}
+    assert not any(o.startswith("主体/archive") for o in allowed), allowed

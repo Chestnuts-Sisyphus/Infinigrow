@@ -52,6 +52,23 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   "the LLM call succeeded" would leave a broken executor being retried every tick, since ①②③④ all
   pass again when nothing was recorded. The regression is now pinned by behaviour, not prose: a
   case runs two executor-less ticks and asserts the ledger does not exist.
+- **Journal rotation now moves content out of the growth surface** (`engine/subject.py` ＋
+  `ledger/rotation.py` ＋ `docs/growth-subject.md` and its Chinese original ＋
+  `prompts/tick.md`·`prompts/org-session.md` ＋ `tests/test_subject.py`·`tests/test_rotation.py`).
+  `rotate_journal` moved `journal/` overflow into `<subject>/archive/journal/`, and the observation
+  surface went on looking at it: `move_file` writes the destination before unlinking the source, so
+  an archived entry carries the mtime of *the move* — newer than whatever is still growing. Measured
+  on a copy of the live subject at `journal_keep_files=200`, adding one entry per round and running
+  the gardener: past the limit every rotation took one more slot of the 20-file window (rounds
+  12/13/14 = 1/2/3), the first slot was always `archive/journal/…md.<stamp>`, `archive/` and
+  `archive/journal/` became directory objects that could be proposed, and the subject's file count
+  never dropped (363→377). Rotation had moved nothing out of sight, while `rotate_journal`'s own
+  docstring claimed the opposite ("does not affect the visibility of new content").
+  `SUBJECT_ARCHIVE_DIR` excludes the subject root's `archive/` from all three readings and from the
+  object-name gate, proposals included; the rule is scoped to the root, so `journal/archive/` stays
+  ordinary content. Re-running the same curve: archived slots 0 of 20 across 14 rounds, window head
+  back to the newest journal entry. **The observation and capacity limits themselves are unchanged**
+  (10 directories / 20 files / 200 entries).
 
 ## v2.2.26 — the documents say what the code, the tree and the Release page actually do (2026-09-18)
 

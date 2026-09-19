@@ -404,3 +404,33 @@ def test_subject_capacity_split_is_documented_and_no_stale_enumeration():
         for p in (REPO_ROOT / folder).rglob("*.py" if folder == "src" else "*.md"):
             assert stale not in p.read_text(encoding="utf-8"), \
                 "库外现状又写成了代码里的事实：%s" % p.relative_to(REPO_ROOT).as_posix()
+
+
+def test_rotated_archive_out_of_surface_is_documented_in_all_five_places():
+    """G1 定案「主体根的 `archive/` 不入生长面」五处同改，且旧措辞不许回流。
+
+    为什么锁这条：轮转把 journal 旧篇搬进 `<主体根>/archive/journal/`，而搬运＝写新件，
+    归档件因此拿到全新 mtime——在「mtime 最新 20」的窗口里排到最前。旧文档与
+    `rotate_journal` 的 docstring 都写着「不影响新内容的可见性」，实测被推翻。
+    定案句式由常量拼出（换归档目录名就找不到），并拒绝那句旧措辞以任何形式回来。
+    """
+    from infinigrow.engine.subject import SUBJECT_ARCHIVE_DIR
+
+    prompt_line = "主体根的 `%s/` 是**轮转归档区，不入生长面**" % SUBJECT_ARCHIVE_DIR
+    zh_verdict = "所以 `%s/` **三处都不算**" % SUBJECT_ARCHIVE_DIR
+    en_verdict = "So `%s/` is excluded in" % SUBJECT_ARCHIVE_DIR
+    docs = (DOCS / "zh/growth-subject.md").read_text(encoding="utf-8")
+    assert zh_verdict in docs, "zh 正本的定案句式变了（或常量名换了没同步）"
+    assert "要到 `journal` 首次轮转才建" not in docs, \
+        "zh 正本还用「archive/ 要到首次轮转才建」当目录名额的理由"
+    en = (DOCS / "growth-subject.md").read_text(encoding="utf-8")
+    assert en_verdict in en, "英文正本的定案句式变了（或常量名换了没同步）"
+    assert "Rotated content really leaves the growth surface" in en
+    for name in ("tick.md", "org-session.md"):
+        pr = (REPO_ROOT / "prompts" / name).read_text(encoding="utf-8")
+        assert prompt_line in pr, "prompts/%s 没写这条归档边界（或常量名换了）" % name
+    rot = (REPO_ROOT / "src" / "infinigrow" / "ledger" / "rotation.py"
+           ).read_text(encoding="utf-8")
+    assert "是错的" in rot, "rotate_journal 没标注那句被实测推翻的旧说法"
+    assert "轮转把最旧的移走不会影响" not in rot, "旧的陈述句式回来了：轮转会影响可见性"
+    assert "SUBJECT_ARCHIVE_DIR" in rot, "轮转侧没指向观测面的执法常量"

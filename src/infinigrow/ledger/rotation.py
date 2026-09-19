@@ -274,8 +274,14 @@ def rotate_journal(subject_root: Path, keep_files: int = 200,
       `archive/journal/`（不混进引擎状态根——那是另一套账）。
     - 只移动不删；按**文件名字典序**（`<创建拍号4位>-<日期>.md`，拍号小的＝更旧）
       移走最旧的，保留最近 N 篇。
-    - 与 K2 的关系：观测按 mtime 取最新 N 个文件——轮转把最旧的移走不会影响
-      新内容的可见性；归档后 `journal/` 里的仍是「最新的那一批」。
+    - 与 K2 的关系（G1 更正，旧措辞已被实测推翻）：观测面按 mtime 取最新 N 个，而
+      `move_file` 是「写新件＋移除源」——归档件拿到的是**搬运那一刻**的 mtime，比正在长的
+      内容更「新」。副本实测（`IG_JOURNAL_KEEP_FILES=200` 逐篇新增并跑园丁）：跨过上限后
+      每次轮转使 20 格窗口里归档件 +1、窗口首格恒为 `archive/journal/…md.<stamp>`，
+      主体文件数也不降（363→377）——轮转等于没搬走。
+      所以**主体根的 `archive/` 不入生长面**：逐文件窗口、目录对象、文件数/总字节数三处
+      都排除它，对象名闸连 `for_proposal` 也不放行（见 `engine/subject.py` 的
+      `SUBJECT_ARCHIVE_DIR`）。原先那句「不影响新内容的可见性」是错的，别再写回去。
     - 归档名带时间戳（同秒重跑换后缀，不覆盖）。
     """
     journal = subject_root / "journal"

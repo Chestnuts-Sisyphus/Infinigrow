@@ -79,6 +79,28 @@ def valid_journal_name(name: str) -> bool:
 SKIP_DIRS = {".git", "__pycache__", ".pytest_cache", ".ruff_cache", ".venv", "venv",
              "node_modules", ".mypy_cache"}
 
+#: 主体根的**轮转归档子树**（K6/G1）：园丁把 `journal/` 超上限的旧篇搬进
+#: `<主体根>/archive/journal/`（只移动不删）。这片子树**不属于生长面**：归档件由
+#: `store.move_file` 写出来（写新件＋移除源），mtime 是**搬运那一刻**的，比正在长的
+#: 内容更新，一旦入观测面就会在「mtime 最新 20」里排到最前，把真内容挤出名额。
+#: 实测（主体副本，`IG_JOURNAL_KEEP_FILES=200`）：跨过上限后每次轮转占格 +1，
+#: 窗口首格恒为 `archive/journal/…md.<stamp>`，主体文件数还不降——等于没搬走。
+#: 所以逐文件窗口、目录对象、文件数/总字节数三处都不算它，对象名闸也不放行
+#: （连 `for_proposal` 都不行：不许提议往盲区里长一格）。
+#: 只认**主体根下**那一片：`journal/archive/` 是内容侧的同名目录，照旧可观测。
+SUBJECT_ARCHIVE_DIR = "archive"
+
+
+def is_archived(rel_parts: Iterable[str]) -> bool:
+    """相对路径（已切成段）是否落在主体根的轮转归档子树里。"""
+    parts = tuple(rel_parts)
+    return bool(parts) and parts[0] == SUBJECT_ARCHIVE_DIR
+
+
+def _in_growth_surface(rel_parts: tuple) -> bool:
+    """这个相对路径算不算生长面：既不是工具缓存目录，也不是主体的归档子树。"""
+    return not is_archived(rel_parts) and not any(p in SKIP_DIRS for p in rel_parts)
+
 
 @dataclass(frozen=True)
 class SubjectFile:
@@ -150,7 +172,7 @@ def subject_files(root: Path, limit: int = SUBJECT_FILE_LIMIT) -> list[SubjectFi
         if not path.is_file():
             continue
         rel_parts = path.relative_to(base).parts
-        if any(part in SKIP_DIRS for part in rel_parts):
+        if not _in_growth_surface(rel_parts):
             continue
         try:
             stat = path.stat()
@@ -195,7 +217,7 @@ def subject_dirs(root: Path, limit: int = SUBJECT_DIR_LIMIT) -> list[SubjectDir]
         if not path.is_dir():
             continue
         rel_parts = path.relative_to(base).parts
-        if any(part in SKIP_DIRS for part in rel_parts):
+        if not _in_growth_surface(rel_parts):
             continue
         out.append(SubjectDir(name="/".join(rel_parts),
                               files=_dir_file_count(path, base)))
@@ -204,19 +226,19 @@ def subject_dirs(root: Path, limit: int = SUBJECT_DIR_LIMIT) -> list[SubjectDir]
 
 
 def _dir_file_count(path: Path, base: Path) -> int:
-    """某个目录下的文件数（递归，跳过 SKIP_DIRS；与 `_subject_stats` 同一口径）。"""
+    """某个目录下的文件数（递归，只算生长面；与 `_subject_stats` 同一口径）。"""
     count = 0
     for sub in path.rglob("*"):
         if not sub.is_file():
             continue
-        if any(part in SKIP_DIRS for part in sub.relative_to(base).parts):
+        if not _in_growth_surface(sub.relative_to(base).parts):
             continue
         count += 1
     return count
 
 
 def _subject_stats(root: Path) -> tuple[int, int]:
-    """一次遍历算「文件总数＋总字节数」（只读；跳过 SKIP_DIRS）。"""
+    """一次遍历算「文件总数＋总字节数」（只读；只算生长面，跳过缓存目录与归档子树）。"""
     base = Path(root)
     if not base.is_dir():
         return 0, 0
@@ -224,7 +246,7 @@ def _subject_stats(root: Path) -> tuple[int, int]:
     for path in base.rglob("*"):
         if not path.is_file():
             continue
-        if any(part in SKIP_DIRS for part in path.relative_to(base).parts):
+        if not _in_growth_surface(path.relative_to(base).parts):
             continue
         try:
             stat = path.stat()
@@ -253,6 +275,9 @@ def valid_subject_object(obj: str, allowed_objs: set[str],
     r"""组织会话产出的对象名**机械闸**（T5/A11）。
 
     判据（具体状态，反不完全归纳）：
+    - **主体根的归档子树直接拒**（G1）：`archive/` 里的东西已被轮转出生长面，
+      既不许被 findings 引用，也不许被提议「往里再长一格」——即使有人把它塞进
+      `allowed_objs`（拒绝发生在名单比对**之前**）；
     - 对象已在可对账清单（本拍主体观测集）→ 通过；
     - 否则必须是 `主体/<相对路径>`，且相对路径**合法**（非空、无 `..` 段、
       不以 `/`/`\` 开头＝非绝对、无盘符前缀、不以 `.` 开头＝不藏隐藏文件）——
@@ -262,6 +287,12 @@ def valid_subject_object(obj: str, allowed_objs: set[str],
 
     返回 (是否通过, 理由)。此前对象名纪律只是提示词里的约定，没有机械闸。
     """
+    rel_head = str(obj or "")
+    if rel_head.startswith(SUBJECT_PREFIX):
+        head = rel_head[len(SUBJECT_PREFIX):].replace("\\", "/").rstrip("/")
+        if is_archived(tuple(head.split("/"))):
+            return False, ("%s/ 是轮转归档区，不入生长面（既不可对账也不可提议）"
+                           % SUBJECT_ARCHIVE_DIR)
     if obj in allowed_objs:
         return True, "已在可对账清单"
     if not obj.startswith(SUBJECT_PREFIX):
@@ -313,6 +344,8 @@ def observe_object(root: Path, obj: str, dimension: str) -> Optional[Observation
         rel = rel[:-len(DIR_OBJECT_SUFFIX)]
     if not rel or any(seg in ("", ".", "..") for seg in rel.split("/")):
         return None                                   # 非法相对路径：不越界读
+    if is_archived(tuple(rel.split("/"))):
+        return None                                   # G1：归档不入生长面，不补读数
     path = base / rel
     if is_dir:
         if dimension != "文件数":

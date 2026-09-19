@@ -43,7 +43,20 @@ One tick does a **read-only, bounded, no-subprocess, no-network** observation:
 | each file (up to 20, newest mtime first) | existence **and** byte size | `subject:<path>` |
 
 - File count and total bytes are **real totals**, not truncated counts: the per-file window is
-  bounded, the aggregate is not.
+  bounded, the aggregate is not. The aggregate counts the **growth surface** only — the
+  subject's own `archive/` subtree is not part of it (next bullet).
+- **Rotated content really leaves the growth surface (settled 2026-09-19).** The gardener moves
+  `journal/` overflow into `<subject>/archive/journal/`; moving means *write a new file, then
+  unlink the source*, so an archived entry carries the mtime of **the moment it was moved** —
+  newer than the content still growing. Measured on a copy of the live subject
+  (`journal_keep_files=200`, adding one entry per round and running the gardener): past the
+  limit every rotation added one archived slot to the 20-file window (rounds 12/13/14 = 1/2/3),
+  the first slot was always `archive/journal/…md.<stamp>`, and the subject's file count never
+  dropped (363→377) — the rotation had moved nothing out of sight. So `archive/` is excluded in
+  all three readings (per-file window, directory objects, file count / total bytes) and the
+  object-name gate rejects it even as a proposal (`for_proposal`): one cannot propose "grow
+  inside the blind spot". The rule is scoped to the subject **root**: `journal/archive/` is
+  ordinary content and stays observable. Code: `subject.SUBJECT_ARCHIVE_DIR`.
 - **A sub-directory is an object**: `<subject>/<path>/` (the trailing `/` is the marker). Its
   accountable quantity is the number of files inside, which makes "grow this directory by one
   entry" a **name-free** prediction.

@@ -271,3 +271,94 @@ def test_keyed_supplement_kills_boundary_false_diff(tmp_path):
     # 补观测**不扩面**：只加「被预测过、又被名额挤出去」的那些键，别的一律不加
     added = {o.key for o in fixed} - {o.key for o in raw}
     assert added == {("主体/f00.md", "存在性"), ("主体/f00.md", "字节数")}
+
+
+# ---------------------------------------------------------------- G1：归档不入生长面
+
+def _archive_fixture(tmp_path, journal_n=3, archive_n=2):
+    """造一个「已轮转过」的主体：journal 若干篇 ＋ `archive/journal/` 里带**全新 mtime**
+    的归档件（轮转＝写新件＋unlink 源，所以归档件比 journal 更新）。
+
+    返回 (主体根, 归档件相对名列表)。
+    """
+    base = time.time()
+    subject = tmp_path / "grown"
+    (subject / "journal").mkdir(parents=True)
+    for i in range(journal_n):
+        p = subject / "journal" / ("%04d-20260919.md" % (i + 1))
+        p.write_text("正文 %d" % i, encoding="utf-8")
+        os.utime(p, (base - 600 + i, base - 600 + i))
+    (subject / "archive" / "journal").mkdir(parents=True)
+    archived = []
+    for i in range(archive_n):
+        p = subject / "archive" / "journal" / ("%04d-20260919.md.20260919-132255" % i)
+        p.write_text("归档 %d" % i, encoding="utf-8")
+        os.utime(p, (base + 600 + i, base + 600 + i))   # 比 journal 全部更「新」
+        archived.append("archive/journal/%04d-20260919.md.20260919-132255" % i)
+    return subject, archived
+
+
+def test_rotated_archive_is_not_part_of_the_growth_surface(tmp_path):
+    """轮转搬进 `<主体根>/archive/` 的内容**不再入观测面**（G1 主判据）。
+
+    实测（主体副本，拍 9012~9014，`IG_JOURNAL_KEEP_FILES=200` 逐篇新增跑园丁）：
+    跨过上限后每次轮转使 20 格窗口里归档件 +1，窗口首格恒为
+    `archive/journal/…md.<stamp>`——归档件带着全新 mtime 把真正在长的内容挤出观测面。
+    反证一并钉住：只有**主体根下**那一片 `archive/` 算归档区，
+    `journal/archive/` 这种内容侧同名目录照旧可观测（不是「凡叫 archive 都瞎」）。
+    """
+    subject, archived = _archive_fixture(tmp_path)
+    names = [f.name for f in subject_mod.subject_files(subject)]
+    assert not any(n.startswith("archive/") for n in names), names
+    assert names == ["journal/0003-20260919.md", "journal/0002-20260919.md",
+                     "journal/0001-20260919.md"]
+    # 目录对象里也没有归档那两格
+    dirs = [d.name for d in subject_mod.subject_dirs(subject)]
+    assert dirs == ["journal"]
+    # 主体层面的「文件数／总字节数」同样只算生长面：轮转要看得见＝内容真的离开
+    assert subject_mod.subject_count(subject) == 3
+    assert subject_mod.subject_total_bytes(subject) == sum(
+        (subject / "journal" / n).stat().st_size
+        for n in ("0001-20260919.md", "0002-20260919.md", "0003-20260919.md"))
+    # 归档件**在盘上还在**（只移动不删），只是不再是可对账对象
+    for rel in archived:
+        assert (subject / rel).is_file()
+    # 反证：内容侧同名目录不被误伤
+    nested = subject / "journal" / "archive"
+    nested.mkdir()
+    (nested / "note.md").write_text("内容，不是归档", encoding="utf-8")
+    assert "journal/archive" in [d.name for d in subject_mod.subject_dirs(subject)]
+    assert subject_mod.subject_count(subject) == 4
+
+
+def test_object_name_gate_rejects_the_archive_subtree(tmp_path):
+    """对象名机械闸：归档子树**永不进可对账清单**，也不许被提议（G1 的另一半）。
+
+    为什么连 `for_proposal=True` 也要拒：轮转后 `archive/`、`archive/journal/` 一旦成为
+    目录对象，组织会话就能提议「往 archive/ 里再长一格」——那是在提议往盲区里堆东西。
+    即使有人把归档对象塞进 `allowed_objs`，也不放行（拒绝发生在名单比对**之前**）。
+    """
+    subject, archived = _archive_fixture(tmp_path)
+    allowed = {o.obj for o in subject_mod.observe_subject(subject)}
+    assert not any(o.startswith("主体/archive") for o in allowed), allowed
+    for obj in ("主体/archive/", "主体/archive/journal/",
+                "主体/" + archived[0], "主体/archive/whatever.md"):
+        for mode in (True, False):
+            ok, why = subject_mod.valid_subject_object(obj, allowed, for_proposal=mode)
+            assert not ok, "%s 在 for_proposal=%s 下被放行（%s）" % (obj, mode, why)
+        # 反证：塞进清单也不放行
+        ok, _ = subject_mod.valid_subject_object(obj, allowed | {obj}, for_proposal=True)
+        assert not ok, "%s 靠清单回流了闸" % obj
+    # 正证：正常对象不受影响
+    assert subject_mod.valid_subject_object("主体/journal/", set(), for_proposal=True)[0]
+    assert subject_mod.valid_subject_object("主体/journal/archive/", set(),
+                                            for_proposal=True)[0]
+
+
+def test_keyed_supplement_refuses_archived_objects(tmp_path):
+    """定键补观测（M7）同样不读归档子树：读不到 → None，不假装有读数。"""
+    subject, archived = _archive_fixture(tmp_path)
+    assert subject_mod.observe_object(subject, "主体/" + archived[0], "存在性") is None
+    assert subject_mod.observe_object(subject, "主体/archive/journal/", "文件数") is None
+    assert subject_mod.observe_object(subject, "主体/journal/0001-20260919.md",
+                                      "存在性") is not None
