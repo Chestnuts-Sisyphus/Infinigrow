@@ -8,6 +8,32 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
 
 ## v2.2.28 — attribution reads the executor's exit code, and two published verdicts are corrected (2026-09-19)
 
+- **The write surface got direct tests, the weak assertions became real, and five dead
+  definitions were retired** (`tests/test_store_gates.py` ＋ `tests/test_rules.py` ＋
+  `tests/test_version.py` ＋ `tests/test_release_tooling.py` ＋ `.github/workflows/ci.yml` ＋
+  `src/infinigrow/rules/static_scan.py` ＋ `core/paths.py` / `engine/sprout_queue.py` /
+  `ledger/rotation.py` ＋ both `superseded.md` ＋ both `markers.md`). `ledger/store.py` is the
+  only place allowed to touch disk, yet its eight write gates had no test of their own — they
+  were only covered indirectly when the engine happened to pass through them, so a broken
+  marker gate or a clobbered exclusive-create could sit unnoticed. `tests/test_store_gates.py`
+  pins each gate (append/guard, bad-line tolerance surfaced not hidden, `require_within`
+  rejecting escapes and symlink hops, `create_exclusive` losing the race without clobbering,
+  `write_work_file`'s marker gate refusing a shrink, atomic replace leaving no `.part`,
+  `move_file` writing the archive before unlinking the source). Three assertions that had
+  drifted weak are now strong: every rule must actually **PASS** on the clean repo (not just
+  "return without raising"); the current version must appear as a real `## v<version>` section
+  heading with the top section the newest (a mere cross-reference no longer counts); the
+  release tool is checked by **exit code** (rc 0 present, rc 1 missing tag, rc 2 bad usage),
+  not just by an exception's message. A new check enforces **every git tag has a CHANGELOG
+  section** — which needs CI to fetch tags, so `ci.yml` adds `fetch-depth: 0` (a shallow
+  checkout lists no tags and would make the check vacuous). The R2 prompt↔code rule no longer
+  skips when the prompts are empty: empty/missing prompt text is now itself a failure (the old
+  `prompt_text and ...` guard let an empty prompts dir pass silently), with a reverse case in
+  `selftest` and a floor test pinning `MIN_SYNC_TERMS` at 17 terms ⊆ the coverage table. Five
+  never-called definitions (`ENV_SUBJECT_ROOT`, `all_dirs`, `to_records`, `ledger_sizes`,
+  `total_archived_lines`) — measured 2026-09-19 to have zero callers repo-wide — were retired
+  through the superseded four-step (a new row `S10`, old rows kept, `scan` + `pytest` green).
+  No limit constant moved.
 - **The read side of the CLI entered CI, and so did Python 3.13** (`.github/workflows/ci.yml` ＋
   `tests/test_cli_surface.py` ＋ both READMEs ＋ `CONTRIBUTING.md`). Until now CI exercised only the
   write path (`dry-run`/`tick`/`gardener`/`org-status`); `status`, `redemption --json`, `rotate`,

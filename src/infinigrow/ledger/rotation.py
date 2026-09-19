@@ -43,7 +43,7 @@ import datetime as _dt
 import json
 import re
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 from ..core.encoding import read_text
 from ..core.paths import StateLayout
@@ -306,12 +306,6 @@ def rotate_journal(subject_root: Path, keep_files: int = 200,
             "archive": str(dest_dir.relative_to(subject_root).as_posix())}
 
 
-def ledger_sizes(layout: StateLayout) -> dict:
-    """账本体检（园丁报告用）：名字 → 字节数。"""
-    return {name: (layout.root / name).stat().st_size
-            for name in LEDGER_POLICY if (layout.root / name).is_file()}
-
-
 def archived_files(layout: StateLayout) -> list[str]:
     """归档区里的文件（可检索的证明：主账本缩了，但历史还在）。"""
     return sorted(str(p.relative_to(layout.archive_dir).as_posix())
@@ -334,8 +328,3 @@ def search_archive(layout: StateLayout, needle: str, limit: int = 20) -> list[st
                 if len(hits) >= limit:
                     return hits
     return hits
-
-
-def total_archived_lines(paths: Iterable[Path]) -> int:
-    """归档件总行数（测试与体检用）。"""
-    return sum(len(_lines(p)) for p in paths)

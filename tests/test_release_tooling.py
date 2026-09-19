@@ -7,6 +7,8 @@
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 from tools.extract_changelog_section import MIN_CHARS, extract
@@ -166,3 +168,40 @@ def test_dry_run_prints_what_would_actually_be_applied(capsys):
     assert sync.main([]) == 0
     out = capsys.readouterr().out
     assert "title: %s" % title_for("2.2.25") in out
+
+
+# --------------------------------------------------- 发布工具的退出码：抽不到就别发
+def test_release_cli_exit_codes(tmp_path):
+    """工具作为进程跑时的**退出码**才是工作流据以失败的东西，光测函数抛错不够。
+
+    rc=0 抽到真 tag（含 `--title`）；rc=1 tag 不存在（发空壳的路要堵死）；
+    rc=2 用法错（参数数量不对）。三档各钉一次。
+    """
+    script = REPO / "tools" / "extract_changelog_section.py"
+    hit = subprocess.run([sys.executable, str(script), "v2.2.27"],
+                         capture_output=True, text=True)
+    assert hit.returncode == 0 and hit.stdout.startswith("## v2.2.27")
+    titled = subprocess.run([sys.executable, str(script), "v2.2.27", "--title"],
+                            capture_output=True, text=True)
+    assert titled.returncode == 0 and titled.stdout.strip().startswith("v2.2.27")
+    miss = subprocess.run([sys.executable, str(script), "v9.9.9"],
+                          capture_output=True, text=True)
+    assert miss.returncode == 1 and "没有 v9.9.9" in miss.stderr
+    usage = subprocess.run([sys.executable, str(script)], capture_output=True, text=True)
+    assert usage.returncode == 2
+
+
+def test_every_git_tag_has_a_changelog_section():
+    """**每个 git tag 都得在 CHANGELOG 里有对应小节**（发布链的下界闸）。
+
+    tag 打了但没写 CHANGELOG 节 = 那条 Release 会发成空壳；这里逐 tag 走 `extract`，
+    抽不到或太短就抛错让本用例红。要求至少有一个 tag：CI 的 checkout 必须 fetch 标签
+    （`fetch-depth: 0`），否则标签列表空——那正是这条闸要**响**的场景，不能静默通过。
+    """
+    listed = subprocess.run(["git", "tag", "--list", "v*"], cwd=REPO,
+                            capture_output=True, text=True)
+    assert listed.returncode == 0, "读 git tag 失败：%s" % listed.stderr
+    tags = [t for t in listed.stdout.split() if t.startswith("v")]
+    assert tags, "仓库里读不到任何 tag——CI 是否 fetch 了标签（需 fetch-depth: 0）？"
+    for tag in tags:
+        extract(tag, CHANGELOG)                                 # 抽不到 → 抛错 → 本用例红

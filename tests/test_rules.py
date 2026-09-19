@@ -4,7 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from infinigrow.rules.static_scan import (RULES, RuleContext, SYNC_TERMS, scan, selftest)
+from infinigrow.rules.static_scan import (MIN_SYNC_TERMS, RULES, RuleContext, SYNC_TERMS,
+                                          scan, selftest)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
@@ -58,11 +59,16 @@ def test_vbs_files_are_scanned_by_static_rules(tmp_path):
 
 
 @pytest.mark.parametrize("name", [n for n, _ in RULES])
-def test_every_rule_runs(name):
-    """规则本身不许抛异常（抛了＝扫描器被拖崩）。"""
+def test_every_rule_passes_on_the_clean_repo(name):
+    """每条规则在干净仓库上必须**真的 PASS**（不是「没抛异常就算过」）。
+
+    旧写法只断言返回类型，于是「规则悄悄判 FAIL」也能蒙过去；这里把它升级成
+    对 REPO_ROOT 现跑并要求 `passed is True`（与 `test_repo_scan_is_green` 同向、但逐条点名）。
+    """
     fn = dict(RULES)[name]
     detail, passed = fn(RuleContext.from_repo(REPO_ROOT))
-    assert isinstance(detail, str) and isinstance(passed, bool)
+    assert isinstance(detail, str) and detail, "规则必须给出非空说明（判词不能空）"
+    assert passed is True, "%s 在干净仓库上应 PASS，实际 FAIL：%s" % (name, detail)
 
 
 def test_repo_scan_is_green():
@@ -76,3 +82,35 @@ def test_sync_terms_cover_all_three_sprout_sources():
     joined = "\n".join(SYNC_TERMS)
     for term in ("差异", "成熟链封顶", "能力库未用", "零差异零芽"):
         assert term in joined
+
+
+def test_prompt_code_sync_fails_when_prompts_missing(tmp_path):
+    """R2 反例：**提示词为空/缺失即红**（旧版靠 `prompt_text and` 短路，静默放行）。
+
+    造一个「代码侧齐、提示词侧一册都没有」的仓库——若规则还在「没提示词就当没事」，
+    这条必 PASS；修好后它必须 FAIL 并点名提示词侧缺。
+    """
+    from infinigrow.rules.static_scan import rule_prompt_code_sync
+    repo = tmp_path / "repo"
+    owners: dict[str, list[str]] = {}
+    for term, owner in SYNC_TERMS.items():
+        owners.setdefault(owner, []).append(term)
+    for owner, terms in owners.items():
+        p = repo / "src" / "infinigrow" / owner
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text("".join("# %s\n" % t for t in terms), encoding="utf-8")
+    (repo / "prompts").mkdir(parents=True)                 # 空提示词目录
+    ctx = RuleContext.from_repo(repo)
+    detail, ok = rule_prompt_code_sync(ctx)
+    assert ok is False and "提示词侧缺" in detail
+
+
+def test_min_sync_terms_is_a_registered_floor():
+    """`MIN_SYNC_TERMS` 是**下限**：词数不得缩水，且每个下限词都必须在覆盖表里。
+
+    R9 靠「MIN ⊆ SYNC_TERMS」拦缩表；这里把下限本身钉住（17 词，实测非编造），
+    少一个词或被删一条都要红。
+    """
+    assert len(MIN_SYNC_TERMS) >= 17, "同源表下限被悄悄改小（曾经 17 词）"
+    for term in MIN_SYNC_TERMS:
+        assert term in SYNC_TERMS, "%s 是下限词却不在覆盖表里——R9 就拦不住它消失" % term

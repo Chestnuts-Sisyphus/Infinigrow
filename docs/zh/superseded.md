@@ -18,6 +18,7 @@ v1 的原始残留不在本表管辖范围（v1 整体封存，见 `docs/zh/vers
 | S7 | 宿主耦合的状态根（状态放在别的项目目录下） | 代码与状态跨项目耦合：搬走代码带不走状态，开源还泄漏目录结构 | `core/paths.py` 状态根参数化，默认 `<repo>/state` | 无（R1 守：源码零绝对路径） | **已清** |
 | S8 | 单体巨石 + 内嵌夹具（一个 900KB 源文件） | 改一处要读全文件；测试与代码混住导致「改坏不自知」 | `core/ledger/engine/rules/garden/scheduler` 六层包 + `tests/` | 无 | **已清** |
 | S9 | `long_task` 芽标记豁免连领上限（K16，曾登记为**预留**） | 它从来没有写入方（拍 647 实测：4,370 行账本全带这个键、**0 行为 true**），而「读到旧行就放行」的分支＝开在连领上限上的后门，那条上限正是 v1「186/221 根同族霸占」事故换来的。**预留迟早被人接线**：留着一条没人用的豁免，成本高于它省下的那句注释 | 连领上限本身，不带任何豁免（`SproutQueue.eligible`、`tick.py`／`org_session.py` 的耗尽判据） | 代码与提示词里已无此名；旧账本行的 `"long_task"` 键变成惰性数据，由 `Sprout.from_record` 忽略（守卫：`tests/test_sprout_queue.py`——这名字回到 `src/`、或带标记的旧行换到豁免，即 FAIL） | **已清** |
+| S10 | 五个从未被调用的定义（`ENV_SUBJECT_ROOT`、`StateLayout.all_dirs`、`SproutQueue.to_records`、`ledger_sizes`、`total_archived_lines`） | 2026-09-19 实测：`src/`、`tests/`、`tools/` 全仓 0 调用方（grep 只命中定义本身）。死定义长得像活 API——迟早有人把它接错、或当入口信它 | 直接删除；`IG_SUBJECT_ROOT` 由配置 `_FIELDS` 表泛化读取，那个常量本就没有消费者 | 删除后无残留（本行即记录）；R2／R9 拦住「重新加回来却仍没人调」的双胞胎冒充已接线 | **已清** |
 
 ## 新增退役件的流程
 

@@ -83,6 +83,7 @@
 | S7 | 宿主耦合的状态根 | `docs/superseded.md` S7 ＋ `src/infinigrow/core/paths.py` | 已清 |
 | S8 | 单体巨石 ＋ 内嵌夹具 | `docs/superseded.md` S8 ＋ 六层包结构 | 已清 |
 | S9 | `long_task` 豁免连领上限 | `src/infinigrow/engine/sprout_queue.py`（`eligible`）＋ `tests/test_sprout_queue.py` | 已清 |
+| S10 | 五个从未被调用的定义按死码清除 | `docs/superseded.md` S10 ＋ 删除处 `core/paths.py`／`engine/sprout_queue.py`／`ledger/rotation.py` | 已清 |
 | T3 | 判据与提示词写好了还得有人调用 | `src/infinigrow/engine/tick.py` ＋ `tests/test_tick.py` | 生效 |
 | T4 | 冻结区重看节奏（与重问分工不同） | `src/infinigrow/engine/sprout_queue.py` ＋ `tests/test_tick.py` | 生效 |
 | T6 | 轮转与容量：账本只增不减，历史由轮转搬进归档 | `src/infinigrow/ledger/rotation.py` ＋ `tests/test_rotation.py` | 生效 |

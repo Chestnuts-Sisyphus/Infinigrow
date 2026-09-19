@@ -209,9 +209,6 @@ class SproutQueue:
         sprout.last_lead_tick = tick
 
     # ---------------------------------------------------------------- 持久化
-    def to_records(self) -> list[dict]:
-        return [s.as_record() for s in self.sprouts]
-
     def save(self, active_path: Path, frozen_path: Path, root: Path) -> None:
         """整份重写队列（工作文件可覆写；账本不受影响＝冻结/合并只动队列）。"""
         for path, items in ((active_path, self.sprouts), (frozen_path, self.frozen)):

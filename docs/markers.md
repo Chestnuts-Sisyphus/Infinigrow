@@ -86,6 +86,7 @@
 | S7 | A state root coupled to a host project | `docs/superseded.md` S7 + `src/infinigrow/core/paths.py` | retired |
 | S8 | One monolith with embedded fixtures | `docs/superseded.md` S8 + the six-layer package layout | retired |
 | S9 | `long_task` exempting a sprout from the lead limit | `src/infinigrow/engine/sprout_queue.py` (`eligible`) + `tests/test_sprout_queue.py` | retired |
+| S10 | Five never-called definitions removed as dead code | `docs/superseded.md` S10 + the deletions in `core/paths.py` / `engine/sprout_queue.py` / `ledger/rotation.py` | retired |
 | T3 | A criterion and a prompt that nobody calls do not exist | `src/infinigrow/engine/tick.py` + `tests/test_tick.py` | in force |
 | T4 | The frozen-zone review cadence (a different job from re-asking) | `src/infinigrow/engine/sprout_queue.py` + `tests/test_tick.py` | in force |
 | T6 | Rotation and capacity: ledgers only grow; history moves to the archive | `src/infinigrow/ledger/rotation.py` + `tests/test_rotation.py` | in force |

@@ -200,12 +200,15 @@ def rule_prompt_code_sync(ctx: RuleContext) -> tuple[str, bool]:
         p = ctx.prompts_dir / name
         if p.is_file():
             prompt_text += _read(p)
+    # 提示词为空/缺失**不是**「无从判起」而是「机制词全丢」：这里不加 `if prompt_text` 兜底，
+    # 让下面每个词都记进 missing_in_prompt → 整条判 FAIL（旧版靠 `prompt_text and` 短路，
+    # 空提示词被静默放行＝同源闸在自己最该响的时候装睡）。
     missing_in_code, missing_in_prompt = [], []
     for term, owner in SYNC_TERMS.items():
         owner_path = ctx.src_dir / "infinigrow" / owner
         if not owner_path.is_file() or term not in _read(owner_path):
             missing_in_code.append("%s(应见于 %s)" % (term, owner))
-        if prompt_text and term not in prompt_text:
+        if term not in prompt_text:
             missing_in_prompt.append(term)
     detail = "同源：代码侧缺 %d、提示词侧缺 %d" % (len(missing_in_code), len(missing_in_prompt))
     if missing_in_code:
@@ -456,6 +459,8 @@ SELFTEST_CASES = (
     ("R2 正例（同源齐）", "rule_prompt_code_sync", None, True),
     ("R2 反例（代码侧删关键词）", "rule_prompt_code_sync",
      "src/infinigrow/engine/model.py", "# 空文件\n"),
+    ("R2 反例（提示词被清空＝机制词全丢）", "rule_prompt_code_sync",
+     "prompts/" + TICK_PROMPT, ""),
     ("R4 正例（状态根已忽略）", "rule_state_gitignored", None, True),
     ("R4 反例（清空 .gitignore）", "rule_state_gitignored", ".gitignore", ""),
     ("R6 正例（无 BOM）", "rule_no_bom", None, True),

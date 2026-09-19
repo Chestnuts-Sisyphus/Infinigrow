@@ -18,7 +18,6 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable
 
 # 仓库根：本文件位于 <repo>/src/infinigrow/core/paths.py → 上溯 4 层
 _MODULE_PATH = Path(__file__).resolve()
@@ -26,7 +25,6 @@ REPO_ROOT = _MODULE_PATH.parents[3]
 
 ENV_STATE_ROOT = "IG_STATE_ROOT"
 ENV_CONFIG = "IG_CONFIG"
-ENV_SUBJECT_ROOT = "IG_SUBJECT_ROOT"
 
 #: 生长主体的默认目录名后缀（**默认落在仓库之外**：代码与「被生长的东西」分家）
 SUBJECT_SUFFIX = "-subject"
@@ -98,9 +96,6 @@ class StateLayout:
     org_findings: Path = None           # type: ignore[assignment]  组织会话发现账（追加型）
     settings_file: Path = None          # type: ignore[assignment]  生效配置快照（工作文件）
     domains: Path = None                # type: ignore[assignment]  域饱和状态（工作文件）
-
-    def all_dirs(self) -> Iterable[Path]:
-        return (self.root, self.reconcile_dir, self.locks_dir)
 
 
 def _fill(layout: StateLayout) -> StateLayout:

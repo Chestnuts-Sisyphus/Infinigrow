@@ -20,7 +20,11 @@ jobs:
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.11", "3.12", "3.13"]
     steps:
+      # fetch-depth: 0 so `git tag` is populated for the tag<->CHANGELOG parity test
+      # (a shallow default checkout fetches no tags and would make that check vacuous).
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v6
         with:
