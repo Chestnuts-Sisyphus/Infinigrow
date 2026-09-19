@@ -42,9 +42,16 @@ MISSING = "缺失"
 #: `journal/` 下文件的**命名规则**（K7/A8 定死并机械化）：`<创建拍号4位>-<创建日期YYYYMMDD>.md`。
 #: 拍号段＝创建它的那一拍的拍号；日期段＝创建那天的机械日期。两条线此前各写各的
 #: （执行者按拍号段、组织会话按当日日期），跨午夜会出现两种写法 → 对账当成两个对象。
-#: 本常量是机械判据；执行者提示词 / 组织会话提议 / 主体声明示例三处**写同一句**，
+#: 本常量是机械判据，**执法点是对象名机械闸**（`valid_subject_object` 的提议分支）：
+#: 组织会话点名一个尚不存在的 `journal/` 直接子文件时，名字不合规格即被拒收——
+#: 执法范围就这一条，因为引擎只能拦自己会读的东西。**写盘侧**（执行者真建的文件）
+#: 靠提示词约定（`prompts/tick.md`）＋测试守护：引擎不替执行者改文件名，改了就等于
+#: 把现实悄悄抹成符合预期。执行者提示词 / 组织会话提议 / 主体声明示例三处**写同一句**，
 #: 由 `tests/test_mechanism_docs.py` 锁定同源（改一处＝三处一起改）。
 JOURNAL_NAME_RX = re.compile(r"^\d{4}-\d{8}\.md$")
+
+#: 主体的日志目录名（命名判据只管**这个目录的直接子文件**，见上方边界说明）
+JOURNAL_DIR = "journal"
 
 #: **目录对象**的命名（N43）：`主体/<相对路径>/`——结尾的 `/` 是「这是目录」的机械标记，
 #: 与文件对象（`主体/<相对路径>`）在同一对账空间里**永不撞名**。
@@ -308,6 +315,12 @@ def valid_subject_object(obj: str, allowed_objs: set[str],
     if bad:
         return False, "非法相对路径：%r（不许越界/绝对/隐藏）" % rel
     if for_proposal:
+        # G3：`journal/` 的直接子文件必须按 K7/A8 的规格命名——不合规格的提议永远对不上
+        # 现实（执行者只会按自己的创建拍命名），白烧一拍；这里拒掉，理由点名约定本身。
+        if (not is_dir and len(segments) == 2 and segments[0] == JOURNAL_DIR
+                and not valid_journal_name(segments[1])):
+            return False, ("journal 文件名必须叫 <创建拍号4位>-<创建日期YYYYMMDD>.md，"
+                           "收到 %r（K7/A8）" % segments[1])
         return True, ("主体内合法新目录（可提议往它里面长一格）" if is_dir
                       else "主体内合法新相对路径（可提议创建）")
     return False, "不在可对账清单（findings 必须引用现实可查的对象）"

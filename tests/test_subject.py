@@ -362,3 +362,28 @@ def test_keyed_supplement_refuses_archived_objects(tmp_path):
     assert subject_mod.observe_object(subject, "主体/archive/journal/", "文件数") is None
     assert subject_mod.observe_object(subject, "主体/journal/0001-20260919.md",
                                       "存在性") is not None
+
+
+# ---------------------------------------------------------------- G3：命名判据真执法
+
+def test_journal_name_rule_is_enforced_at_the_proposal_gate():
+    """`valid_journal_name` 不是摆设：它接在对象名机械闸的**提议**分支上（K7/A8/G3）。
+
+    边界同时钉住，免得判据管过头：目录对象 `主体/journal/` 照过（提议「再长一格」不必
+    点名）；只管 `journal/` 的**直接子文件**（嵌套路径不是 journal 篇，不动）；已在可对账
+    清单里的对象不受影响（现实长成了什么样，findings 就能引用什么——执法只挡新提议）。
+    """
+    ok, _ = subject_mod.valid_subject_object("主体/journal/0085-20260915.md", set(),
+                                             for_proposal=True)
+    assert ok is True                                        # 合规格：照过
+    for bad in ("主体/journal/note.md", "主体/journal/0085-2026-09-15.md",
+                "主体/journal/85-20260915.md", "主体/journal/0085-20260915.txt"):
+        ok, why = subject_mod.valid_subject_object(bad, set(), for_proposal=True)
+        assert ok is False, "%s 被当作合法的 journal 提议" % bad
+        assert "YYYYMMDD" in why, "%s 的拒绝理由没点名约定本身：%s" % (bad, why)
+    assert subject_mod.valid_subject_object("主体/journal/", set(), for_proposal=True)[0]
+    assert subject_mod.valid_subject_object("主体/journal/sub/whatever.md", set(),
+                                            for_proposal=True)[0]
+    existing = {"主体/journal/weird.md"}
+    assert subject_mod.valid_subject_object("主体/journal/weird.md", existing)[0]
+    assert subject_mod.valid_subject_object("主体/journal/weird.md", set())[0] is False

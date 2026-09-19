@@ -86,6 +86,18 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   whole file would have the engine testify for itself. Measured over the last 30 / 40 / 60 cap
   leads: 2 / 0 / 0 across the three buckets. **The redemption algorithm, its numerator and its
   denominator are untouched** — this only says which point was lost and why.
+- **The journal naming rule now has an enforcement point** (`engine/subject.py` ＋
+  `prompts/org-session.md` ＋ `docs/growth-subject.md` and its Chinese original ＋
+  `tests/test_subject.py`·`tests/test_mechanism_docs.py`). `JOURNAL_NAME_RX`/`valid_journal_name`
+  had **no call site at all** while the comment and the docs called it a mechanical judgement —
+  either the claim was decorative or the enforcement was missing; the fix was to wire it in, not to
+  soften the wording. `subject.valid_journal_name` is now called from the object-name gate's
+  proposal branch (`valid_subject_object`), so an org session that names a not-yet-existing
+  `journal/` file with a malformed name is refused on the spot instead of at reconciliation.
+  Scope is deliberately narrow and pinned by tests: direct children of `journal/` only, directory
+  objects untouched, already-observable objects unaffected. The **writing** side stays a prompt
+  convention plus a test guard — the engine does not rename what the executor produced, because
+  rewriting reality to fit the expectation is the failure mode this whole mechanism exists to avoid.
 
 ## v2.2.26 — the documents say what the code, the tree and the Release page actually do (2026-09-18)
 

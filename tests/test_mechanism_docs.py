@@ -94,12 +94,15 @@ def test_english_public_docs_carry_the_mechanism_glossary():
 
 
 def test_journal_naming_rule_is_synced_across_three_sources():
-    """K7/A8：`journal/` 命名规则 `<创建拍号4位>-<创建日期YYYYMMDD>.md` 三处同源。
+    """K7/A8：`journal/` 命名规则 `<创建拍号4位>-<创建日期YYYYMMDD>.md` 三处同源，且**真有执法点**。
 
     执行者提示词（tick.md）／组织会话提议（org-session.md）／主体文档（`docs/zh/growth-subject.md`）
     必须写同一句；代码里 `subject.valid_journal_name` 是机械判据。改一处＝各处一起改。
     （本机主体声明 `<仓库同级>/<主体名>/subject.md` 也同步该句，但它不在仓库里、不在 CI 上
     ——仓库内断言以中文正本为准；英文公开文档用英文写出同一条规则。）
+
+    G3 补的正是「判据有没有牙」：它必须被对象名机械闸调用（执法在**提议侧**），双语正本还要
+    写明写盘侧是提示词约定＋测试守护。此前它零调用点却被称为机械判据——那是装饰性说法。
     """
     from infinigrow.engine.subject import valid_journal_name
     # 机械判据本身
@@ -108,6 +111,18 @@ def test_journal_naming_rule_is_synced_across_three_sources():
     assert not valid_journal_name("0085-20260914")        # 缺 .md
     assert not valid_journal_name("85-20260915.md")       # 拍号不足 4 位
     assert not valid_journal_name("0085-2026-09-15.md")   # 日期带横杠
+    # 执法点：对象名机械闸必须真的调它（判据不许再退回「没人调用的常量」）
+    src = (REPO_ROOT / "src" / "infinigrow" / "engine" / "subject.py").read_text(
+        encoding="utf-8")
+    gate_body = src.split("def valid_subject_object", 1)[1].split("\ndef ", 1)[0]
+    assert "valid_journal_name" in gate_body, \
+        "valid_journal_name 又没人调用了，注释与文档却称它是机械判据"
+    for name in ("growth-subject.md", "zh/growth-subject.md"):
+        doc = (DOCS / name).read_text(encoding="utf-8")
+        assert ("提议侧执法" in doc) or ("enforced on the proposal side" in doc), \
+            "%s 没写明这条判据在哪执法" % name
+        assert ("不替执行者改文件名" in doc) or ("never renames" in doc), \
+            "%s 没写明写盘侧不执法（提示词约定＋测试守护）" % name
     # 三处文本都必须含同一句规则说明（防一边改了另一边忘改）
     texts = {
         "tick.md": (REPO_ROOT / "prompts" / "tick.md").read_text(encoding="utf-8"),

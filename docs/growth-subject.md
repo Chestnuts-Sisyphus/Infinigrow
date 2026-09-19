@@ -105,7 +105,10 @@ New files under `journal/` are named `<created tick, 4 digits>-<created date YYY
 the tick segment is the tick that **created** the file, the date segment is that day's
 mechanical date. The same sentence appears in the acting prompt, the org-session prompt and this
 document, and `subject.valid_journal_name` is the mechanical test — a proposer cannot know a
-future file's creation tick, so proposals name the *directory*, never the file.
+future file's creation tick, so proposals name the *directory*, never the file. The test is
+**enforced on the proposal side** (the object-name gate rejects a malformed file name outright,
+§3); on the writing side it is a prompt convention plus a test guard — the engine never renames
+what the executor produced.
 
 ## 6. What the subject has to do with the three sprout sources
 

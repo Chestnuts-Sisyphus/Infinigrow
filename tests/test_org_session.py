@@ -202,15 +202,29 @@ def test_finding_with_fabricated_object_is_dropped_with_error(tmp_path):
 
 def test_prediction_can_propose_new_subject_path(tmp_path):
     """T5/A11：predictions 可以提议**主体内合法新相对路径**（预期=存在＝该创建它）——
-    这是「提议者」职责的合法通道，不许被闸误伤。"""
+    这是「提议者」职责的合法通道，不许被闸误伤。
+
+    G3 之后这条通道有了边界：点名 `journal/` 里的新文件时，名字必须合 K7/A8 的规格
+    （拍号段＋日期段），否则当场拒收——原来那个 `journal/0001.md` 就是不合规格的，
+    它作为「合法提议」被收下过，正是这条判据当时没牙的证据。
+    """
+    settings = _settings(tmp_path)
     payload = json.dumps({"findings": [], "predictions": [
-        {"obj": "主体/journal/0001.md", "dimension": "存在性", "expected": "存在",
+        {"obj": "主体/journal/0001-20260915.md", "dimension": "存在性", "expected": "存在",
+         "pointer": "计划:提议创建"},
+        {"obj": "主体/notes/idea.md", "dimension": "存在性", "expected": "存在",
          "pointer": "计划:提议创建"},
     ]}, ensure_ascii=False)
-    settings = _settings(tmp_path)
     run, _layout, _queue = _run(settings, 1, payload)
-    assert len(run.predictions) == 1
-    assert run.predictions[0].obj == "主体/journal/0001.md"
+    assert [p.obj for p in run.predictions] == ["主体/journal/0001-20260915.md",
+                                                "主体/notes/idea.md"]
+    # 反证：journal 下不合规格的点名被拒，理由点名约定本身
+    bad = json.dumps({"findings": [], "predictions": [
+        {"obj": "主体/journal/0001.md", "dimension": "存在性", "expected": "存在",
+         "pointer": "p"}]}, ensure_ascii=False)
+    run2, _l2, _q2 = _run(settings, 2, bad)
+    assert run2.predictions == [] and "对象名被拒" in run2.parse_error
+    assert "YYYYMMDD" in run2.parse_error
 
 
 def test_prediction_with_escaping_path_is_dropped(tmp_path):
