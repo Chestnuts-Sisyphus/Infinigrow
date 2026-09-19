@@ -8,6 +8,21 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
 
 ## v2.2.28 — attribution reads the executor's exit code, and two published verdicts are corrected (2026-09-19)
 
+- **Cold-start assets now read their facts instead of memorising them, and the tick's timeout
+  budget got a gate** (`AGENTS.md` ＋ `.qoder/rules/ig-marker-triage.md` ＋
+  `src/infinigrow/engine/tick.py` ＋ `tests/test_tick_timeout_budget.py` ＋ the handoff redaction
+  plan). The repo's own onboarding docs pinned a HEAD tag and a "no open work" verdict — and they
+  were already stale on arrival (they said `v2.2.25`; HEAD was two releases ahead). Anything that
+  moves every commit is now a command to run (`git describe --tags`, `git status --short`,
+  `infinigrow version --check`), not a number copied into prose. A new constant
+  `MAX_EXECUTOR_CALLS_PER_TICK` (= 2: the tick call plus the org-session call) feeds a budget gate:
+  `executor_timeout_s × calls` must stay under the scheduled task's `-ExecutionTimeLimit`, or
+  Windows kills a run mid-flight and leaves a half-written ledger — a relation the local
+  `IG_EXECUTOR_TIMEOUT_S=600` (~20 min against a 30 min wall) makes real but nothing watched. The
+  gate reads the config default, not the machine env, so it is deterministic. Separately, the
+  handoff notes carry hundreds of machine-specific absolute paths; they are **not** edited here
+  (changing another session's handoff assets is out of scope) — a redaction plan is filed as a
+  pending decision instead.
 - **The observation surface became a live reading, and the trigger it documents has fired**
   (`src/infinigrow/engine/subject.py` ＋ `engine/tick.py` ＋ `tests/test_subject_composition.py`
   ＋ both `growth-subject.md`). The doc promised that the day evidence files crowded the

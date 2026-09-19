@@ -74,6 +74,12 @@ SOURCE_MECHANICAL = "mechanical"
 KIND_TICK = "tick"
 KIND_ORG = "org-session"
 
+#: 一次计划任务运行**最多调用几次执行者**（超时预算的乘数）。`run_tick` 里最多两处：
+#: 本拍动手一次（line 720），若这拍是组织段到期则组织会话再调一次（`org_mod.run_org_session`）。
+#: 超时预算闸（tests/test_tick_timeout_budget.py）用 `executor_timeout_s × 本常量` 去比
+#: 计划任务的 ExecutionTimeLimit——超过就会被 Windows 计划任务中途杀掉，留下半截留痕。
+MAX_EXECUTOR_CALLS_PER_TICK = 2
+
 
 class TickHeartbeatError(RuntimeError):
     """心跳写不进去（园丁的断流判据上游）——必须响亮，不许静默。"""
