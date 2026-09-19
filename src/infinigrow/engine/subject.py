@@ -197,6 +197,26 @@ def subject_files(root: Path, limit: int = SUBJECT_FILE_LIMIT) -> list[SubjectFi
     return out[:limit]
 
 
+def _composition_of(files, limit: int) -> dict:
+    counts: dict[str, int] = {}
+    for f in files:
+        head = f.name.split("/", 1)[0] if "/" in f.name else "(根)"
+        counts[head] = counts.get(head, 0) + 1
+    ordered = dict(sorted(counts.items(), key=lambda kv: (-kv[1], kv[0])))
+    return {"limit": limit, "observed": len(files), "by_dir": ordered}
+
+
+def observation_composition(root: Path, limit: int = SUBJECT_FILE_LIMIT) -> dict:
+    """「观测面构成」的**现算读数**（M3：让「证据件挤占 journal 名额」变得可读）。
+
+    把本拍真正进观测面的那 `limit` 个文件，按**顶层目录**归类计数（直接躺在主体根的
+    文件归 `(根)`）。它不改动任何上限，只是把「名额被谁占了」这层构成显式化——
+    当 `app/`（固化边写出的应用证据件、mtime 恒最新、刻意不轮转）长期吃掉绝大多数名额、
+    `journal/`（真正在长的新内容）被挤到个位数时，这条读数就是那条触发器的机械证据。
+    """
+    return _composition_of(subject_files(root, limit=limit), limit)
+
+
 def subject_count(root: Path) -> int:
     """主体文件的**真实总数**（不受观测上限影响）。
 
@@ -485,6 +505,7 @@ def subject_snapshot(root: Path, tick: int, limit: int = SUBJECT_FILE_LIMIT) -> 
         "file_limit": limit,
         "observed_files": len(files),
         "observed_dirs": len(dirs),
+        "composition": _composition_of(files, limit),
     }
 
 

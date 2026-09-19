@@ -89,6 +89,15 @@ One tick does a **read-only, bounded, no-subprocess, no-network** observation:
   the subject root. Re-read it from `infinigrow status`. The trigger to revisit: once the
   evidence files start crowding the observation surface or the disk budget, design the
   "movable" criterion first — do not just move a number.
+  **That trigger has now fired (measured 2026-09-19, tick 745):** `observation_composition`
+  reads the 20-slot file window as `app` 18 / `journal` 2 (`app/` now 201 files, `journal/`
+  194 entries). A copy of the subject under a temp dir confirms the mechanism: pruning `app/`
+  to its 4 newest files flips that same window to `journal` 16 / `app` 4, so the crowding
+  comes from app's ever-newest mtimes — not from 20 being too small. **Conclusion: needs a
+  decision.** The remedy is the still-missing "this evidence file is closed and no maturity
+  chain refers to it" test; the observation caps (10 / 20) stay untouched this round, because
+  widening them would only let more evidence files crowd out `journal/` without adding one
+  accountable quantity.
 - `.git` and cache directories are skipped.
 - Content-level judgement is not here: byte sizes changed *is* a fact, and no one has to
   interpret it.

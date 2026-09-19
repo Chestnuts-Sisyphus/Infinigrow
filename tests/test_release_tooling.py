@@ -178,16 +178,18 @@ def test_release_cli_exit_codes(tmp_path):
     rc=2 用法错（参数数量不对）。三档各钉一次。
     """
     script = REPO / "tools" / "extract_changelog_section.py"
+    # encoding=utf-8：小节标题含破折号，Windows 默认 GBK 读线程会解码崩溃、把 stdout 变成 None。
     hit = subprocess.run([sys.executable, str(script), "v2.2.27"],
-                         capture_output=True, text=True)
+                         capture_output=True, text=True, encoding="utf-8")
     assert hit.returncode == 0 and hit.stdout.startswith("## v2.2.27")
     titled = subprocess.run([sys.executable, str(script), "v2.2.27", "--title"],
-                            capture_output=True, text=True)
+                            capture_output=True, text=True, encoding="utf-8")
     assert titled.returncode == 0 and titled.stdout.strip().startswith("v2.2.27")
     miss = subprocess.run([sys.executable, str(script), "v9.9.9"],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, encoding="utf-8")
     assert miss.returncode == 1 and "没有 v9.9.9" in miss.stderr
-    usage = subprocess.run([sys.executable, str(script)], capture_output=True, text=True)
+    usage = subprocess.run([sys.executable, str(script)],
+                           capture_output=True, text=True, encoding="utf-8")
     assert usage.returncode == 2
 
 

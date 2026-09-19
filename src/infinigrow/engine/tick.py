@@ -563,9 +563,12 @@ def tick_facts(layout: StateLayout, queue: SproutQueue, tick: int,
         "最近 30 行差异账按类型：%s" % json.dumps(by_kind, ensure_ascii=False),
         "兑现账：%s（样本 %d／共 %d 行）"
         % (redemption["判定"], redemption["样本数"], redemption["总行数"]),
-        "主体读数：文件 %d 个（真实总数，不受观测上限影响）／观测 %d 个／共 %d 字节"
+        "主体读数：文件 %d 个（真实总数，不受观测上限影响）／观测 %d 个／共 %d 字节%s"
         % (snapshot["file_count"], snapshot.get("observed_files", len(snapshot["files"])),
-           snapshot["total_bytes"]),
+           snapshot["total_bytes"],
+           ("／观测构成 " + "、".join("%s:%d" % (d, n)
+                                     for d, n in snapshot["composition"]["by_dir"].items()))
+           if snapshot.get("composition", {}).get("by_dir") else ""),
     ]
     if snapshot["files"]:
         lines.append("主体文件：%s"

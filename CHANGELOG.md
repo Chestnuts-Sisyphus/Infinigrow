@@ -8,6 +8,23 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
 
 ## v2.2.28 — attribution reads the executor's exit code, and two published verdicts are corrected (2026-09-19)
 
+- **The observation surface became a live reading, and the trigger it documents has fired**
+  (`src/infinigrow/engine/subject.py` ＋ `engine/tick.py` ＋ `tests/test_subject_composition.py`
+  ＋ both `growth-subject.md`). The doc promised that the day evidence files crowded the
+  observation surface, a "movable" criterion would be designed first. That day is measured, not
+  guessed: `observation_composition` groups the 20-slot file window by top-level directory and the
+  tick trace now prints it, so "who is eating the slots" is a computed reading instead of a manual
+  read of a trace file. At tick 745 the live subject reads `app` 18 / `journal` 2 (app evidence
+  files, ever-newest by mtime and deliberately never rotated, crowd the growing journal out). A
+  copy-based comparison confirms the cause: pruning `app/` to its 4 newest files flips the same
+  window to `journal` 16 / `app` 4 — it is app's mtime ordering, not the size 20. **Conclusion:
+  needs a decision, not a bigger constant.** The observation caps (10 / 20) are untouched this
+  round; widening them would let still more evidence files crowd out `journal/` without adding one
+  accountable quantity. `tests/test_subject_composition.py` pins grouping, that the archived subtree
+  never counts, and the reverse case where app squeezes journal out of the window entirely. A latent
+  locale bug surfaced on the way: `tests/test_release_tooling.py` ran the extraction tool as a
+  subprocess and decoded its output with the machine locale, so the em dash in a CHANGELOG heading
+  crashed the Windows GBK reader thread (`stdout` came back `None`); the call now pins `encoding="utf-8"`.
 - **The write surface got direct tests, the weak assertions became real, and five dead
   definitions were retired** (`tests/test_store_gates.py` ＋ `tests/test_rules.py` ＋
   `tests/test_version.py` ＋ `tests/test_release_tooling.py` ＋ `.github/workflows/ci.yml` ＋
