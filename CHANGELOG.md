@@ -25,6 +25,20 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   is only reached once both executor-side tests fail to hold. The wording was already hedged in the
   Chinese original; the English table now carries the same grade instead of a bare "proxy".
 
+- **Two published verdicts in the evidence section were re-run and are publicly corrected**
+  (both `mechanism.md` files ＋ `tests/test_evidence_snapshot.py` ＋
+  `tests/data/redemption-tick-00731.json`). v2.2.27 quoted a tick-624 snapshot as if it were a
+  conclusion; the ledgers only grow, so by tick 731 the readings are 682 led rows / **319 checkable
+  samples** / 312 redeemed / 363 unverifiable (53% of leads) and the two claims failed a live
+  re-run: (1) the `lib*` origin was reported as *no samples*, yet the bucket holds
+  **8 checkable samples since tick 654** (654, 656–662) — and n=8 buys a sample count and its ticks,
+  **not** a 1.00 verdict; (2) the misses were reported as 4 rows with **0 "genuinely not done"**,
+  yet there are **7**, splitting 3 / 2 / 2 under the attribution above. The "no case to extrapolate"
+  discipline is kept and extended: it binds the n=8 bucket exactly as it bound the 0-case one.
+  Every figure in the section is now checked against one `redemption --json` snapshot by a test, so
+  corrupting a number in the docs turns CI red; the README's test-size figure moved to ≈6,600
+  because the new cases are 236 lines.
+
 ## v2.2.27 — the five open judgements are closed, and one correction from last round was wrong (2026-09-19)
 
 - **`org-check` got its own exit code** (`core/exit_codes.py` ＋ `cli.py` ＋ both `running.md`

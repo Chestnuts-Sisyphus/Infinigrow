@@ -358,35 +358,49 @@ it only makes "which point was lost, and why" a mechanically readable fact.
 - every tick's prompt states this verdict (symmetric with the cap-sprout clause, so the
   executor never has to guess).
 
-**How far this long run carries a redemption-rate study** (proven, live at tick 624 on
-2026-09-18):
+**How far this long run carries a redemption-rate study** (proven, live snapshot at tick 731 on
+2026-09-19):
 
-- Global reading: 575 led rows, **212 checkable sample rows**, 208 redeemed → rate **0.98**
-  (Wilson 95% interval 0.95–0.99). The number has to be quoted with its denominator share:
-  **363 rows (63%) are `verifiable=false`** and sit outside the denominator.
+Re-run with `PYTHONIOENCODING=utf-8 python -m infinigrow redemption --json`; that same output is
+kept as `tests/data/redemption-tick-00731.json`, and a test checks every figure below against it —
+corrupt a number in the docs and the case goes red. **Two verdicts in this section are this
+round's public corrections**: v2.2.27 quoted a 2026-09-18 snapshot taken at tick 624, while the
+ledgers only grow, so such numbers drift by construction (quoting a snapshot as a conclusion is
+exactly how two stale verdicts got published last round).
+
+- Global reading: 682 led rows, **319 checkable sample rows**, 312 redeemed → rate **0.98**
+  (Wilson 95% interval 0.96–0.99). The number has to be quoted with its denominator share:
+  **363 rows (53%) are `verifiable=false`** and sit outside the denominator.
 - The bucket axes are object domain × predicted edge × actual edge; **maturity step is not one of
   them** — an outcome row carries no step, it takes a join against the maturity ledger on
-  (object, tick ≤ lead tick). Joined that way all 212 samples land on step 4 (the cap) and steps
-  1–3 have **no samples**, so "which step predicts better" is *not computable* here (not 0).
+  (object, tick ≤ lead tick). Joined that way all 277 joinable samples land on step 4 (the cap) and
+  steps 1–3 have **no samples**, so "which step predicts better" is *not computable* here (not 0).
   Another 42 sample rows name an object the maturity ledger does not carry (the two ledgers spell
   objects differently) and must be normalised before the join.
-- Coverage is uneven across sprout origins: the solidify / read / act / principle edges all have
-  samples, while every historical `lib*` row (179 of them) predates the trace-mention fix — that
-  origin is still **no samples**.
-  - **Re-measurement ETA for that gap** (G7, snapshot at tick 713, 2026-09-19): 28 pending
-    questions, **all** of them blocked (28 by the re-ask cooldown, 17 also short of the idle
-    threshold); earliest re-askable tick is **892** (the blocking entry froze at tick 592, 179
-    ticks away) and this machine runs ~10 minutes per tick → due around the evening of
-    **2026-09-20**. What gets measured then is not "did one sprout appear" but whether the whole
-    chain **pending → sprout → pickup → closed/consumed** actually flows; re-run the two readings
-    `infinigrow status` (library channel verdict / re-ask gate) plus the `lib*` bucket of
-    `infinigrow redemption --json`. Until that tick passes this origin stays **no samples** —
-    neither 0 nor 1.00 may be reported for it.
-- The shape of the misses: 4 failures = 3 dropped on the executor side + 1 proposal went stale +
-  **0 genuinely not done**, and **no row** has a predicted edge different from the actual edge.
-  So this data answers "did the announced action really happen", not "was the wrong edge chosen" —
-  the second question needs rows where an edge *was* mis-chosen, and 0 cases cannot be read as
-  1.00.
+- Coverage across sprout origins: **correction 1** — v2.2.27 claimed every historical `lib*` row
+  predates the trace-mention fix, so that origin was still "no samples". At tick 731 the bucket is
+  `lib {187 leads, 8 checkable, 8 redeemed, 0 failed, 179 unverifiable}`: **8 samples have been in
+  the denominator since tick 654** (ticks 654, 656, 657, 658, 659, 660, 661, 662) → "no samples" is
+  **false**. What n=8 buys is a sample count and its ticks — **not** a 1.00 verdict: the bucket
+  falsified its own ETA (tick 892) before that ETA arrived, which shows that writing down a
+  re-measurement date is not enough on its own; a snapshot has to carry its tick and be regression-
+  tested. The solidify / read / act / principle edges still all have samples.
+  - **What the ETA still owes** (G7, tick 731): 30 pending questions, **all** blocked (30 by the
+    re-ask cooldown, 19 also short of the idle threshold); earliest re-askable tick is **892** (the
+    blocking entry froze at tick 592, 162 ticks away) and this machine runs ~10 minutes per tick →
+    due around the evening of **2026-09-20**. What gets measured then is whether the whole chain
+    **pending → sprout → pickup → closed/consumed** actually flows, read from the two
+    `infinigrow status` lines (library channel verdict / re-ask gate) plus the **sample count** of
+    the `lib*` bucket in `infinigrow redemption --json`.
+- The shape of the misses: **correction 2** — v2.2.27 reported 4 failures = 3 dropped on the
+  executor side + 1 proposal went stale + **0 genuinely not done**. At tick 731 there are **7 failed
+  rows**, and under the attribution extended this round with the executor exit code they split
+  **3 dropped on the executor side + 2 proposal went stale + 2 genuinely not done** → the old
+  verdict is **false** (one of those rows, tick 723, was neither "the subject did nothing" nor "the
+  premise aged out" but a non-zero executor exit). And still **no row** has a predicted edge
+  different from the actual edge, so this data answers "did the announced action really happen",
+  not "was the wrong edge chosen" — the second question needs rows where an edge *was* mis-chosen,
+  and 0 cases cannot be read as 1.00. The same discipline bounds the n=8 `lib*` bucket above.
 - **Verdict**: the format and the analysis surface are already there (computed on read, bucketed,
   three-way failure attribution, reproducible with `infinigrow redemption --json`); what a further
   study of "are the judgements accurate" lacks is not more ticks but **samples that can be wrong**.
