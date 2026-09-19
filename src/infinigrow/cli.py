@@ -423,7 +423,7 @@ def _cmd_status(settings) -> int:
                              cap=settings.queue_cap, lead_limit=settings.lead_limit,
                              cold_start_ticks=settings.cold_start_ticks)
     s = queue.summary()
-    # K4/A5：可领数＝`leads<3` 且非冻结（长任务芽豁免连领上限，也算可领）。
+    # K4/A5：可领数＝`leads<连领上限` 且非冻结（**无任何豁免**，见 `docs/superseded.md` S9）。
     # 「活跃」只是非冻结行数，**不等于可领**——空转期 25 根全 leads=3，可领 0
     # （状态面曾因此误导过：显示「活跃 25」让人以为有 25 个活可干）。
     eligible = len(queue.eligible(0))

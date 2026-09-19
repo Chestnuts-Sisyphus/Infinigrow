@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 """芽队列纪律：合并、上限冻结、连领上限、冷启动随机化 vs 字典序。"""
+import re
+
 from infinigrow.engine.model import Diff, DiffKind, Sprout, SproutOrigin
 from infinigrow.engine.sprout_queue import SproutQueue
 
@@ -254,6 +256,24 @@ def test_revive_clears_frozen_tick_and_refreshes_age():
     assert s1.frozen_tick is None and s1.created_tick == 9 and s1.leads == 0
 
 
+_S9_USAGE_RX = re.compile(r"\.long_task\b|long_task\s*[:=]|\[\s*['\"]long_task['\"]\s*\]")
+_S9_ZH_NAME = "长任务"       # 退役豁免的中文旧名：机制代码/提示词里出现＝又写成生效
+
+
+def _s9_offending_paths(files):
+    """返回「让 S9 复活」的文件：英文 `long_task` **用法**，或中文旧名「长任务」。
+
+    英文只在**用法**（属性/字段/字典键）时算回流——把 `long_task` 作为历史说明写进
+    注释是 superseded 流程允许的；中文「长任务」则一律算回流，因为它只属于那条已退役的豁免。
+    """
+    out = []
+    for p in files:
+        text = p.read_text(encoding="utf-8")
+        if _S9_USAGE_RX.search(text) or _S9_ZH_NAME in text:
+            out.append(p)
+    return out
+
+
 def test_long_task_is_retired_and_must_not_return():
     """S9：`long_task` 豁免已**退役**，这个名字不许回到机制位置（回流守卫）。
 
@@ -263,17 +283,17 @@ def test_long_task_is_retired_and_must_not_return():
     退役后要求三件事同时成立：代码/提示词里查不到这个名字、退役登记在双语表里各占一行、
     机制正本写明上限没有后门。少任何一件都算「悄悄活着」。
     """
-    import re
     from pathlib import Path
     root = Path(__file__).resolve().parents[1]
-    #: 挡的是**用法**（属性访问 / 字段声明或赋值 / 字典键），不是名字本身：
-    #: `docs/superseded.md` 的流程第 2 步允许把它作为历史说明留在注释里。
-    usage = re.compile(r"\.long_task\b|long_task\s*[:=]|\[\s*['\"]long_task['\"]\s*\]")
+    #: 挡的是**用法**（属性访问 / 字段声明或赋值 / 字典键）与**中文旧名「长任务」**——
+    #: 后者是 S9 中文残留表述：英文 `long_task` 作为历史说明留在注释里是允许的（见
+    #: `docs/superseded.md` 流程第 2 步），但「长任务」这个词只属于那条已退役的豁免，
+    #: 出现在机制代码/提示词里＝把退役豁免又写成了生效。
     offenders = [p.relative_to(root).as_posix()
-                 for p in list((root / "src" / "infinigrow").rglob("*.py"))
-                 + list((root / "prompts").rglob("*.md"))
-                 if usage.search(p.read_text(encoding="utf-8"))]
-    assert offenders == [], "退役件回流到机制位置：%s" % offenders
+                 for p in _s9_offending_paths(
+                     list((root / "src" / "infinigrow").rglob("*.py"))
+                     + list((root / "prompts").rglob("*.md")))]
+    assert offenders == [], "退役件回流到机制位置（英文用法或中文「长任务」）：%s" % offenders
 
     for name in ("superseded.md", "zh/superseded.md"):
         table = (root / "docs" / name).read_text(encoding="utf-8")
@@ -291,3 +311,18 @@ def test_long_task_is_retired_and_must_not_return():
     assert Sprout.from_record({"id": "s", "obj": "o", "dimension": "d", "pointer": "p",
                                "origin": "差异对账", "created_tick": 1,
                                "long_task": True}).leads == 0
+
+
+def test_s9_guard_catches_both_spellings(tmp_path):
+    """反证：把退役豁免重新写成「生效」的两种形态，守卫都必须点名；历史说明放过。"""
+    from pathlib import Path
+    en_usage = tmp_path / "en.py"
+    en_usage.write_text("obj = make()\nobj.long_task = True\n", encoding="utf-8")
+    zh_word = tmp_path / "zh.md"
+    zh_word.write_text("# 连领上限 3 拍（长任务芽豁免）\n", encoding="utf-8")
+    prose_ok = tmp_path / "prose.py"          # 只作为历史说明提一句（`long_task`）
+    prose_ok.write_text("# 已退役字段的残留（如 S9 的 `long_task`）忽略\n", encoding="utf-8")
+    flagged = {p.name for p in _s9_offending_paths([en_usage, zh_word, prose_ok])}
+    assert {"en.py", "zh.md"} <= flagged, "两种回流形态没都抓到：%s" % flagged
+    assert "prose.py" not in flagged, "把名字写成历史说明不该被判成回流"
+    assert Path(en_usage).exists() and Path(zh_word).exists()

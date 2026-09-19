@@ -34,6 +34,19 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   `total_archived_lines`) — measured 2026-09-19 to have zero callers repo-wide — were retired
   through the superseded four-step (a new row `S10`, old rows kept, `scan` + `pytest` green).
   No limit constant moved.
+- **S9's retired exemption stopped masquerading as live in the Chinese comments**
+  (`src/infinigrow/cli.py` ＋ `engine/sprout_queue.py` ＋ `engine/domain_saturation.py` ＋
+  `tests/test_sprout_queue.py` ＋ both `superseded.md`). The S9 retirement guard watched only
+  the English identifier `long_task`, so five comments could still describe the exemption as
+  current behaviour in Chinese — `cli.py` ("长任务芽豁免连领上限"), the queue docstring
+  ("连领上限 3 拍（长任务芽豁免）"), and three in `domain_saturation.py` ("…且非长任务") —
+  right under a superseded row that says there is no exemption. Measured 2026-09-19: the word
+  长任务 appeared nowhere in the mechanism itself, only in prose, and the code has no such
+  condition. The five comments now say plainly there is no exemption; the return guard was
+  widened to reject the Chinese name 长任务 anywhere in `src/`/`prompts/` (not just the English
+  usage), with a reverse case proving both spellings are caught while a backtick prose mention
+  of `long_task` as history stays allowed. Both `superseded.md` S9 rows record the widened
+  guard. No constant or behaviour changed — this is wording, not a reopening of K16/S9.
 - **The read side of the CLI entered CI, and so did Python 3.13** (`.github/workflows/ci.yml` ＋
   `tests/test_cli_surface.py` ＋ both READMEs ＋ `CONTRIBUTING.md`). Until now CI exercised only the
   write path (`dry-run`/`tick`/`gardener`/`org-status`); `status`, `redemption --json`, `rotate`,
