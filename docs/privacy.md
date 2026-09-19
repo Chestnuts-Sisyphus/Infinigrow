@@ -45,6 +45,16 @@ python -m pytest -q                                               # includes col
 git status --porcelain --ignored                                  # state/, archive/, secrets ignored
 ```
 
+The project layer cannot be exercised by CI on its own — the file it reads is deliberately not in
+the repository, so the repo-wide test for it used to **skip on every CI run**, which left the whole
+layer unproven (a broken deny loader would have looked green). A committed synthetic deny list
+(`tests/data/privacy-deny-sample.txt`, made of invented terms only) plus a sentinel that carries the
+payload it must catch (`tests/data/privacy-sentinel/leaky-example.md`) let
+`tests/test_privacy_deny_layer.py` prove **both** directions on CI: with a deny list the sentinel
+must be reported (exit code 1), and once the payload is removed it must not (exit code 0). The
+sentinel is also checked against the generic layer, so adding it cannot dirty the repository scan.
+None of this publishes anyone's real list.
+
 **A cold-start check that fails blocks publishing**: run one tick in a temporary directory with an
 empty state root (zero tokens, zero credentials) and confirm no absolute path appears in any
 artifact. `tests/test_coldstart.py` guards that, and CI runs it on every push.

@@ -46,8 +46,15 @@ jobs:
       - name: Prompt ↔ code sync (同源校验机)
         run: python tools/check_prompt_code_sync.py
 
-      - name: Privacy scan (通用层：路径/凭据/邮箱)
+      - name: Privacy scan (generic layer: paths / credentials / emails)
         run: python tools/privacy_scan.py --root .
+
+      # Project layer: the real deny list is (by design) never committed, so the
+      # repo-level test for it skips on CI. That left the whole layer unproven.
+      # These cases run the *mechanism* against a committed synthetic deny list and
+      # a sentinel that must be caught, then against a cleared copy that must not be.
+      - name: Privacy deny layer (must hit sentinel, must miss once cleared)
+        run: python -m pytest -q tests/test_privacy_deny_layer.py
 
       # O5/T12 的验收项：**冷启动空仓跑一拍**——空状态目录 + 零 token。
       # 这一关过了，才说明「引擎能在没有任何个人数据的环境里转起来」。

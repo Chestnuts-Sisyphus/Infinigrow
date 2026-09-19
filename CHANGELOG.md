@@ -24,6 +24,17 @@ documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals
   --max-bytes 4000` moved 1,290 + 3,462 + 1,233 lines into `archive/`, then `rotate --search`
   reported 20 hits in the archived files (rc=0) and 0 hits for an absent needle (rc=0); the config
   source line printed `defaults、caller` with `IG_EXECUTOR`/`IG_EXECUTOR_TIMEOUT_S` cleared.
+- **The project privacy layer is now provable on CI instead of permanently skipped**
+  (`tests/data/privacy-deny-sample.txt` ＋ `tests/data/privacy-sentinel/leaky-example.md` ＋
+  `tests/test_privacy_deny_layer.py` ＋ `.github/workflows/ci.yml` ＋ both `privacy.md` files).
+  The real deny list is machine-specific and stays out of the repository — that is by design and was
+  not changed — but as a consequence `test_repo_is_free_of_project_deny_hits` skipped on every CI
+  run, so nothing anywhere proved that `--deny` still bites; a broken loader would have read as
+  green. The fix is **not** to delete the skip (it is genuine environment adaptation): a committed
+  deny sample made of invented terms, plus a sentinel carrying the payload it must catch, now prove
+  both directions on ubuntu and windows — deny given → the three rules report hits and exit 1;
+  payload removed → zero hits and exit 0 — and the sentinel is itself checked to contribute no
+  generic-layer hits, so shipping it cannot dirty the repo-wide gate.
 - **`tools/split_monolith.py` is registered as parked rather than newly tested** (`CONTRIBUTING.md`).
   It is analysis-only and its `--src` input — the v1 monolith — is not in this repository, so a
   behavioural case would mean committing a fabricated monolith and testing the fixture; CI keeps

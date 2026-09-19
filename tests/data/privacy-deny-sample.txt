@@ -1,0 +1,11 @@
+# 项目层禁列**样例**（受版本控制；三条规则全是合成词，与任何真实清单无关）
+#
+# 为什么要有一份进库的样例：真实清单 `privacy-deny.txt` 按设计**不进公共仓库**（被
+# `.gitignore` 忽略），于是「项目层禁列」这条机器判据在任何非本机环境里都无从验证——
+# `tests/test_privacy.py` 的那条用例在 CI 上**永远 skip**，等于这一层在线上从未生效过。
+# 样例的职责不是替代真实清单，而是把**机制**钉住：给了 deny 文件就必须咬、清零就必须放。
+#
+# 格式与真实清单一致：<正则> 或 <正则>\t<标签>；# 开头为注释。
+TTL-DEMO-SECRET-[0-9]{4}	demo-secret-token
+not-a-real-collaborator-name	demo-identity
+demo-private-infra-[0-9]+	demo-infra

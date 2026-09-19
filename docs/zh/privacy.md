@@ -40,5 +40,12 @@ python -m pytest -q                                         # 含冷启动与隐
 git status --porcelain --ignored                            # state/ archive/ 秘密文件必须被忽略
 ```
 
+**项目层在 CI 上原本无从验证**：它读的那份清单按设计不进仓库，于是全仓那条用例在每次 CI 里
+**恒 skip**——这一层到底还咬不咬人，没人知道；禁列装载逻辑坏掉也会一片绿。现在仓库里带了一份
+**合成词**样例禁列（`tests/data/privacy-deny-sample.txt`）与一个故意留载荷的哨兵文件
+（`tests/data/privacy-sentinel/leaky-example.md`），由 `tests/test_privacy_deny_layer.py` 在每次
+CI 上把**两个方向**都钉住：给了禁列就必须报命中（退出码 1），把载荷拿掉就必须报零命中（退出码 0）。
+哨兵同时受通用层检查——多带一个样例文件不会把全仓扫描搞脏。这一切都不改变「真实清单不进库」。
+
 **空仓验收不通过不得发布**：在临时目录用空状态跑一拍（零 token、零凭据），
 产物里不得出现任何绝对路径——这条由 `tests/test_coldstart.py` 守着。
