@@ -300,6 +300,36 @@ def executor_output_unparsed(traces_dir, tick: int,
     return any(mark in text for mark in marks)
 
 
+def executor_tick_failures(rows) -> dict:
+    """按拍聚合**执行者退出码**：只收「该拍每次 tick 类调用都没成功返回」的拍。
+
+    为什么要有第二条执行者侧证据：留痕的「输出未解析」标记只覆盖**解析失败**那一种
+    （适配器把整条回复当最终留痕）；执行者**非零退出／超时**时留痕里没有那个标记，
+    于是那条打脸会被芽龄规则判成「真没做」——把执行者侧的失败记在主体的账上
+    （真机拍 723：`executor.jsonl` 一行 rc=1、usage=unknown、note「非零退出（stderr 见留痕）」）。
+
+    三条边界都为了**不替主体开脱**：① 同拍只要有一次 rc=0 且未超时的尝试，动作就可能已落地
+    （重试成功的形态），不算；② 组织段调用（`kind` 非 `tick`）与这根芽无关，不算；
+    ③ 没给账本（旧调用形态／空状态根）→ 空表，不猜。
+    """
+    ok_ticks = set()
+    failed: dict = {}
+    for row in rows or []:
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("kind") or "tick") != "tick":
+            continue
+        tick = int(row.get("tick") or 0)
+        timed_out = bool(row.get("timed_out"))
+        code = int(row.get("rc") or 0)
+        if code == 0 and not timed_out:
+            ok_ticks.add(tick)
+            continue
+        info = failed.setdefault(tick, {"rc": code, "timed_out": timed_out, "attempts": 0})
+        info["attempts"] += 1
+    return {t: v for t, v in failed.items() if t not in ok_ticks}
+
+
 def executor_side_loss(traces_dir, tick_now: int, window: int = 10) -> dict:
     """**执行者侧损耗**读数（R2/N69）：最近 `window` 拍里，几份留痕带「输出未解析」标记。
 
@@ -330,7 +360,7 @@ def executor_side_loss(traces_dir, tick_now: int, window: int = 10) -> dict:
 
 def redemption_attribution(records: Iterable, tick_from: Optional[int] = None,
                            stale_after: int = STALE_LEAD_TICKS,
-                           traces_dir=None) -> dict:
+                           traces_dir=None, executor_rows=None) -> dict:
     """领做与兑现的**分桶归因**（M10/B2/B3；可复跑的命令形态）。
 
     三件事一次说清，全部机械可判：
@@ -339,19 +369,24 @@ def redemption_attribution(records: Iterable, tick_from: Optional[int] = None,
        「可对账／不可对账」——固化边（`cap*`）占了多少取题位，是 B4/A3 的核心读数；
     2. **兑现与打脸**：可对账样本行里，兑现多少、打脸多少；
     3. **打脸归因**：把打脸行分开——
-       - **执行者侧未落地**（给了 `traces_dir` 且该拍留痕带「输出未解析」标记）：动作可能
-         压根没执行，**先别记提议的账**（实测拍 449：模型回了带 `actions` 的 JSON 但开头少了
-         `{"` → 适配器解析失败 → 整条回复含写入动作被丢弃）；
+       - **执行者侧未落地**（两条执行者侧证据任一成立）：给了 `traces_dir` 且该拍留痕带
+         「输出未解析」标记；或给了 `executor_rows`（`state/executor.jsonl` 的行）且该拍
+         **每次** tick 调用都非零退出／超时。动作可能压根没执行，**先别记提议的账**
+         （实测拍 449：模型回了带 `actions` 的 JSON 但开头少了 `{"` → 适配器解析失败 →
+         整条回复含写入动作被丢弃；实测拍 723：rc=1、usage=unknown、留痕里却没有解析标记）；
        - **提议过期**：领做时芽龄 ≥ `stale_after`（默认 30 拍）——这条提议做出来时看的是
-         30 拍前的现实，而引擎在领做时**不会重新校验前提**（判据只锚 `(对象, 维度)`），
-         所以「前提已经过期」是这条打脸的**机械代理**，不是替它开脱；
-       - **真没做**：芽龄 < 阈值，且留痕里没有「未解析」标记——提议是新的，现实没被满足。
+         30 拍前的现实，而引擎在领做时**不会重新校验前提**（判据只锚 `(对象, 维度)`）。
+         这是**机械代理·待证**：它说的是「前提老」，**没有**证明「提议内容已失效」，
+         因此只在两条执行者侧证据都不成立时才落到这个桶；
+       - **真没做**：芽龄 < 阈值，且两条执行者侧证据都不成立——提议是新的，现实没被满足。
 
     **证明等级**：分桶与芽龄是 [已证明]（全部读账本现算）；「提议过期」是
-    [归纳待证] 的**归因代理**——它说的是「前提老」，不是「提议内容本身已失效」。
-    「执行者侧未落地」则是 [已证明] 的**字面标记**（标记由适配器自己打）。
+    [归纳待证] 的**归因代理**（措辞按代理呈现，不外推成结论）。「执行者侧未落地」则是
+    [已证明]：留痕的字面标记由适配器自己打，退出码／超时由引擎逐次记进 `executor.jsonl`。
 
     `tick_from` 给了就只看该拍及之后的领做行（长窗口复验收口用同一个函数复跑）。
+    `executor_rows` 不给（旧调用形态）→ 只看留痕标记，行为与从前一致。
+    归因**只动打脸行的分组**，不改分子分母（可对账样本／兑现／打脸计数与兑现率口径不变）。
     """
     rows = [r for r in records if isinstance(r, dict)]
     if tick_from is not None:
@@ -364,6 +399,7 @@ def redemption_attribution(records: Iterable, tick_from: Optional[int] = None,
     undone_rows: list[dict] = []
     unparsed_rows: list[dict] = []
     undone_ages: list[int] = []
+    exec_fail = executor_tick_failures(executor_rows)
     for r in rows:
         prefix = sprout_prefix(r.get("sprout_id"))
         leads[prefix] = leads.get(prefix, 0) + 1
@@ -383,7 +419,17 @@ def redemption_attribution(records: Iterable, tick_from: Optional[int] = None,
         age = None if created is None else max(0, tick - created)
         item = {"sprout_id": r.get("sprout_id"), "tick": tick,
                 "出生拍": created, "等待拍数": age}
-        if executor_output_unparsed(traces_dir, tick):
+        unparsed = executor_output_unparsed(traces_dir, tick)
+        side = exec_fail.get(tick)
+        if unparsed or side is not None:
+            evidence = []
+            if unparsed:
+                evidence.append("留痕「输出未解析」标记")
+            if side is not None:
+                evidence.append("该拍 %d 次 tick 调用全部非零退出/超时" % side["attempts"])
+                item["执行者退出码"] = side["rc"]
+                item["执行者超时"] = side["timed_out"]
+            item["依据"] = "＋".join(evidence)
             unparsed_rows.append(item)
         elif age is not None and age >= stale_after:
             stale_rows.append(item)
@@ -406,20 +452,24 @@ def redemption_attribution(records: Iterable, tick_from: Optional[int] = None,
         "不可对账": unverifiable,
         "打脸归因": {
             "执行者侧未落地": {"n": len(unparsed_rows), "行": unparsed_rows,
-                              "说明": ("该拍留痕带「输出未解析」标记：动作可能没执行"
-                                       "（[已证明] 的字面标记，见 "
-                                       "`executor_output_unparsed`）")},
+                              "说明": ("该拍留痕带「输出未解析」标记，或该拍每次 tick 调用都"
+                                       "非零退出/超时（`state/executor.jsonl` 的 rc/timed_out）："
+                                       "动作可能没执行（[已证明] 的两条执行者侧证据，见 "
+                                       "`executor_output_unparsed`／`executor_tick_failures`）")},
             "提议过期": {"n": len(stale_rows), "阈值拍": stale_after,
                          "行": stale_rows,
-                         "说明": "领做时芽龄 ≥ 阈值：提议的前提已老（机械代理，[归纳待证]）"},
+                         "说明": "领做时芽龄 ≥ 阈值：提议的前提已老（机械代理·待证，"
+                                 "仅在执行者侧两条证据都不成立时才落此桶）"},
             "真没做": {"n": len(undone_rows), "行": undone_rows,
                        "芽龄中位数": (sorted(undone_ages)[len(undone_ages) // 2]
                                       if undone_ages else None),
-                       "说明": "领做时芽龄 < 阈值，且该拍留痕没有「未解析」标记"},
+                       "说明": "领做时芽龄 < 阈值，且该拍既无「输出未解析」标记、"
+                               "也不是执行者调用全失败"},
         },
         "说明": ("按芽源前缀分桶现算；「不可对账」＝该维度机械层读不到（读不到≠打脸），"
                  "固化边（cap*）的取题位占比＝ 按芽源.cap.领做 ÷ 领做.总。"
-                 "打脸归因按「领做时芽龄」机械分桶（出生拍取自芽 ID 拍号段）；"
-                 "给了 `traces_dir` 时，「执行者侧未落地（输出未解析）」优先于芽龄分桶。"),
+                 "打脸归因先查执行者侧证据（留痕标记／该拍调用全失败），"
+                 "都不成立才按「领做时芽龄」分提议过期与真没做；"
+                 "归因只动打脸行的分组，分子分母不变。"),
     }
 

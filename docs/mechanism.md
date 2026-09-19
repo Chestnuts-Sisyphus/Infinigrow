@@ -275,9 +275,9 @@ buckets keep the executor's own failures off the proposal's account.
 
 | Bucket | Test | Proof level |
 |---|---|---|
-| **dropped on the executor side** | the tick's executor trace carries the literal "output was not parsed" marker (the adapter's own honest line: the whole reply was kept as a trace and no action ran) | proven (literal marker) |
-| **proposal went stale** | age at lead time ≥ 30 ticks (birth tick read from the sprout id) | a mechanical *proxy*, pending proof |
-| **genuinely not done** | age < 30 ticks and no "not parsed" marker in the trace | proven (same tests) |
+| **dropped on the executor side** | either executor-side test holds: (1) the tick's executor trace carries the literal "output was not parsed" marker (the adapter's own honest line: the whole reply was kept as a trace and no action ran); (2) **every** tick-class call of that tick exited non-zero or timed out (`rc`/`timed_out` in `state/executor.jsonl`; one `rc=0` attempt in the same tick disqualifies it, and org-session calls are not charged to a sprout) | proven (both are mechanical readings) |
+| **proposal went stale** | age at lead time ≥ 30 ticks (birth tick read from the sprout id) — the premise of the proposal was old. Nothing proves the proposal's **content** expired, so this stays a mechanical *proxy*, pending proof, and only applies when neither executor-side test holds | a mechanical *proxy*, pending proof |
+| **genuinely not done** | age < 30 ticks and neither executor-side test holds | proven (same tests) |
 
 Live case (proven, tick 449 on 2026-09-17): the model replied with a JSON object containing
 `actions`, but the **opening `{"` was missing** → the adapter's parse failed → the whole reply
@@ -286,6 +286,17 @@ row's age was 59 (≥ 30), so the age rule would have filed it as "proposal went
 wrong account**. When a `traces_dir` is given, the executor-side bucket takes precedence over the
 age split. The engine's bookkeeping along this chain is honest (the file really was absent, so the
 failure stands); what was lost is the executor-side action.
+
+A second live case (proven, tick 723 on 2026-09-19): `state/executor.jsonl` has a row with
+`rc=1`, `usage=unknown` and the note "non-zero exit (stderr see trace)", while that tick's
+`outcomes.jsonl` row `sp0695-051-…` is `verifiable=true`, `redeemed=false`. The trace carries
+**no** "output was not parsed" marker — the adapter only writes that one when parsing fails, not
+on a non-zero exit — so a marker-only rule filed the row as "genuinely not done", charging the
+subject with the executor's own failure. Hence two executor-side tests. Measured against the live
+ledgers (`python -m infinigrow redemption --json`, tick 730): tick 723 moves out of "genuinely not
+done", ticks 499/521 stay (their calls returned `rc=0`), ticks 676/679 still go through the marker
+test, and **neither numerator nor denominator moved** (318 sampled / 311 redeemed / 7 failed /
+363 unverifiable): attribution re-groups the failing rows, nothing else.
 
 **The solidify edge is now accountable, through an evidence file** (Q2/A3). The "application
 surface" of a capped sprout used to be unreadable forever (measured: 160 leads, 0 verifiable

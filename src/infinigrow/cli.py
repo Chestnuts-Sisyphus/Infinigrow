@@ -298,7 +298,8 @@ def main(argv=None) -> int:
             read_jsonl(layout.outcome_ledger), tick_from=args.from_tick,
             stale_after=(args.stale_after if args.stale_after is not None
                          else STALE_LEAD_TICKS),
-            traces_dir=layout.traces_dir)
+            traces_dir=layout.traces_dir,
+            executor_rows=read_jsonl(layout.executor_ledger))
         if args.json:
             print(json.dumps(report, ensure_ascii=False, indent=2))
             return rc.OK

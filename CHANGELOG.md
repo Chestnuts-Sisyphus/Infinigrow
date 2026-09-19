@@ -6,6 +6,25 @@ The long-form reasoning behind each entry (incident, measurement, decision) live
 documents — [`docs/mechanism.md`](docs/mechanism.md) and the Chinese originals in
 [`docs/zh/`](docs/zh/).
 
+## v2.2.28 — attribution reads the executor's exit code, and two published verdicts are corrected (2026-09-19)
+
+- **Failure attribution gained a second executor-side test** (`engine/reconcile.py`
+  `executor_tick_failures` ＋ `cli.py` `redemption` ＋ both `mechanism.md` files ＋
+  `tests/test_redemption_report.py`). The "dropped on the executor side" bucket used to recognise
+  only the literal "output was not parsed" marker in the trace, which the adapter writes when
+  *parsing* fails. When the executor exits non-zero it writes no such marker, so that failure was
+  filed against the subject: at tick 723 `state/executor.jsonl` has `rc=1`/`usage=unknown` while
+  the outcome row for the same tick is `verifiable=true`, `redeemed=false` — the age rule called
+  it "genuinely not done". The bucket now also fires when **every** tick-class call of that tick
+  exited non-zero or timed out, with the disqualifiers kept strict (one `rc=0` attempt in the same
+  tick, or only org-session calls, is not an excuse). Measured on the live ledgers at tick 730:
+  723 moves buckets, 499/521 stay put, 676/679 keep the marker route, and the **numerator and
+  denominator are untouched** (318 sampled / 311 redeemed / 7 failed / 363 unverifiable).
+- **"Proposal went stale" is now stated as what it is** — a mechanical *proxy, pending proof*: age
+  ≥ 30 ticks proves the premise was old, never that the proposal's content expired, and the bucket
+  is only reached once both executor-side tests fail to hold. The wording was already hedged in the
+  Chinese original; the English table now carries the same grade instead of a bare "proxy".
+
 ## v2.2.27 — the five open judgements are closed, and one correction from last round was wrong (2026-09-19)
 
 - **`org-check` got its own exit code** (`core/exit_codes.py` ＋ `cli.py` ＋ both `running.md`

@@ -12,8 +12,9 @@ import json
 from infinigrow.core.config import load_settings
 from infinigrow.core.paths import REPO_ROOT, resolve_state
 from infinigrow.engine.model import Observation, Prediction
-from infinigrow.engine.reconcile import (redemption_attribution, redemption_report,
-                                        sampled, sprout_created_tick, sprout_prefix)
+from infinigrow.engine.reconcile import (executor_tick_failures, redemption_attribution,
+                                        redemption_report, sampled, sprout_created_tick,
+                                        sprout_prefix)
 from infinigrow.engine.tick import run_tick
 
 
@@ -234,6 +235,78 @@ def test_attribution_puts_unparsed_executor_output_in_its_own_bucket(tmp_path):
     legacy = redemption_attribution(rows)
     assert legacy["打脸归因"]["执行者侧未落地"]["n"] == 0
     assert legacy["打脸归因"]["提议过期"]["n"] == 2
+
+
+def test_executor_tick_failures_only_counts_ticks_with_no_landing_attempt():
+    """执行者退出码的**按拍聚合**口径：该拍每次 tick 调用都失败才算「没落地」。
+
+    三条边界都来自真库形态（`state/executor.jsonl`）：① 重试成功（拍 3/4 的形态：先 rc=1
+    再 rc=0）不能算执行者侧失败，否则把已落地的动作开脱掉；② 组织段调用（`kind` 非 tick）
+    与芽无关，不能替芽的打脸开脱；③ 没给账本（旧调用形态／CI 冷启动空根）→ 空表，不猜。
+    """
+    rows = [
+        {"tick": 723, "kind": "tick", "rc": 1, "timed_out": False, "attempt": 1},
+        {"tick": 500, "kind": "tick", "rc": 1, "timed_out": False, "attempt": 1},
+        {"tick": 500, "kind": "tick", "rc": 0, "timed_out": False, "attempt": 2},
+        {"tick": 600, "kind": "tick", "rc": 0, "timed_out": False, "attempt": 1},
+        {"tick": 700, "kind": "org-session", "rc": 1, "timed_out": False, "attempt": 1},
+        {"tick": 800, "kind": "tick", "rc": 0, "timed_out": True, "attempt": 1},
+    ]
+    failures = executor_tick_failures(rows)
+    assert sorted(failures) == [723, 800]
+    assert failures[723]["rc"] == 1 and failures[723]["timed_out"] is False
+    assert failures[800]["timed_out"] is True
+    assert executor_tick_failures([]) == {}
+    assert executor_tick_failures(None) == {}
+
+
+def test_attribution_uses_executor_exit_code_before_the_sprout_age(tmp_path):
+    """真机拍 723 的形态：执行者非零退出 → 记「执行者侧未落地」，**不记成主体没做**。
+
+    现场：`state/executor.jsonl` 拍 723 有一行 rc=1、usage=unknown、note「非零退出（stderr
+    见留痕）」，同拍 `outcomes.jsonl` 的 `sp0695-051-…` 是 verifiable=True、redeemed=False。
+    现行三分规则只认留痕「输出未解析」标记、不看退出码 → 那一行被判成「真没做」，
+    把执行者侧的失败记在主体的账上。留痕里没有标记（适配器如实写了 stderr 见留痕），
+    所以必须有**第二条**执行者侧证据：同拍所有 tick 调用都非零退出／超时。
+    """
+    rows = [
+        {"sprout_id": "sp0695-051-主体_journal_0690", "tick": 723, "redeemed": False,
+         "sample": True, "verifiable": True, "obj": "主体/journal/x.md",
+         "predicted_edge": "判读"},                      # 芽龄 28 < 30 → 老口径＝真没做
+        {"sprout_id": "cap0470-001-主体_app_0466", "tick": 499, "redeemed": False,
+         "sample": True, "verifiable": True, "obj": "主体/journal/y.md",
+         "predicted_edge": "固化"},                      # 该拍 rc=0 → 仍是真没做
+    ]
+    executor_rows = [
+        {"tick": 723, "kind": "tick", "rc": 1, "timed_out": False},
+        {"tick": 499, "kind": "tick", "rc": 0, "timed_out": False},
+    ]
+    buckets = redemption_attribution(rows, stale_after=30,
+                                    executor_rows=executor_rows)["打脸归因"]
+    assert buckets["执行者侧未落地"]["n"] == 1
+    assert buckets["执行者侧未落地"]["行"][0]["sprout_id"] == "sp0695-051-主体_journal_0690"
+    assert buckets["执行者侧未落地"]["行"][0]["执行者退出码"] == 1
+    assert buckets["真没做"]["n"] == 1
+    assert buckets["真没做"]["行"][0]["sprout_id"] == "cap0470-001-主体_app_0466"
+    assert buckets["提议过期"]["n"] == 0
+    # 不给执行者账（旧调用形态）→ 行为与从前完全一致
+    legacy = redemption_attribution(rows, stale_after=30)["打脸归因"]
+    assert legacy["执行者侧未落地"]["n"] == 0 and legacy["真没做"]["n"] == 2
+
+
+def test_executor_exit_code_outranks_the_stale_age_proxy():
+    """退出码证据**优先于**「提议过期」的机械代理（与留痕标记同一条纪律）。
+
+    芽龄 ≥30 只说明前提老，不说明主体做没做；同一拍执行者压根没成功返回时，
+    记在「提议过期」上同样是记错账。分子分母（可对账样本／兑现／打脸）不受归因影响。
+    """
+    rows = [{"sprout_id": "sp0100-001-a", "tick": 400, "redeemed": False,
+             "sample": True, "verifiable": True}]        # 芽龄 300 ≥ 30
+    executor_rows = [{"tick": 400, "kind": "tick", "rc": 1, "timed_out": False}]
+    report = redemption_attribution(rows, stale_after=30, executor_rows=executor_rows)
+    buckets = report["打脸归因"]
+    assert buckets["执行者侧未落地"]["n"] == 1 and buckets["提议过期"]["n"] == 0
+    assert report["可对账样本"] == 1 and report["兑现"] == 0 and report["打脸"] == 1
 
 
 def test_redemption_cli_prints_attribution(tmp_path, capsys):
