@@ -44,6 +44,11 @@ def extract(tag: str, changelog: Path) -> str:
 
 
 def main(argv: list[str]) -> int:
+    # 输出即 Release 正文，必须逐字节等于 UTF-8 的 CHANGELOG——不能随平台默认控制台
+    # 编码漂移（Windows 裸 python 的 stdout 默认 cp936，会把正文写成 GBK 字节）。
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
     want_title = "--title" in argv
     args = [a for a in argv[1:] if not a.startswith("--")]
     if len(args) != 1:

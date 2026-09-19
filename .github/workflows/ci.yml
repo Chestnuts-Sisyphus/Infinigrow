@@ -50,7 +50,7 @@ jobs:
       - name: Prompt ↔ code sync (同源校验机)
         run: python tools/check_prompt_code_sync.py
 
-      - name: Privacy scan (generic layer: paths / credentials / emails)
+      - name: "Privacy scan (generic layer: paths / credentials / emails)"
         run: python tools/privacy_scan.py --root .
 
       # Project layer: the real deny list is (by design) never committed, so the
